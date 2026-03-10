@@ -1,0 +1,9 @@
+
+> pics-nigeria@1.0.0 dev:api
+> npm run dev --workspace @pics-nigeria/api
+
+
+> @pics-nigeria/api@1.0.0 dev
+> tsx watch src/index.ts
+
+PICS Nigeria API listening on port 4000

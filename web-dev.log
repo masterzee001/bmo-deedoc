@@ -1,0 +1,80 @@
+
+> pics-nigeria@1.0.0 dev:web
+> npm run dev --workspace @pics-nigeria/web
+
+
+> @pics-nigeria/web@1.0.0 dev
+> next dev
+
+ ⚠ Found lockfile missing swc dependencies, patching...
+ ⚠ Found lockfile missing swc dependencies, patching...
+   ▲ Next.js 15.5.12
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.43.60:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ⚠ Lockfile was successfully patched, please run "npm install" to ensure @next/swc dependencies are downloaded
+ ✓ Ready in 145.5s
+ ⚠ Lockfile was successfully patched, please run "npm install" to ensure @next/swc dependencies are downloaded
+ ○ Compiling / ...
+ ✓ Compiled / in 93.3s (545 modules)
+ HEAD / 307 in 2180ms
+ GET / 307 in 540ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 7.2s (603 modules)
+ GET /login 200 in 9073ms
+ ⚠ Cross origin request detected from 127.0.0.1 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ ○ Compiling /admin/login ...
+ ✓ Compiled /admin/login in 3.6s (598 modules)
+ GET /admin/login 200 in 5867ms
+ ○ Compiling /admin/dashboard ...
+ ✓ Compiled /admin/dashboard in 3.2s (605 modules)
+ GET /admin/dashboard 200 in 4356ms
+npm error Lifecycle script `dev` failed with error:
+npm error code 1
+npm error path C:\Users\USER\projects\pics-nigeria\apps\web
+npm error workspace @pics-nigeria/web@1.0.0
+npm error location C:\Users\USER\projects\pics-nigeria\apps\web
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c next dev
+ ✓ Compiled in 11.7s (605 modules)
+ ✓ Compiled in 7.4s (605 modules)
+ ✓ Compiled in 6s (605 modules)
+ GET /admin/login 200 in 9008ms
+ ✓ Compiled in 7.4s (605 modules)
+ ✓ Compiled in 5s (605 modules)
+ ✓ Compiled in 4.6s (605 modules)
+ ✓ Compiled in 4.2s (605 modules)
+ ✓ Compiled in 3s (605 modules)
+ GET /admin/login 200 in 8414ms
+ ✓ Compiled in 5s (605 modules)
+ ✓ Compiled in 4.2s (605 modules)
+ ✓ Compiled in 4.1s (605 modules)
+ ✓ Compiled in 4.6s (605 modules)
+ ✓ Compiled in 6.2s (605 modules)
+ ✓ Compiled in 4.9s (605 modules)
+ ✓ Compiled in 3.8s (605 modules)
+ ✓ Compiled in 5.3s (605 modules)
+ ✓ Compiled in 3.9s (605 modules)
+ ✓ Compiled in 6.6s (605 modules)
+ ✓ Compiled in 5s (605 modules)
+ ✓ Compiled in 4.3s (605 modules)
+ ✓ Compiled in 3.9s (605 modules)
+ ✓ Compiled in 3.6s (605 modules)
+ ✓ Compiled in 3.3s (605 modules)
+ ✓ Compiled in 3.7s (605 modules)
+ ✓ Compiled in 4.7s (605 modules)
+ ✓ Compiled in 6s (605 modules)
+ ✓ Compiled in 5.4s (605 modules)
+ ✓ Compiled in 4.4s (605 modules)
+ ✓ Compiled in 5.2s (605 modules)
+ ✓ Compiled in 10.9s (605 modules)
+ ✓ Compiled in 12.1s (605 modules)
+ ✓ Compiled in 7.4s (605 modules)
+ ✓ Compiled in 49.9s (605 modules)
+ ✓ Compiled in 5.5s (605 modules)
+ ✓ Compiled in 6.8s (619 modules)
+ GET /admin/login 200 in 7758ms
+ ✓ Compiled in 3.1s (605 modules)
