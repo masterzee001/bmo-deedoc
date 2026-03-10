@@ -1,0 +1,765 @@
+import type {
+  AdminUserItem,
+  AgentUserItem,
+  AdminDashboardSummary,
+  AdminMapSummary,
+  AgentActivitySummary,
+  AuthUserProfile,
+  AuditLogItem,
+  CandidateListItem,
+  FeedbackListItem,
+  GeoPoliticalZoneItem,
+  IncidentListItem,
+  LgaItem,
+  ManagedUserItem,
+  NotificationItem,
+  PollingUnitItem,
+  PollingUnitCoverageSummary,
+  PoliticalPartyItem,
+  PollListItem,
+  PostListItem,
+  RewardBalanceSummary,
+  RewardRedemptionItem,
+  RewardsSummary,
+  SenatorialDistrictItem,
+  StateItem,
+  StateConstituencyItem,
+  FederalConstituencyItem,
+  VoterUserItem,
+  WardItem,
+} from "@pics-nigeria/shared";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
+
+export class ApiError extends Error {
+  status: number;
+  details: unknown;
+
+  constructor(message: string, status: number, details?: unknown) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new ApiError(payload.message || "Request failed.", response.status, payload);
+  }
+  return payload as T;
+}
+
+export async function loginUser(email: string, password: string): Promise<{ token: string; user: AuthUserProfile }> {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  return readJson(response);
+}
+
+export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> {
+  const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ user: AuthUserProfile }>(response);
+  return payload.user;
+}
+
+export async function fetchVoterRewards(token: string): Promise<RewardsSummary> {
+  const response = await fetch(`${API_BASE_URL}/voter/rewards`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson(response);
+}
+
+export async function fetchAdminSummary(token: string): Promise<AdminDashboardSummary> {
+  const response = await fetch(`${API_BASE_URL}/admin/summary`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ summary: AdminDashboardSummary }>(response);
+  return payload.summary;
+}
+
+export async function fetchAdminCandidates(token: string): Promise<CandidateListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/candidates`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ candidates: CandidateListItem[] }>(response);
+  return payload.candidates;
+}
+
+export async function fetchAdminFeedback(token: string): Promise<FeedbackListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/feedback`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ feedback: FeedbackListItem[] }>(response);
+  return payload.feedback;
+}
+
+export async function fetchAdminIncidents(token: string): Promise<IncidentListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/incidents`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ incidents: IncidentListItem[] }>(response);
+  return payload.incidents;
+}
+
+export async function fetchAdminAgentActivitySummaries(token: string): Promise<AgentActivitySummary[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/agent-activity-summaries`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ agentActivitySummaries: AgentActivitySummary[] }>(response);
+  return payload.agentActivitySummaries;
+}
+
+export async function fetchAdminPollingUnitCoverage(token: string): Promise<PollingUnitCoverageSummary> {
+  const response = await fetch(`${API_BASE_URL}/admin/polling-unit-coverage`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ coverage: PollingUnitCoverageSummary }>(response);
+  return payload.coverage;
+}
+
+export async function fetchAdminMapSummary(token: string): Promise<AdminMapSummary> {
+  const response = await fetch(`${API_BASE_URL}/admin/map-summary`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ mapSummary: AdminMapSummary }>(response);
+  return payload.mapSummary;
+}
+
+export async function fetchAdminAnalytics(token: string) {
+  const response = await fetch(`${API_BASE_URL}/admin/analytics`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ analytics: {
+    incidentCountsByType: Record<string, number>;
+    incidentCountsBySeverity: Record<string, number>;
+    incidentCountsByStatus: Record<string, number>;
+    agentActivitiesByType: Record<string, number>;
+    rewardTotalsByType: Record<string, number>;
+    pollResponseTotalsByPoll: Array<{ pollId: string; title: string; responses: number }>;
+    voterRegistrationsOverTime: Record<string, number>;
+  } }>(response);
+  return payload.analytics;
+}
+
+export async function fetchAdminRedemptions(token: string): Promise<RewardRedemptionItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/redemptions`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ redemptions: RewardRedemptionItem[] }>(response);
+  return payload.redemptions;
+}
+
+export async function fetchGeoPoliticalZones(token: string): Promise<GeoPoliticalZoneItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/geo-political-zones`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ zones: GeoPoliticalZoneItem[] }>(response);
+  return payload.zones;
+}
+
+export async function fetchStates(token: string, geoPoliticalZoneId?: string): Promise<StateItem[]> {
+  const query = geoPoliticalZoneId ? `?geoPoliticalZoneId=${encodeURIComponent(geoPoliticalZoneId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/admin/states${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ states: StateItem[] }>(response);
+  return payload.states;
+}
+
+export async function fetchSenatorialDistricts(token: string, stateId: string): Promise<SenatorialDistrictItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/senatorial-districts?stateId=${encodeURIComponent(stateId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ districts: SenatorialDistrictItem[] }>(response);
+  return payload.districts;
+}
+
+export async function fetchFederalConstituencies(
+  token: string,
+  stateId: string,
+  senatorialDistrictId?: string,
+): Promise<FederalConstituencyItem[]> {
+  const query = new URLSearchParams({ stateId });
+  if (senatorialDistrictId) {
+    query.set("senatorialDistrictId", senatorialDistrictId);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/federal-constituencies?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ constituencies: FederalConstituencyItem[] }>(response);
+  return payload.constituencies;
+}
+
+export async function fetchLgas(token: string, stateId: string): Promise<LgaItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/lgas?stateId=${encodeURIComponent(stateId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ lgas: LgaItem[] }>(response);
+  return payload.lgas;
+}
+
+export async function fetchWards(token: string, stateId: string, lgaId?: string): Promise<WardItem[]> {
+  const query = new URLSearchParams({ stateId });
+  if (lgaId) {
+    query.set("lgaId", lgaId);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/wards?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ wards: WardItem[] }>(response);
+  return payload.wards;
+}
+
+export async function fetchStateConstituencies(token: string, stateId: string, lgaId?: string): Promise<StateConstituencyItem[]> {
+  const query = new URLSearchParams({ stateId });
+  if (lgaId) {
+    query.set("lgaId", lgaId);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/state-constituencies?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ constituencies: StateConstituencyItem[] }>(response);
+  return payload.constituencies;
+}
+
+export async function fetchPollingUnits(token: string, stateId: string, lgaId: string, wardId?: string): Promise<PollingUnitItem[]> {
+  const query = new URLSearchParams({ stateId, lgaId });
+  if (wardId) {
+    query.set("wardId", wardId);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/polling-units?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ pollingUnits: PollingUnitItem[] }>(response);
+  return payload.pollingUnits;
+}
+
+export async function fetchAdminUsers(token: string, stateId: string, lgaId?: string): Promise<AdminUserItem[]> {
+  const query = new URLSearchParams();
+  if (stateId) {
+    query.set("stateId", stateId);
+  }
+  if (lgaId) {
+    query.set("lgaId", lgaId);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/admin-users?${query.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ adminUsers: AdminUserItem[] }>(response);
+  return payload.adminUsers;
+}
+
+export async function fetchManagedUsers(
+  token: string,
+  query?: { role?: "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER"; isActive?: boolean; search?: string; limit?: number },
+): Promise<ManagedUserItem[]> {
+  const params = new URLSearchParams();
+  if (query?.role) {
+    params.set("role", query.role);
+  }
+  if (query?.isActive !== undefined) {
+    params.set("isActive", String(query.isActive));
+  }
+  if (query?.search) {
+    params.set("search", query.search);
+  }
+  if (query?.limit) {
+    params.set("limit", String(query.limit));
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/admin/users/manage${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ users: ManagedUserItem[] }>(response);
+  return payload.users;
+}
+
+export async function fetchAgents(token: string): Promise<AgentUserItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/agents`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ agents: AgentUserItem[] }>(response);
+  return payload.agents;
+}
+
+export async function fetchVoters(token: string): Promise<VoterUserItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/voters`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ voters: VoterUserItem[] }>(response);
+  return payload.voters;
+}
+
+export async function createGeoPoliticalZone(token: string, body: { id: string; name: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/geo-political-zones`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function updateGeoPoliticalZone(token: string, zoneId: string, body: { name: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/geo-political-zones/${zoneId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function deleteGeoPoliticalZone(token: string, zoneId: string) {
+  const response = await fetch(`${API_BASE_URL}/admin/geo-political-zones/${zoneId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson(response);
+}
+
+export async function fetchPoliticalParties(token: string): Promise<PoliticalPartyItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/political-parties`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ parties: PoliticalPartyItem[] }>(response);
+  return payload.parties;
+}
+
+export async function createAdminUser(token: string, body: {
+  name: string;
+  email: string;
+  password: string;
+  adminLevel: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/users`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function createPoliticalParty(token: string, body: { id: string; code: string; name: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/political-parties`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function createCandidate(token: string, body: {
+  name: string;
+  email: string;
+  password: string;
+  officeType: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
+  politicalPartyId?: string;
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/candidates`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function createAgent(token: string, body: {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  stateId: string;
+  lgaId: string;
+  wardId: string;
+  pollingUnitId?: string;
+  assignedAdminUserId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/agents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function updateAdminUser(token: string, userId: string, body: {
+  name: string;
+  adminLevel: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function updateCandidate(token: string, userId: string, body: {
+  name: string;
+  officeType: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
+  politicalPartyId?: string;
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/candidates/${userId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function updateAgent(token: string, userId: string, body: {
+  name: string;
+  phone?: string;
+  stateId: string;
+  lgaId: string;
+  wardId: string;
+  pollingUnitId?: string;
+  assignedAdminUserId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/agents/${userId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function setUserActivation(token: string, userId: string, isActive: boolean) {
+  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/deactivation`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ isActive }),
+  });
+
+  return readJson(response);
+}
+
+export async function updatePoliticalParty(token: string, partyId: string, body: { code: string; name: string }) {
+  const response = await fetch(`${API_BASE_URL}/admin/political-parties/${partyId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function deletePoliticalParty(token: string, partyId: string) {
+  const response = await fetch(`${API_BASE_URL}/admin/political-parties/${partyId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson(response);
+}
+
+export async function fetchAuditLogs(token: string): Promise<AuditLogItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/audit-logs`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ auditLogs: AuditLogItem[] }>(response);
+  return payload.auditLogs;
+}
+
+export async function fetchCandidatePosts(token: string): Promise<PostListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/candidate/posts`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ posts: PostListItem[] }>(response);
+  return payload.posts;
+}
+
+export async function fetchCandidateFeedback(
+  token: string,
+): Promise<{ totalFeedback: number; feedback: FeedbackListItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/candidate/feedback`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson(response);
+}
+
+export async function fetchCandidateIncidents(
+  token: string,
+): Promise<{ totalIncidents: number; incidents: IncidentListItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/candidate/incidents`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson(response);
+}
+
+export async function fetchNotifications(token: string): Promise<NotificationItem[]> {
+  const response = await fetch(`${API_BASE_URL}/notifications`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ notifications: NotificationItem[] }>(response);
+  return payload.notifications;
+}
+
+export async function markAllNotificationsRead(token: string) {
+  const response = await fetch(`${API_BASE_URL}/notifications/read-all`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson(response);
+}
+
+export async function fetchVoterPolls(token: string): Promise<PollListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/voter/polls`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ polls: PollListItem[] }>(response);
+  return payload.polls;
+}
+
+export async function fetchVoterPosts(token: string): Promise<PostListItem[]> {
+  const response = await fetch(`${API_BASE_URL}/voter/posts`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ posts: PostListItem[] }>(response);
+  return payload.posts;
+}
+
+export async function fetchVoterRedemptions(
+  token: string,
+): Promise<{ balance: RewardBalanceSummary; redemptions: RewardRedemptionItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/voter/redemptions`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson(response);
+}
+
+export async function createVoterRedemption(
+  token: string,
+  body: { pointsRequested: number; amountRequested?: number; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/voter/redemptions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function fetchAgentActivities(token: string): Promise<Array<{
+  id: string;
+  type: string;
+  note: string | null;
+  createdAt: string;
+  latitude: number | null;
+  longitude: number | null;
+  pollingUnitId: string | null;
+}>> {
+  const response = await fetch(`${API_BASE_URL}/agent/activities`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ activities: Array<{
+    id: string;
+    type: string;
+    note: string | null;
+    createdAt: string;
+    latitude: number | null;
+    longitude: number | null;
+    pollingUnitId: string | null;
+  }> }>(response);
+  return payload.activities;
+}
+
+export async function createAgentActivity(
+  token: string,
+  path: "check-in" | "check-out" | "location",
+  body: {
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    note?: string;
+    pollingUnitId?: string;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/agent/${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function createAgentIncident(
+  token: string,
+  body: {
+    type: string;
+    title: string;
+    description: string;
+    severity: string;
+    pollingUnitId?: string;
+    latitude?: number;
+    longitude?: number;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/agent/incidents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
