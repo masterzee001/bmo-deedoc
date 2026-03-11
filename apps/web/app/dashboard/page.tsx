@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, NotificationItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary } from "@pics-nigeria/shared";
+import type { AuthUserProfile, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary } from "@pics-nigeria/shared";
 import {
   ApiError,
   createVoterRedemption,
   fetchCurrentUser,
   fetchNotifications,
+  fetchVoterPosts,
   fetchVoterRedemptions,
   fetchVoterRewards,
 } from "../../lib/api";
@@ -18,17 +19,19 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<RewardBalanceSummary | null>(null);
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [posts, setPosts] = useState<PostListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ pointsRequested: "", amountRequested: "", note: "" });
   const [message, setMessage] = useState("");
 
   async function loadDashboard(token: string) {
-    const [currentUser, rewardSummary, redemptionData, notificationItems] = await Promise.all([
+    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts] = await Promise.all([
       fetchCurrentUser(token),
       fetchVoterRewards(token),
       fetchVoterRedemptions(token),
       fetchNotifications(token),
+      fetchVoterPosts(token),
     ]);
 
     if (currentUser.role !== "VOTER") {
@@ -40,6 +43,7 @@ export default function DashboardPage() {
     setBalance(redemptionData.balance);
     setRedemptions(redemptionData.redemptions);
     setNotifications(notificationItems);
+    setPosts(visiblePosts);
   }
 
   useEffect(() => {
@@ -198,6 +202,23 @@ export default function DashboardPage() {
             </div>
           )}
         </section>
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <h2>Campaign Updates</h2>
+        {posts.length === 0 ? (
+          <p className="muted">No campaign updates are currently visible in your territory.</p>
+        ) : (
+          <div className="reward-list">
+            {posts.slice(0, 6).map((post) => (
+              <article key={post.id} className="reward-item">
+                <strong>{post.title}</strong>
+                <p>{post.content}</p>
+                <p className="muted">{new Date(post.createdAt).toLocaleString()}</p>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

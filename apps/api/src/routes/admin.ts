@@ -111,8 +111,11 @@ const agentCreationSchema = z.object({
   password: z.string().min(8),
   phone: z.string().trim().min(7).optional(),
   stateId: z.string().trim().min(1),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
   lgaId: z.string().trim().min(1),
   wardId: z.string().trim().min(1),
+  stateConstituencyId: z.string().trim().optional(),
   pollingUnitId: z.string().trim().optional(),
   assignedAdminUserId: z.string().trim().optional(),
 });
@@ -148,8 +151,11 @@ const agentUpdateSchema = z.object({
   name: z.string().trim().min(2),
   phone: z.string().trim().min(7).optional(),
   stateId: z.string().trim().min(1),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
   lgaId: z.string().trim().min(1),
   wardId: z.string().trim().min(1),
+  stateConstituencyId: z.string().trim().optional(),
   pollingUnitId: z.string().trim().optional(),
   assignedAdminUserId: z.string().trim().optional(),
 });
@@ -506,7 +512,6 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   }
 
   return {
-    geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
     stateId: actor.adminProfile.stateId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
@@ -1358,10 +1363,21 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
   const agentTerritory = {
     geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
     stateId: parsed.data.stateId,
+    senatorialDistrictId: parsed.data.senatorialDistrictId || undefined,
+    federalConstituencyId: parsed.data.federalConstituencyId || undefined,
     lgaId: parsed.data.lgaId,
     wardId: parsed.data.wardId,
+    stateConstituencyId: parsed.data.stateConstituencyId || undefined,
     pollingUnitId: parsed.data.pollingUnitId || undefined,
   };
+
+  if (
+    request.authUser?.role === UserRole.ADMIN &&
+    request.authUser.adminProfile?.adminLevel === AdminLevel.LGA &&
+    (request.authUser.adminProfile.stateId !== parsed.data.stateId || request.authUser.adminProfile.lgaId !== parsed.data.lgaId)
+  ) {
+    return response.status(403).json({ message: "LGA admins can only create ward agents inside their assigned LGA." });
+  }
 
   if (!request.authUser || !canCreateAgentInScope(request.authUser, agentTerritory)) {
     return response.status(403).json({ message: "You cannot create an agent in this territory." });
@@ -1404,8 +1420,11 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
         create: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
           stateId: parsed.data.stateId,
+          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
+          federalConstituencyId: parsed.data.federalConstituencyId || null,
           lgaId: parsed.data.lgaId,
           wardId: parsed.data.wardId,
+          stateConstituencyId: parsed.data.stateConstituencyId || null,
           pollingUnitId: parsed.data.pollingUnitId || null,
           assignedAdminUserId: parsed.data.assignedAdminUserId || null,
         },
@@ -1420,8 +1439,11 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     targetId: createdUser.id,
     metadata: {
       stateId: parsed.data.stateId,
+      senatorialDistrictId: parsed.data.senatorialDistrictId || null,
+      federalConstituencyId: parsed.data.federalConstituencyId || null,
       lgaId: parsed.data.lgaId,
       wardId: parsed.data.wardId,
+      stateConstituencyId: parsed.data.stateConstituencyId || null,
       pollingUnitId: parsed.data.pollingUnitId || null,
     },
   });
@@ -1640,8 +1662,11 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
   const agentTerritory = {
     geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
     stateId: parsed.data.stateId,
+    senatorialDistrictId: parsed.data.senatorialDistrictId || undefined,
+    federalConstituencyId: parsed.data.federalConstituencyId || undefined,
     lgaId: parsed.data.lgaId,
     wardId: parsed.data.wardId,
+    stateConstituencyId: parsed.data.stateConstituencyId || undefined,
     pollingUnitId: parsed.data.pollingUnitId || undefined,
   };
 
@@ -1683,8 +1708,11 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
         update: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
           stateId: parsed.data.stateId,
+          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
+          federalConstituencyId: parsed.data.federalConstituencyId || null,
           lgaId: parsed.data.lgaId,
           wardId: parsed.data.wardId,
+          stateConstituencyId: parsed.data.stateConstituencyId || null,
           pollingUnitId: parsed.data.pollingUnitId || null,
           assignedAdminUserId: parsed.data.assignedAdminUserId || null,
         },

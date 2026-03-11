@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { createRewardEntryWithNotification } from "../lib/rewards";
+import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
 
@@ -24,8 +25,11 @@ const registerVoterSchema = z.object({
   password: z.string().min(8),
   voterCardNumber: z.string().trim().min(5),
   stateId: z.string().trim().min(1),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
   lgaId: z.string().trim().min(1),
   wardId: z.string().trim().min(1),
+  stateConstituencyId: z.string().trim().optional(),
   referredByCode: z.string().trim().min(4).optional(),
 });
 
@@ -82,6 +86,11 @@ router.post("/register-voter", async (request, response) => {
 
   if (existingVoterCard) {
     return response.status(409).json({ message: "Voter card number is already registered." });
+  }
+
+  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
   }
 
   const ward = await prisma.ward.findUnique({
@@ -142,8 +151,11 @@ router.post("/register-voter", async (request, response) => {
             referralCode,
             referredByUserId: referrer?.id || null,
             stateId: parsed.data.stateId,
+            senatorialDistrictId: parsed.data.senatorialDistrictId || null,
+            federalConstituencyId: parsed.data.federalConstituencyId || null,
             lgaId: parsed.data.lgaId,
             wardId: parsed.data.wardId,
+            stateConstituencyId: parsed.data.stateConstituencyId || null,
           },
         },
       },

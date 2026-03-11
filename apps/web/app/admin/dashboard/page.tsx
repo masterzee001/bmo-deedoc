@@ -180,8 +180,11 @@ export default function AdminDashboardPage() {
     password: "",
     phone: "",
     stateId: "",
+    senatorialDistrictId: "",
+    federalConstituencyId: "",
     lgaId: "",
     wardId: "",
+    stateConstituencyId: "",
     pollingUnitId: "",
     assignedAdminUserId: "",
   });
@@ -532,8 +535,11 @@ export default function AdminDashboardPage() {
   function resetAgentTerritoryFields(overrides?: Partial<typeof agentCreateForm>) {
     return {
       ...agentCreateForm,
+      senatorialDistrictId: "",
+      federalConstituencyId: "",
       lgaId: "",
       wardId: "",
+      stateConstituencyId: "",
       pollingUnitId: "",
       assignedAdminUserId: "",
       ...overrides,
@@ -664,8 +670,11 @@ export default function AdminDashboardPage() {
         name: agentCreateForm.name,
         phone: agentCreateForm.phone || undefined,
         stateId: agentCreateForm.stateId,
+        senatorialDistrictId: agentCreateForm.senatorialDistrictId || undefined,
+        federalConstituencyId: agentCreateForm.federalConstituencyId || undefined,
         lgaId: agentCreateForm.lgaId,
         wardId: agentCreateForm.wardId,
+        stateConstituencyId: agentCreateForm.stateConstituencyId || undefined,
         pollingUnitId: agentCreateForm.pollingUnitId || undefined,
         assignedAdminUserId: agentCreateForm.assignedAdminUserId || undefined,
       };
@@ -687,8 +696,11 @@ export default function AdminDashboardPage() {
         password: "",
         phone: "",
         stateId: "",
+        senatorialDistrictId: "",
+        federalConstituencyId: "",
         lgaId: "",
         wardId: "",
+        stateConstituencyId: "",
         pollingUnitId: "",
         assignedAdminUserId: "",
       });
@@ -756,13 +768,17 @@ export default function AdminDashboardPage() {
       password: "",
       phone: agent.phone || "",
       stateId: agent.territory.stateId || "",
+      senatorialDistrictId: agent.territory.senatorialDistrictId || "",
+      federalConstituencyId: agent.territory.federalConstituencyId || "",
       lgaId: agent.territory.lgaId || "",
       wardId: agent.territory.wardId || "",
+      stateConstituencyId: agent.territory.stateConstituencyId || "",
       pollingUnitId: agent.territory.pollingUnitId || "",
       assignedAdminUserId: agent.assignedAdminUserId || "",
     });
     await refreshTerritoryOptions({
       stateId: agent.territory.stateId || undefined,
+      senatorialDistrictId: agent.territory.senatorialDistrictId || undefined,
       lgaId: agent.territory.lgaId || undefined,
       wardId: agent.territory.wardId || undefined,
     });
@@ -1326,6 +1342,34 @@ export default function AdminDashboardPage() {
                 </select>
               </label>
               <label className="field">
+                <span>Senatorial District</span>
+                <select
+                  value={agentCreateForm.senatorialDistrictId}
+                  onChange={async (event) => {
+                    const senatorialDistrictId = event.target.value;
+                    setAgentCreateForm({ ...agentCreateForm, senatorialDistrictId, federalConstituencyId: "" });
+                    await refreshTerritoryOptions({ stateId: agentCreateForm.stateId, senatorialDistrictId, lgaId: agentCreateForm.lgaId, wardId: agentCreateForm.wardId });
+                  }}
+                >
+                  <option value="">Unspecified</option>
+                  {districts.map((district) => (
+                    <option key={district.id} value={district.id}>{district.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Federal Constituency</span>
+                <select
+                  value={agentCreateForm.federalConstituencyId}
+                  onChange={(event) => setAgentCreateForm({ ...agentCreateForm, federalConstituencyId: event.target.value })}
+                >
+                  <option value="">Unspecified</option>
+                  {federalConstituencies.map((constituency) => (
+                    <option key={constituency.id} value={constituency.id}>{constituency.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
                 <span>LGA</span>
                 <select
                   value={agentCreateForm.lgaId}
@@ -1339,6 +1383,18 @@ export default function AdminDashboardPage() {
                   <option value="">Select LGA</option>
                   {lgas.map((lga) => (
                     <option key={lga.id} value={lga.id}>{lga.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>State Constituency</span>
+                <select
+                  value={agentCreateForm.stateConstituencyId}
+                  onChange={(event) => setAgentCreateForm({ ...agentCreateForm, stateConstituencyId: event.target.value })}
+                >
+                  <option value="">Unspecified</option>
+                  {stateConstituencies.map((constituency) => (
+                    <option key={constituency.id} value={constituency.id}>{constituency.name}</option>
                   ))}
                 </select>
               </label>

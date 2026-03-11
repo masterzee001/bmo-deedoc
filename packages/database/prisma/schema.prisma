@@ -224,8 +224,11 @@ model AgentProfile {
   assignedAdminUserId String?
   geoPoliticalZoneId  String?
   stateId             String
+  senatorialDistrictId String?
+  federalConstituencyId String?
   lgaId               String
   wardId              String
+  stateConstituencyId String?
   pollingUnitId       String?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
@@ -233,15 +236,21 @@ model AgentProfile {
   assignedAdminUser   User?        @relation("AssignedAdmin", fields: [assignedAdminUserId], references: [id])
   geoPoliticalZone    GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
   state               State        @relation(fields: [stateId], references: [id])
+  senatorialDistrict  SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
   lga                 LGA          @relation(fields: [lgaId], references: [id])
   ward                Ward         @relation(fields: [wardId], references: [id])
+  stateConstituency   StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
   pollingUnit         PollingUnit? @relation(fields: [pollingUnitId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([assignedAdminUserId])
   @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
   @@index([lgaId])
   @@index([wardId])
+  @@index([stateConstituencyId])
   @@index([pollingUnitId])
 }
 
@@ -253,21 +262,30 @@ model VoterProfile {
   referredByUserId String?
   geoPoliticalZoneId String?
   stateId          String
+  senatorialDistrictId String?
+  federalConstituencyId String?
   lgaId            String
   wardId           String
+  stateConstituencyId String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   referredByUser   User?    @relation("VoterReferral", fields: [referredByUserId], references: [id])
   geoPoliticalZone GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
   state            State    @relation(fields: [stateId], references: [id])
+  senatorialDistrict SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
   lga              LGA      @relation(fields: [lgaId], references: [id])
   ward             Ward     @relation(fields: [wardId], references: [id])
+  stateConstituency StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
   @@index([lgaId])
   @@index([wardId])
+  @@index([stateConstituencyId])
   @@index([referredByUserId])
 }
 
@@ -675,6 +693,8 @@ model SenatorialDistrict {
   federalConstituencies FederalConstituency[]
   adminProfiles         AdminProfile[]
   candidateProfiles     CandidateProfile[]
+  agentProfiles         AgentProfile[]
+  voterProfiles         VoterProfile[]
   polls                 Poll[]
   posts                 Post[]
   feedbackItems         Feedback[]
@@ -695,6 +715,8 @@ model FederalConstituency {
   senatorialDistrict   SenatorialDistrict   @relation(fields: [senatorialDistrictId], references: [id], onDelete: Cascade)
   adminProfiles        AdminProfile[]
   candidateProfiles    CandidateProfile[]
+  agentProfiles        AgentProfile[]
+  voterProfiles        VoterProfile[]
   polls                Poll[]
   posts                Post[]
 
@@ -763,6 +785,8 @@ model StateConstituency {
   lga               LGA                @relation(fields: [lgaId], references: [id], onDelete: Cascade)
   adminProfiles     AdminProfile[]
   candidateProfiles CandidateProfile[]
+  agentProfiles     AgentProfile[]
+  voterProfiles     VoterProfile[]
   polls             Poll[]
   posts             Post[]
 

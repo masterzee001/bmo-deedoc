@@ -187,5 +187,25 @@ export function canCreateAgentInScope(actor: AuthUserProfile, territory: Territo
     return false;
   }
 
+  const adminProfile = actor.adminProfile;
+  if (!adminProfile) {
+    return false;
+  }
+
+  if (adminProfile.adminLevel === "LGA") {
+    return (
+      adminProfile.stateId === territory.stateId &&
+      adminProfile.lgaId === territory.lgaId
+    );
+  }
+
+  if (adminProfile.adminLevel === "WARD") {
+    return (
+      adminProfile.stateId === territory.stateId &&
+      adminProfile.lgaId === territory.lgaId &&
+      adminProfile.wardId === territory.wardId
+    );
+  }
+
   return matchesAdminScope(actor, territory);
 }

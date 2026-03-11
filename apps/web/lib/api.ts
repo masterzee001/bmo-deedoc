@@ -463,8 +463,11 @@ export async function createAgent(token: string, body: {
   password: string;
   phone?: string;
   stateId: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
   lgaId: string;
   wardId: string;
+  stateConstituencyId?: string;
   pollingUnitId?: string;
   assignedAdminUserId?: string;
 }) {
@@ -531,8 +534,11 @@ export async function updateAgent(token: string, userId: string, body: {
   name: string;
   phone?: string;
   stateId: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
   lgaId: string;
   wardId: string;
+  stateConstituencyId?: string;
   pollingUnitId?: string;
   assignedAdminUserId?: string;
 }) {
@@ -601,6 +607,28 @@ export async function fetchCandidatePosts(token: string): Promise<PostListItem[]
 
   const payload = await readJson<{ posts: PostListItem[] }>(response);
   return payload.posts;
+}
+
+export async function createCandidatePost(
+  token: string,
+  body: {
+    title: string;
+    content: string;
+    isPublished?: boolean;
+    audience?: "VOTERS" | "AGENTS" | "ALL";
+  },
+): Promise<PostListItem> {
+  const response = await fetch(`${API_BASE_URL}/candidate/posts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await readJson<{ post: PostListItem }>(response);
+  return payload.post;
 }
 
 export async function fetchCandidateFeedback(

@@ -179,11 +179,19 @@ router.get("/polls", requireAuth, requireRole("VOTER"), async (request, response
       return false;
     }
 
+    if (poll.federalConstituencyId && poll.federalConstituencyId !== voterProfile.federalConstituencyId) {
+      return false;
+    }
+
     if (poll.lgaId && poll.lgaId !== voterProfile.lgaId) {
       return false;
     }
 
     if (poll.wardId && poll.wardId !== voterProfile.wardId) {
+      return false;
+    }
+
+    if (poll.stateConstituencyId && poll.stateConstituencyId !== voterProfile.stateConstituencyId) {
       return false;
     }
 
@@ -276,11 +284,19 @@ router.get("/posts", requireAuth, requireRole("VOTER"), async (request, response
       return false;
     }
 
+    if (post.federalConstituencyId && post.federalConstituencyId !== voterProfile.federalConstituencyId) {
+      return false;
+    }
+
     if (post.lgaId && post.lgaId !== voterProfile.lgaId) {
       return false;
     }
 
     if (post.wardId && post.wardId !== voterProfile.wardId) {
+      return false;
+    }
+
+    if (post.stateConstituencyId && post.stateConstituencyId !== voterProfile.stateConstituencyId) {
       return false;
     }
 
