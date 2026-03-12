@@ -72,6 +72,38 @@ export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> 
   return payload.user;
 }
 
+export async function updateCurrentUserProfile(
+  token: string,
+  body: { name: string; email: string; phone?: string },
+): Promise<{ message: string; user: AuthUserProfile }> {
+  const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function updateCurrentUserPassword(
+  token: string,
+  body: { currentPassword: string; newPassword: string },
+): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/auth/password`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
 export async function fetchVoterRewards(token: string): Promise<RewardsSummary> {
   const response = await fetch(`${API_BASE_URL}/voter/rewards`, {
     headers: { Authorization: `Bearer ${token}` },

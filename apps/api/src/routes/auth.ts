@@ -18,6 +18,17 @@ const loginSchema = z.object({
   password: z.string().min(8),
 });
 
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(2),
+  email: z.string().email(),
+  phone: z.string().trim().min(7).max(30).optional().or(z.literal("")),
+});
+
+const updatePasswordSchema = z.object({
+  currentPassword: z.string().min(8),
+  newPassword: z.string().min(8),
+});
+
 const registerVoterSchema = z.object({
   fullName: z.string().trim().min(2),
   email: z.string().email(),
@@ -64,6 +75,68 @@ router.post("/login", async (request, response) => {
 
 router.get("/me", requireAuth, async (request, response) => {
   return response.json({ user: request.authUser });
+});
+
+router.patch("/me", requireAuth, async (request, response) => {
+  const parsed = updateProfileSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid profile update payload.", errors: parsed.error.flatten() });
+  }
+
+  const email = normalizeEmail(parsed.data.email);
+  const phone = parsed.data.phone?.trim() ? parsed.data.phone.trim() : null;
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existingUser && existingUser.id !== request.authUser!.id) {
+    return response.status(409).json({ message: "Email is already registered." });
+  }
+
+  await prisma.user.update({
+    where: { id: request.authUser!.id },
+    data: {
+      name: parsed.data.name.trim(),
+      email,
+      phone,
+    },
+  });
+
+  const authUser = await getAuthUserProfile(request.authUser!.id);
+  return response.json({
+    message: "Profile updated successfully.",
+    user: authUser,
+  });
+});
+
+router.patch("/password", requireAuth, async (request, response) => {
+  const parsed = updatePasswordSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid password update payload.", errors: parsed.error.flatten() });
+  }
+
+  if (parsed.data.currentPassword === parsed.data.newPassword) {
+    return response.status(400).json({ message: "New password must be different from the current password." });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: request.authUser!.id },
+    select: { id: true, passwordHash: true },
+  });
+
+  if (!user || !(await verifyPassword(parsed.data.currentPassword, user.passwordHash))) {
+    return response.status(401).json({ message: "Current password is incorrect." });
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash: await hashPassword(parsed.data.newPassword),
+    },
+  });
+
+  return response.json({ message: "Password updated successfully." });
 });
 
 router.post("/register-voter", async (request, response) => {

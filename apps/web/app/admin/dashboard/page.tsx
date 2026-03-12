@@ -71,6 +71,8 @@ import {
   fetchVoters,
   fetchWards,
   setUserActivation,
+  updateCurrentUserPassword,
+  updateCurrentUserProfile,
   updateAdminUser,
   updateAdminTask,
   updateAgent,
@@ -268,6 +270,8 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
+  const [profileForm, setProfileForm] = useState({ name: "", email: "", phone: "" });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
   const [zoneForm, setZoneForm] = useState({ id: "", name: "" });
   const [partyForm, setPartyForm] = useState({ id: "", code: "", name: "" });
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
@@ -380,6 +384,11 @@ export default function AdminDashboardPage() {
         }
 
         setUser(currentUser);
+        setProfileForm({
+          name: currentUser.name,
+          email: currentUser.email,
+          phone: currentUser.phone || "",
+        });
         setSummary(nextSummary);
         setAdminUsers(nextAdminUsers);
         setCandidates(nextCandidates);
@@ -461,6 +470,55 @@ export default function AdminDashboardPage() {
       dueAt: "",
     });
     setSelectedMapMarkerId(incident.id);
+  }
+
+  async function handleUpdateProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      const payload = await updateCurrentUserProfile(token, profileForm);
+      setUser(payload.user);
+      setProfileForm({
+        name: payload.user.name,
+        email: payload.user.email,
+        phone: payload.user.phone || "",
+      });
+      setAdminMessage(payload.message);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update your profile.");
+    }
+  }
+
+  async function handleUpdatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      setError("New password confirmation does not match.");
+      return;
+    }
+
+    try {
+      setError("");
+      const payload = await updateCurrentUserPassword(token, {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+      setAdminMessage(payload.message);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update your password.");
+    }
   }
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
@@ -1091,6 +1149,62 @@ export default function AdminDashboardPage() {
           Territory: {user.adminProfile?.stateId || "nationwide"} | {user.adminProfile?.lgaId || "all LGAs"} |{" "}
           {user.adminProfile?.wardId || "all wards"}
         </p>
+      </section>
+
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+        <section className="panel card">
+          <h2>My Profile</h2>
+          {adminMessage ? <p className="muted">{adminMessage}</p> : null}
+          <form className="form" onSubmit={handleUpdateProfile}>
+            <label className="field">
+              <span>Name</span>
+              <input value={profileForm.name} onChange={(event) => setProfileForm({ ...profileForm, name: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input type="email" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Phone</span>
+              <input value={profileForm.phone} onChange={(event) => setProfileForm({ ...profileForm, phone: event.target.value })} placeholder="Optional phone number" />
+            </label>
+            <button className="button" type="submit">Save profile</button>
+          </form>
+        </section>
+
+        <section className="panel card">
+          <h2>Change Password</h2>
+          <form className="form" onSubmit={handleUpdatePassword}>
+            <label className="field">
+              <span>Current Password</span>
+              <input
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>New Password</span>
+              <input
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Confirm New Password</span>
+              <input
+                type="password"
+                value={passwordForm.confirmNewPassword}
+                onChange={(event) => setPasswordForm({ ...passwordForm, confirmNewPassword: event.target.value })}
+                required
+              />
+            </label>
+            <button className="button" type="submit">Update password</button>
+          </form>
+        </section>
       </section>
 
       <section className="grid stats">
