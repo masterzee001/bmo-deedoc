@@ -183,20 +183,30 @@ async function main() {
   });
 
   const bootstrap = getBootstrapConfig();
-  const superAdmin = await prisma.user.upsert({
-    where: { email: normalizeEmail(bootstrap.email) },
-    update: {
-      name: bootstrap.name,
-      passwordHash: await hash(bootstrap.password),
-      role: UserRole.SUPER_ADMIN,
-    },
-    create: {
-      name: bootstrap.name,
-      email: normalizeEmail(bootstrap.email),
-      passwordHash: await hash(bootstrap.password),
-      role: UserRole.SUPER_ADMIN,
-    },
+  const hashedBootstrapPassword = await hash(bootstrap.password);
+  const existingSuperAdmin = await prisma.user.findFirst({
+    where: { role: UserRole.SUPER_ADMIN },
+    select: { id: true, email: true },
   });
+
+  const superAdmin = existingSuperAdmin
+    ? await prisma.user.update({
+        where: { id: existingSuperAdmin.id },
+        data: {
+          name: bootstrap.name,
+          email: normalizeEmail(bootstrap.email),
+          passwordHash: hashedBootstrapPassword,
+          role: UserRole.SUPER_ADMIN,
+        },
+      })
+    : await prisma.user.create({
+        data: {
+          name: bootstrap.name,
+          email: normalizeEmail(bootstrap.email),
+          passwordHash: hashedBootstrapPassword,
+          role: UserRole.SUPER_ADMIN,
+        },
+      });
 
   const stateAdmin = await prisma.user.upsert({
     where: { email: normalizeEmail(sampleAccounts.stateAdmin.email) },
