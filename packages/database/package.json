@@ -10,6 +10,8 @@
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma --name init",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:push": "prisma db push --schema prisma/schema.prisma --accept-data-loss",
+    "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
+    "verify:production": "tsx scripts/verify-production-readiness.ts",
     "seed": "tsx prisma/seed.ts",
     "seed:credentials": "tsx scripts/print-seeded-credentials.ts",
     "bootstrap:check": "tsx scripts/check-bootstrap.ts"

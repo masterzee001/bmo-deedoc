@@ -8,7 +8,7 @@ Reward balances currently assume that `PENDING`, `APPROVED`, and `PAID` redempti
 
 - `apps/web`: Next.js + TypeScript
 - `apps/api`: Express + TypeScript
-- `packages/database`: Prisma schema, migration, seed, bootstrap checks
+- `packages/database`: Prisma schema, migration, seed, bootstrap checks, production verification
 - `packages/shared`: shared constants, types, and helpers
 
 ## Local setup order
@@ -27,9 +27,12 @@ Reward balances currently assume that `PENDING`, `APPROVED`, and `PAID` redempti
 6. Review seeded bootstrap details
    - `npm run seed:credentials`
    - `npm run bootstrap:check`
-7. Run API
+7. Optional: run the production-safe bootstrap and verification commands
+   - `npm run bootstrap:super-admin`
+   - `npm run verify:production`
+8. Run API
    - `npm run dev:api`
-8. Run web
+9. Run web
    - `npm run dev:web`
 
 ## Environment variables
@@ -59,6 +62,7 @@ NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 - The repo includes [`render.yaml`](/C:/Users/USER/projects/pics-nigeria/render.yaml) for the Express API.
 - Import the repo in Render as a Blueprint or create a web service that uses the same commands:
   - Build command: `npm install && npm run build`
+  - Pre-deploy command: `npm run predeploy:render --workspace @pics-nigeria/api`
   - Start command: `npm run start:render --workspace @pics-nigeria/api`
 - This app is configured for PostgreSQL in production. Set `DATABASE_URL` in Render to your Render Postgres connection string.
 - Required secret env vars in Render:
@@ -66,6 +70,11 @@ NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
   - `JWT_SECRET`
   - `SUPER_ADMIN_EMAIL`
   - `SUPER_ADMIN_PASSWORD`
+- `SUPER_ADMIN_NAME` is optional. If omitted, bootstrap uses `PICS Nigeria Super Admin` only when creating a missing account.
+- Render predeploy runs `prisma migrate deploy`, then `bootstrap:super-admin`, then `verify:production`.
+- `bootstrap:super-admin` creates the configured `SUPER_ADMIN` only if it does not already exist. It never logs secrets and does not overwrite an existing password.
+- `npm run verify:production` checks database connectivity, whether bootstrap env vars are present, and whether the configured `SUPER_ADMIN` exists.
+- If you change `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, or `SUPER_ADMIN_NAME`, redeploy or restart the Render service so the new env values are loaded before bootstrap or verification runs.
 - Use the Render Postgres internal connection string when the database and web service are in the same Render region.
 
 ### Vercel Web
