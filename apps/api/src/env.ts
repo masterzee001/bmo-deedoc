@@ -31,6 +31,7 @@ type ApiEnv = {
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
   PORT: number;
+  CORS_ALLOWED_ORIGINS: string[];
 };
 
 function requireValue(name: string, fallback?: string): string {
@@ -46,4 +47,8 @@ export const env: ApiEnv = {
   JWT_SECRET: requireValue("JWT_SECRET"),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "7d",
   PORT: Number(process.env.PORT || 4000),
+  CORS_ALLOWED_ORIGINS: (process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 };

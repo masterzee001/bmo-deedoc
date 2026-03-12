@@ -44,6 +44,7 @@ DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pics_nigeria?schema=
 JWT_SECRET="replace-with-a-long-random-secret"
 JWT_EXPIRES_IN="7d"
 PORT=4000
+CORS_ALLOWED_ORIGINS="http://localhost:3000"
 SUPER_ADMIN_EMAIL="superadmin@pics.ng"
 SUPER_ADMIN_PASSWORD="ChangeMe123!"
 SUPER_ADMIN_NAME="PICS Nigeria Super Admin"
@@ -68,8 +69,10 @@ NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 - Required secret env vars in Render:
   - `DATABASE_URL`
   - `JWT_SECRET`
+  - `CORS_ALLOWED_ORIGINS`
   - `SUPER_ADMIN_EMAIL`
   - `SUPER_ADMIN_PASSWORD`
+- `NEXT_PUBLIC_API_BASE_URL` is read in the Next.js frontend at build time and inlined into the browser bundle. Changing it in Vercel requires a rebuild/redeploy of the frontend before browsers will use the new API URL.
 - `SUPER_ADMIN_NAME` is optional. If omitted, bootstrap uses `PICS Nigeria Super Admin` only when creating a missing account.
 - Render predeploy runs `prisma migrate deploy`, then `bootstrap:super-admin`, then `verify:production`.
 - `bootstrap:super-admin` creates the configured `SUPER_ADMIN` only if it does not already exist. It never logs secrets and does not overwrite an existing password.
@@ -82,7 +85,7 @@ NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 - Configure the Vercel project root directory as `apps/web`.
 - The repo includes [`apps/web/vercel.json`](/C:/Users/USER/projects/pics-nigeria/apps/web/vercel.json) for monorepo installs/builds.
 - Set `NEXT_PUBLIC_API_BASE_URL` in Vercel to your Render API URL, for example `https://pics-nigeria-api.onrender.com`.
-- After the API URL is known, redeploy the Vercel project so the public env var is baked into the build.
+- After the API URL is known or changed, redeploy the Vercel project so the public env var is baked into the build.
 
 ## Starter seed structure
 

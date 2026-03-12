@@ -31,7 +31,25 @@ import type {
   WardItem,
 } from "@pics-nigeria/shared";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function getApiBaseUrl(): string {
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+  if (configuredBaseUrl) {
+    return normalizeBaseUrl(configuredBaseUrl);
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    return "http://localhost:4000";
+  }
+
+  throw new Error("Missing NEXT_PUBLIC_API_BASE_URL for production build.");
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;

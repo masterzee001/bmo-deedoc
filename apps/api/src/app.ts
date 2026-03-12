@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
+import { env } from "./env";
 import adminRoutes from "./routes/admin";
 import agentRoutes from "./routes/agent";
 import authRoutes from "./routes/auth";
@@ -15,8 +16,31 @@ type JsonParseError = Error & {
 
 export function createApp() {
   const app = express();
+  const allowedOrigins = new Set(
+    env.CORS_ALLOWED_ORIGINS.length > 0
+      ? env.CORS_ALLOWED_ORIGINS
+      : process.env.NODE_ENV === "production"
+        ? []
+        : ["http://localhost:3000", "http://127.0.0.1:3000"],
+  );
 
-  app.use(cors());
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        if (allowedOrigins.has(origin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error("CORS origin not allowed."));
+      },
+    }),
+  );
   app.use(express.json());
 
   app.get("/health", (_request, response) => {
