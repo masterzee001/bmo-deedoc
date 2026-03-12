@@ -52,6 +52,28 @@ SUPER_ADMIN_NAME="PICS Nigeria Super Admin"
 NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 ```
 
+## Deployment
+
+### Render API
+
+- The repo includes [`render.yaml`](/C:/Users/USER/projects/pics-nigeria/render.yaml) for the Express API.
+- Import the repo in Render as a Blueprint or create a web service that uses the same commands:
+  - Build command: `npm install && npm run build`
+  - Start command: `npm run start:render --workspace @pics-nigeria/api`
+- This app uses SQLite, so Render must keep the attached disk from `render.yaml`.
+- Required secret env vars in Render:
+  - `JWT_SECRET`
+  - `SUPER_ADMIN_EMAIL`
+  - `SUPER_ADMIN_PASSWORD`
+- The production database path is `file:/var/data/pics-nigeria.db`.
+
+### Vercel Web
+
+- Configure the Vercel project root directory as `apps/web`.
+- The repo includes [`apps/web/vercel.json`](/C:/Users/USER/projects/pics-nigeria/apps/web/vercel.json) for monorepo installs/builds.
+- Set `NEXT_PUBLIC_API_BASE_URL` in Vercel to your Render API URL, for example `https://pics-nigeria-api.onrender.com`.
+- After the API URL is known, redeploy the Vercel project so the public env var is baked into the build.
+
 ## Starter seed structure
 
 The seed creates:

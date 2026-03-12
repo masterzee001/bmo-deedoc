@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: pics-nigeria-api
+    runtime: node
+    repo: https://github.com/edurewards01-creator/pics-nigeria.git
+    rootDir: .
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:render --workspace @pics-nigeria/api
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: pics-nigeria-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        value: file:/var/data/pics-nigeria.db
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_SECRET
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: SUPER_ADMIN_NAME
+        value: PICS Nigeria Super Admin
