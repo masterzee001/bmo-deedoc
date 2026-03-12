@@ -93,6 +93,28 @@ export const NOTIFICATION_TYPES = [
   "SYSTEM",
 ] as const;
 
+export const FIELD_TASK_STATUSES = [
+  "TODO",
+  "IN_PROGRESS",
+  "BLOCKED",
+  "DONE",
+] as const;
+
+export const FIELD_TASK_PRIORITIES = [
+  "LOW",
+  "MEDIUM",
+  "HIGH",
+  "CRITICAL",
+] as const;
+
+export const BROADCAST_AUDIENCES = [
+  "ALL",
+  "ADMINS",
+  "AGENTS",
+  "VOTERS",
+  "CANDIDATES",
+] as const;
+
 export type UserRole = (typeof USER_ROLES)[number];
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export type CandidateOfficeType = (typeof CANDIDATE_OFFICE_TYPES)[number];
@@ -104,6 +126,9 @@ export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 export type RewardRedemptionStatus = (typeof REWARD_REDEMPTION_STATUSES)[number];
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+export type FieldTaskStatus = (typeof FIELD_TASK_STATUSES)[number];
+export type FieldTaskPriority = (typeof FIELD_TASK_PRIORITIES)[number];
+export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
 
 export type TerritoryScope = {
   geoPoliticalZoneId?: string | null;
@@ -420,6 +445,39 @@ export type AuditLogItem = {
   targetId: string;
   metadataJson: string | null;
   createdAt: string;
+};
+
+export type FieldTaskItem = {
+  id: string;
+  title: string;
+  description: string;
+  status: FieldTaskStatus;
+  priority: FieldTaskPriority;
+  createdByUserId: string;
+  assignedToUserId: string;
+  incidentId: string | null;
+  dueAt: string | null;
+  completedAt: string | null;
+  resolutionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  territory: TerritorySummary;
+  assigneeName: string;
+  creatorName: string;
+};
+
+export type BroadcastMessageItem = {
+  id: string;
+  title: string;
+  message: string;
+  audience: BroadcastAudience;
+  taskStatus: FieldTaskStatus | null;
+  createdByUserId: string;
+  createdByName: string;
+  recipientCount: number;
+  createdAt: string;
+  updatedAt: string;
+  territory: TerritorySummary;
 };
 
 export function normalizeEmail(email: string): string {

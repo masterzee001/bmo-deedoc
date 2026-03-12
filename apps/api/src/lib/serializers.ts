@@ -3,7 +3,9 @@ import type {
   AdminMapSummary,
   AgentActivitySummary,
   AuditLogItem,
+  BroadcastMessageItem,
   CandidateListItem,
+  FieldTaskItem,
   FeedbackListItem,
   IncidentListItem,
   NotificationItem,
@@ -266,5 +268,85 @@ export function serializeAuditLogItem(log: {
     targetId: log.targetId,
     metadataJson: log.metadataJson,
     createdAt: log.createdAt.toISOString(),
+  };
+}
+
+export function serializeFieldTaskItem(task: {
+  id: string;
+  title: string;
+  description: string;
+  status: FieldTaskItem["status"];
+  priority: FieldTaskItem["priority"];
+  createdByUserId: string;
+  assignedToUserId: string;
+  incidentId: string | null;
+  dueAt: Date | null;
+  completedAt: Date | null;
+  resolutionNote: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  createdByUser: { name: string };
+  assignedToUser: { name: string };
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+}): FieldTaskItem {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    createdByUserId: task.createdByUserId,
+    assignedToUserId: task.assignedToUserId,
+    incidentId: task.incidentId,
+    dueAt: task.dueAt ? task.dueAt.toISOString() : null,
+    completedAt: task.completedAt ? task.completedAt.toISOString() : null,
+    resolutionNote: task.resolutionNote,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+    territory: serializeTerritory(task),
+    assigneeName: task.assignedToUser.name,
+    creatorName: task.createdByUser.name,
+  };
+}
+
+export function serializeBroadcastMessageItem(broadcast: {
+  id: string;
+  title: string;
+  message: string;
+  audience: BroadcastMessageItem["audience"];
+  taskStatus: BroadcastMessageItem["taskStatus"];
+  createdByUserId: string;
+  recipientCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+  createdByUser: { name: string };
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+}): BroadcastMessageItem {
+  return {
+    id: broadcast.id,
+    title: broadcast.title,
+    message: broadcast.message,
+    audience: broadcast.audience,
+    taskStatus: broadcast.taskStatus,
+    createdByUserId: broadcast.createdByUserId,
+    createdByName: broadcast.createdByUser.name,
+    recipientCount: broadcast.recipientCount,
+    createdAt: broadcast.createdAt.toISOString(),
+    updatedAt: broadcast.updatedAt.toISOString(),
+    territory: serializeTerritory(broadcast),
   };
 }

@@ -1,10 +1,12 @@
-import { AgentActivityType, IncidentSeverity, IncidentStatus, IncidentType } from "@prisma/client";
+import { AgentActivityType, FieldTaskStatus, IncidentSeverity, IncidentStatus, IncidentType, NotificationType } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { validateTerritoryReferences } from "../lib/territory";
-import { serializeFeedbackItem, serializeIncidentItem } from "../lib/serializers";
+import { serializeFeedbackItem, serializeFieldTaskItem, serializeIncidentItem } from "../lib/serializers";
+import { createAuditLog } from "../lib/audit";
+import { createNotification } from "../lib/notifications";
 
 const router = Router();
 
@@ -33,6 +35,11 @@ const activityQuerySchema = z.object({
   dateTo: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(50).optional(),
+});
+
+const taskStatusSchema = z.object({
+  status: z.nativeEnum(FieldTaskStatus),
+  resolutionNote: z.string().trim().max(1000).optional(),
 });
 
 async function getAgentProfileOrError(userId: string) {
@@ -242,6 +249,87 @@ router.get("/incident-feedback", requireAuth, requireRole("AGENT"), async (reque
 
   return response.json({
     feedback: feedback.map(serializeFeedbackItem),
+  });
+});
+
+router.get("/tasks", requireAuth, requireRole("AGENT"), async (request, response) => {
+  const tasks = await prisma.fieldTask.findMany({
+    where: { assignedToUserId: request.authUser!.id },
+    include: {
+      createdByUser: { select: { name: true } },
+      assignedToUser: { select: { name: true } },
+    },
+    orderBy: [
+      { status: "asc" },
+      { priority: "desc" },
+      { createdAt: "desc" },
+    ],
+    take: 50,
+  });
+
+  return response.json({
+    tasks: tasks.map(serializeFieldTaskItem),
+  });
+});
+
+router.patch("/tasks/:taskId", requireAuth, requireRole("AGENT"), async (request, response) => {
+  const parsed = taskStatusSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid task update payload.", errors: parsed.error.flatten() });
+  }
+
+  const taskId = Array.isArray(request.params.taskId) ? request.params.taskId[0] : request.params.taskId;
+  if (!taskId) {
+    return response.status(400).json({ message: "Invalid task id." });
+  }
+
+  const task = await prisma.fieldTask.findUnique({
+    where: { id: taskId },
+    include: {
+      createdByUser: { select: { name: true } },
+      assignedToUser: { select: { name: true } },
+    },
+  });
+
+  if (!task || task.assignedToUserId !== request.authUser!.id) {
+    return response.status(404).json({ message: "Task was not found." });
+  }
+
+  const updatedTask = await prisma.$transaction(async (transaction) => {
+    const nextTask = await transaction.fieldTask.update({
+      where: { id: task.id },
+      data: {
+        status: parsed.data.status,
+        resolutionNote: parsed.data.resolutionNote || null,
+        completedAt: parsed.data.status === FieldTaskStatus.DONE ? new Date() : null,
+      },
+      include: {
+        createdByUser: { select: { name: true } },
+        assignedToUser: { select: { name: true } },
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: nextTask.createdByUserId,
+      type: NotificationType.SYSTEM,
+      title: "Field task status updated",
+      message: `${nextTask.title} is now ${nextTask.status}.`,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "FIELD_TASK_STATUS_UPDATED",
+      targetType: "FieldTask",
+      targetId: nextTask.id,
+      metadata: { status: nextTask.status },
+    });
+
+    return nextTask;
+  });
+
+  return response.json({
+    message: "Task updated successfully.",
+    task: serializeFieldTaskItem(updatedTask),
   });
 });
 

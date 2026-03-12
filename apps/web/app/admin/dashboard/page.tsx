@@ -9,10 +9,13 @@ import {
 import type {
   AdminUserItem,
   AdminDashboardSummary,
+  AdminMapSummary,
   AgentActivitySummary,
   AgentUserItem,
   AuthUserProfile,
+  BroadcastMessageItem,
   CandidateListItem,
+  FieldTaskItem,
   FeedbackListItem,
   FederalConstituencyItem,
   GeoPoliticalZoneItem,
@@ -34,6 +37,8 @@ import {
   ApiError,
   createAdminUser,
   createAgent,
+  createAdminTask,
+  createAdminBroadcast,
   createCandidate,
   createGeoPoliticalZone,
   createPoliticalParty,
@@ -44,10 +49,13 @@ import {
   fetchAdminUsers,
   fetchAdminCandidates,
   fetchAdminFeedback,
+  fetchAdminMapSummary,
   fetchAdminIncidents,
   fetchAdminPollingUnitCoverage,
   fetchAdminRedemptions,
   fetchAdminSummary,
+  fetchAdminTasks,
+  fetchAdminBroadcasts,
   fetchCurrentUser,
   fetchManagedUsers,
   fetchAgents,
@@ -64,6 +72,7 @@ import {
   fetchWards,
   setUserActivation,
   updateAdminUser,
+  updateAdminTask,
   updateAgent,
   updateCandidate,
   updateGeoPoliticalZone,
@@ -71,6 +80,18 @@ import {
 } from "../../../lib/api";
 
 type DependencyCounts = Record<string, number>;
+type MapLayerFilter = "ALL" | "AGENTS" | "INCIDENTS";
+type MapSeverityFilter = "ALL" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+type LiveMapMarker = {
+  id: string;
+  kind: "agent" | "incident";
+  label: string;
+  detail: string;
+  timestamp: string | null;
+  x: number;
+  y: number;
+  tone: "safe" | "alert";
+};
 
 function formatDependencyCounts(value: unknown): string {
   if (!value || typeof value !== "object") {
@@ -85,6 +106,88 @@ function formatDependencyCounts(value: unknown): string {
   return entries
     .map(([key, count]) => `${key.replace(/([A-Z])/g, " $1").toLowerCase()}: ${count}`)
     .join(", ");
+}
+
+function formatMapTime(value: string | null): string {
+  if (!value) {
+    return "No timestamp";
+  }
+
+  return new Date(value).toLocaleString();
+}
+
+function buildLiveMapMarkers(
+  mapSummary: AdminMapSummary,
+  layer: MapLayerFilter,
+  severity: MapSeverityFilter,
+): LiveMapMarker[] {
+  const incidents = mapSummary.incidents
+    .filter((incident) => incident.latitude !== null && incident.longitude !== null)
+    .filter((incident) => severity === "ALL" || incident.severity === severity)
+    .map((incident) => ({
+      id: incident.id,
+      kind: "incident" as const,
+      label: incident.title,
+      detail: `${incident.type} | ${incident.severity} | ${incident.status}`,
+      timestamp: incident.createdAt,
+      latitude: incident.latitude as number,
+      longitude: incident.longitude as number,
+      tone: "alert" as const,
+    }));
+
+  const agents = mapSummary.activeAgents
+    .map((agent) => ({
+      latitude: agent.latestLatitude,
+      longitude: agent.latestLongitude,
+      id: agent.agentUserId,
+      kind: "agent" as const,
+      label: agent.name,
+      detail: `${agent.latestActivityType || "No recent activity"} | ${agent.pollingUnitId || "No polling unit"}`,
+      timestamp: agent.latestActivityAt,
+      tone: "safe" as const,
+    }))
+    .filter((agent) => agent.latitude !== null && agent.longitude !== null)
+    .map((agent) => ({
+      id: agent.id,
+      kind: agent.kind,
+      label: agent.label,
+      detail: agent.detail,
+      timestamp: agent.timestamp,
+      latitude: agent.latitude as number,
+      longitude: agent.longitude as number,
+      tone: agent.tone,
+    }));
+
+  const source =
+    layer === "AGENTS"
+      ? agents
+      : layer === "INCIDENTS"
+        ? incidents
+        : [...incidents, ...agents];
+
+  if (source.length === 0) {
+    return [];
+  }
+
+  const latitudes = source.map((item) => item.latitude);
+  const longitudes = source.map((item) => item.longitude);
+  const minLatitude = Math.min(...latitudes);
+  const maxLatitude = Math.max(...latitudes);
+  const minLongitude = Math.min(...longitudes);
+  const maxLongitude = Math.max(...longitudes);
+  const latitudeSpan = Math.max(maxLatitude - minLatitude, 0.08);
+  const longitudeSpan = Math.max(maxLongitude - minLongitude, 0.08);
+
+  return source.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    label: item.label,
+    detail: item.detail,
+    timestamp: item.timestamp,
+    tone: item.tone,
+    x: 10 + ((item.longitude - minLongitude) / longitudeSpan) * 80,
+    y: 12 + (1 - (item.latitude - minLatitude) / latitudeSpan) * 76,
+  }));
 }
 
 export default function AdminDashboardPage() {
@@ -138,6 +241,30 @@ export default function AdminDashboardPage() {
     pollResponseTotalsByPoll: Array<{ pollId: string; title: string; responses: number }>;
     voterRegistrationsOverTime: Record<string, number>;
   } | null>(null);
+  const [tasks, setTasks] = useState<FieldTaskItem[]>([]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastMessageItem[]>([]);
+  const [mapSummary, setMapSummary] = useState<AdminMapSummary | null>(null);
+  const [mapLayer, setMapLayer] = useState<MapLayerFilter>("ALL");
+  const [mapSeverityFilter, setMapSeverityFilter] = useState<MapSeverityFilter>("ALL");
+  const [selectedMapMarkerId, setSelectedMapMarkerId] = useState<string | null>(null);
+  const [taskForm, setTaskForm] = useState({
+    title: "",
+    description: "",
+    assignedToUserId: "",
+    incidentId: "",
+    priority: "HIGH" as FieldTaskItem["priority"],
+    dueAt: "",
+  });
+  const [broadcastForm, setBroadcastForm] = useState({
+    title: "",
+    message: "",
+    audience: "AGENTS" as BroadcastMessageItem["audience"],
+    taskStatus: "",
+    stateId: "",
+    lgaId: "",
+    wardId: "",
+    pollingUnitId: "",
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
@@ -216,6 +343,9 @@ export default function AdminDashboardPage() {
           nextIncidents,
           nextAgents,
           nextCoverage,
+          nextMapSummary,
+          nextTasks,
+          nextBroadcasts,
           nextNotifications,
           nextRedemptions,
           nextAnalytics,
@@ -234,6 +364,9 @@ export default function AdminDashboardPage() {
           fetchAdminIncidents(authToken),
           fetchAdminAgentActivitySummaries(authToken),
           fetchAdminPollingUnitCoverage(authToken),
+          fetchAdminMapSummary(authToken),
+          fetchAdminTasks(authToken),
+          fetchAdminBroadcasts(authToken),
           fetchNotifications(authToken),
           fetchAdminRedemptions(authToken),
           fetchAdminAnalytics(authToken),
@@ -257,6 +390,9 @@ export default function AdminDashboardPage() {
         setIncidents(nextIncidents);
         setAgentSummaries(nextAgents);
         setCoverage(nextCoverage);
+        setMapSummary(nextMapSummary);
+        setTasks(nextTasks);
+        setBroadcasts(nextBroadcasts);
         setNotifications(nextNotifications);
         setRedemptions(nextRedemptions);
         setAnalytics(nextAnalytics);
@@ -285,7 +421,7 @@ export default function AdminDashboardPage() {
     );
   }
 
-  if (error || !user || !summary || !coverage || !analytics) {
+  if (error || !user || !summary || !coverage || !analytics || !mapSummary) {
     return (
       <main className="shell">
         <section className="panel card">
@@ -297,6 +433,123 @@ export default function AdminDashboardPage() {
         </section>
       </main>
     );
+  }
+
+  const liveMapMarkers = buildLiveMapMarkers(mapSummary, mapLayer, mapSeverityFilter);
+  const selectedMapMarker = liveMapMarkers.find((item) => item.id === selectedMapMarkerId) || liveMapMarkers[0] || null;
+  const highlightedIncidents = mapSummary.incidents
+    .filter((incident) => mapSeverityFilter === "ALL" || incident.severity === mapSeverityFilter)
+    .slice(0, 4);
+  const visibleAgents = mapSummary.activeAgents.slice(0, 4);
+  const stableMapSummary = mapSummary;
+
+  function seedTaskFormFromIncident(incidentId: string) {
+    const incident = stableMapSummary.incidents.find((item) => item.id === incidentId);
+    if (!incident) {
+      return;
+    }
+
+    const suggestedAgent = agents.find((agent) => agent.territory.pollingUnitId && incident.pollingUnitId && agent.territory.pollingUnitId === incident.pollingUnitId)
+      || agents.find((agent) => agent.territory.wardId === incident.wardId);
+
+    setTaskForm({
+      title: `Respond to ${incident.type.toLowerCase().replace(/_/g, " ")}`,
+      description: incident.description,
+      assignedToUserId: suggestedAgent?.userId || "",
+      incidentId: incident.id,
+      priority: incident.severity === "CRITICAL" ? "CRITICAL" : incident.severity === "HIGH" ? "HIGH" : "MEDIUM",
+      dueAt: "",
+    });
+    setSelectedMapMarkerId(incident.id);
+  }
+
+  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      const payload = {
+        title: taskForm.title,
+        description: taskForm.description,
+        assignedToUserId: taskForm.assignedToUserId,
+        incidentId: taskForm.incidentId || undefined,
+        priority: taskForm.priority,
+        dueAt: taskForm.dueAt ? new Date(taskForm.dueAt).toISOString() : undefined,
+      };
+
+      await createAdminTask(token, payload);
+      setTasks(await fetchAdminTasks(token));
+      setTaskForm({
+        title: "",
+        description: "",
+        assignedToUserId: "",
+        incidentId: "",
+        priority: "HIGH",
+        dueAt: "",
+      });
+      setAdminMessage("Field task created.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not create field task.");
+    }
+  }
+
+  async function handleTaskStatusUpdate(taskId: string, status: FieldTaskItem["status"]) {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      await updateAdminTask(token, taskId, { status });
+      setTasks(await fetchAdminTasks(token));
+      setAdminMessage("Task updated.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update task.");
+    }
+  }
+
+  async function handleCreateBroadcast(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      await createAdminBroadcast(token, {
+        title: broadcastForm.title,
+        message: broadcastForm.message,
+        audience: broadcastForm.audience,
+        taskStatus: broadcastForm.taskStatus ? broadcastForm.taskStatus as FieldTaskItem["status"] : undefined,
+        stateId: broadcastForm.stateId || undefined,
+        lgaId: broadcastForm.lgaId || undefined,
+        wardId: broadcastForm.wardId || undefined,
+        pollingUnitId: broadcastForm.pollingUnitId || undefined,
+      });
+      setBroadcasts(await fetchAdminBroadcasts(token));
+      setBroadcastForm({
+        title: "",
+        message: "",
+        audience: "AGENTS",
+        taskStatus: "",
+        stateId: "",
+        lgaId: "",
+        wardId: "",
+        pollingUnitId: "",
+      });
+      setAdminMessage("Broadcast sent.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not send broadcast.");
+    }
   }
 
   async function handleCreateZone(event: FormEvent<HTMLFormElement>) {
@@ -895,11 +1148,301 @@ export default function AdminDashboardPage() {
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Map Panel Placeholder</h2>
-        <p className="muted">
-          This panel is reserved for future live map rendering. Current backend data already supports markers for
-          agent locations, incidents, and polling units.
-        </p>
+        <div className="section-head">
+          <div>
+            <h2>Live Operations Map</h2>
+            <p className="muted">Field activity and incident pressure across the current admin scope.</p>
+          </div>
+          <div className="map-filter-row">
+            <select value={mapLayer} onChange={(event) => setMapLayer(event.target.value as MapLayerFilter)}>
+              <option value="ALL">All markers</option>
+              <option value="INCIDENTS">Incidents only</option>
+              <option value="AGENTS">Agents only</option>
+            </select>
+            <select value={mapSeverityFilter} onChange={(event) => setMapSeverityFilter(event.target.value as MapSeverityFilter)}>
+              <option value="ALL">All severities</option>
+              <option value="CRITICAL">Critical</option>
+              <option value="HIGH">High</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="LOW">Low</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="live-map-layout">
+          <div className="live-map-frame">
+            <div className="live-map-stage">
+              <div className="live-map-grid" />
+              {liveMapMarkers.length === 0 ? (
+                <div className="live-map-empty">
+                  <strong>No plotted markers</strong>
+                  <p className="muted">No agent coordinates or incidents match the current filters.</p>
+                </div>
+              ) : (
+                liveMapMarkers.map((marker) => (
+                  <button
+                    key={`${marker.kind}-${marker.id}`}
+                    type="button"
+                    className={`map-marker ${marker.kind} ${selectedMapMarker?.id === marker.id ? "selected" : ""}`}
+                    style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+                    onClick={() => setSelectedMapMarkerId(marker.id)}
+                    title={`${marker.label} - ${marker.detail}`}
+                  >
+                    <span className="map-marker-pulse" />
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="live-map-legend">
+              <span><span className="legend-dot incident" /> Incidents</span>
+              <span><span className="legend-dot agent" /> Active agents</span>
+              <span>{mapSummary.pollingUnits.length} polling units in scope</span>
+            </div>
+          </div>
+
+          <div className="live-map-side">
+            <article className="reward-item">
+              <strong>{selectedMapMarker ? selectedMapMarker.label : "No marker selected"}</strong>
+              <p>{selectedMapMarker ? selectedMapMarker.detail : "Pick a marker to inspect field activity."}</p>
+              <p className="muted">{selectedMapMarker ? formatMapTime(selectedMapMarker.timestamp) : "Waiting for selection"}</p>
+              {selectedMapMarker?.kind === "incident" ? (
+                <button className="button" type="button" onClick={() => seedTaskFormFromIncident(selectedMapMarker.id)}>
+                  Create task from incident
+                </button>
+              ) : null}
+            </article>
+
+            <article className="reward-item">
+              <strong>Incident Load</strong>
+              <p>{mapSummary.incidents.length} mapped incidents</p>
+              <p className="muted">
+                Critical: {mapSummary.counts.bySeverity.CRITICAL || 0} | High: {mapSummary.counts.bySeverity.HIGH || 0}
+              </p>
+            </article>
+
+            <article className="reward-item">
+              <strong>Coverage Snapshot</strong>
+              <p>{coverage.pollingUnitsWithRecentActivity} units with recent activity</p>
+              <p className="muted">
+                {coverage.pollingUnitsWithIncidents} units with incidents | {coverage.pollingUnitsWithoutActivity} without activity
+              </p>
+            </article>
+          </div>
+        </div>
+
+        <div className="grid" style={{ marginTop: 18, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+          <section className="reward-item">
+            <strong>Hot Incidents</strong>
+            {highlightedIncidents.length === 0 ? (
+              <p className="muted">No incidents match the current severity filter.</p>
+            ) : (
+              <div className="reward-list" style={{ marginTop: 12 }}>
+                {highlightedIncidents.map((item) => (
+                  <article key={item.id} className="map-list-item">
+                    <strong>{item.title}</strong>
+                    <span>{item.type} | {item.severity} | {item.status}</span>
+                    <span className="muted">{formatMapTime(item.createdAt)}</span>
+                    <div className="action-row">
+                      <button type="button" className="button secondary" onClick={() => setSelectedMapMarkerId(item.id)}>
+                        Focus
+                      </button>
+                      <button type="button" className="button" onClick={() => seedTaskFormFromIncident(item.id)}>
+                        Task it
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="reward-item">
+            <strong>Field Agents</strong>
+            {visibleAgents.length === 0 ? (
+              <p className="muted">No active agent coordinates available yet.</p>
+            ) : (
+              <div className="reward-list" style={{ marginTop: 12 }}>
+                {visibleAgents.map((item) => (
+                  <button
+                    key={item.agentUserId}
+                    type="button"
+                    className="map-list-item"
+                    onClick={() => setSelectedMapMarkerId(item.agentUserId)}
+                  >
+                    <strong>{item.name}</strong>
+                    <span>{item.latestActivityType || "No recent activity"}</span>
+                    <span className="muted">{formatMapTime(item.latestActivityAt)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
+
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "minmax(320px, 1fr) minmax(0, 1.5fr)" }}>
+        <section className="panel card">
+          <h2>Create Field Task</h2>
+          <p className="muted">Assign an agent directly from an incident or create a fresh field follow-up task.</p>
+          <form className="form" onSubmit={handleCreateTask}>
+            <label className="field">
+              <span>Title</span>
+              <input value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Description</span>
+              <textarea value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} required rows={4} />
+            </label>
+            <label className="field">
+              <span>Assign Agent</span>
+              <select value={taskForm.assignedToUserId} onChange={(event) => setTaskForm({ ...taskForm, assignedToUserId: event.target.value })} required>
+                <option value="">Select agent</option>
+                {agents.map((agent) => (
+                  <option key={agent.userId} value={agent.userId}>
+                    {agent.name} | {agent.territory.lgaId} | {agent.territory.wardId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Linked Incident</span>
+              <select value={taskForm.incidentId} onChange={(event) => setTaskForm({ ...taskForm, incidentId: event.target.value })}>
+                <option value="">No linked incident</option>
+                {mapSummary.incidents.slice(0, 20).map((incident) => (
+                  <option key={incident.id} value={incident.id}>
+                    {incident.title} | {incident.severity}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Priority</span>
+              <select value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value as FieldTaskItem["priority"] })}>
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="CRITICAL">Critical</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Due At</span>
+              <input type="datetime-local" value={taskForm.dueAt} onChange={(event) => setTaskForm({ ...taskForm, dueAt: event.target.value })} />
+            </label>
+            <button className="button" type="submit">Create task</button>
+          </form>
+        </section>
+
+        <section className="panel card">
+          <h2>Task Board</h2>
+          {tasks.length === 0 ? (
+            <p className="muted">No field tasks created yet.</p>
+          ) : (
+            <div className="reward-list">
+              {tasks.slice(0, 10).map((task) => (
+                <article key={task.id} className="reward-item">
+                  <div className="section-head compact">
+                    <div>
+                      <strong>{task.title}</strong>
+                      <p className="muted">{task.assigneeName} | {task.priority} | {task.status}</p>
+                    </div>
+                    <span className={`status-pill ${task.status === "DONE" ? "active" : task.status === "BLOCKED" ? "inactive" : ""}`}>{task.status}</span>
+                  </div>
+                  <p>{task.description}</p>
+                  <p className="muted">
+                    {task.territory.stateId} | {task.territory.lgaId} | {task.territory.wardId} | Due {task.dueAt ? new Date(task.dueAt).toLocaleString() : "not set"}
+                  </p>
+                  <div className="action-row">
+                    <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "IN_PROGRESS")}>Start</button>
+                    <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "BLOCKED")}>Block</button>
+                    <button className="button" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "DONE")}>Complete</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </section>
+
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "minmax(320px, 1fr) minmax(0, 1.5fr)" }}>
+        <section className="panel card">
+          <h2>Broadcast Message</h2>
+          <p className="muted">Send scoped instructions to roles across a territory, with optional task-status targeting for agents.</p>
+          <form className="form" onSubmit={handleCreateBroadcast}>
+            <label className="field">
+              <span>Title</span>
+              <input value={broadcastForm.title} onChange={(event) => setBroadcastForm({ ...broadcastForm, title: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Message</span>
+              <textarea value={broadcastForm.message} onChange={(event) => setBroadcastForm({ ...broadcastForm, message: event.target.value })} rows={4} required />
+            </label>
+            <label className="field">
+              <span>Audience</span>
+              <select value={broadcastForm.audience} onChange={(event) => setBroadcastForm({ ...broadcastForm, audience: event.target.value as BroadcastMessageItem["audience"] })}>
+                <option value="ALL">All roles</option>
+                <option value="ADMINS">Admins</option>
+                <option value="AGENTS">Agents</option>
+                <option value="VOTERS">Voters</option>
+                <option value="CANDIDATES">Candidates</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Task Status Filter</span>
+              <select value={broadcastForm.taskStatus} onChange={(event) => setBroadcastForm({ ...broadcastForm, taskStatus: event.target.value })}>
+                <option value="">No task filter</option>
+                <option value="TODO">Todo agents</option>
+                <option value="IN_PROGRESS">In-progress agents</option>
+                <option value="BLOCKED">Blocked agents</option>
+                <option value="DONE">Done agents</option>
+              </select>
+            </label>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+              <label className="field">
+                <span>State Id</span>
+                <input value={broadcastForm.stateId} onChange={(event) => setBroadcastForm({ ...broadcastForm, stateId: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>LGA Id</span>
+                <input value={broadcastForm.lgaId} onChange={(event) => setBroadcastForm({ ...broadcastForm, lgaId: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Ward Id</span>
+                <input value={broadcastForm.wardId} onChange={(event) => setBroadcastForm({ ...broadcastForm, wardId: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Polling Unit Id</span>
+                <input value={broadcastForm.pollingUnitId} onChange={(event) => setBroadcastForm({ ...broadcastForm, pollingUnitId: event.target.value })} />
+              </label>
+            </div>
+            <button className="button" type="submit">Send broadcast</button>
+          </form>
+        </section>
+
+        <section className="panel card">
+          <h2>Recent Broadcasts</h2>
+          {broadcasts.length === 0 ? (
+            <p className="muted">No broadcasts sent yet.</p>
+          ) : (
+            <div className="reward-list">
+              {broadcasts.slice(0, 8).map((broadcast) => (
+                <article key={broadcast.id} className="reward-item">
+                  <div className="section-head compact">
+                    <div>
+                      <strong>{broadcast.title}</strong>
+                      <p className="muted">{broadcast.audience} | {broadcast.recipientCount} recipients</p>
+                    </div>
+                    <span className="status-pill">{broadcast.taskStatus || "GENERAL"}</span>
+                  </div>
+                  <p>{broadcast.message}</p>
+                  <p className="muted">
+                    {broadcast.territory.stateId || "all states"} | {broadcast.territory.lgaId || "all LGAs"} | {new Date(broadcast.createdAt).toLocaleString()}
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

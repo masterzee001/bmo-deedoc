@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, NotificationItem } from "@pics-nigeria/shared";
+import type { AuthUserProfile, FieldTaskItem, NotificationItem } from "@pics-nigeria/shared";
 import {
   ApiError,
   createAgentActivity,
   createAgentIncident,
   fetchAgentActivities,
+  fetchAgentTasks,
   fetchCurrentUser,
   fetchNotifications,
+  updateAgentTask,
 } from "../../../lib/api";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
@@ -17,6 +19,7 @@ type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number
 export default function AgentDashboardPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [activities, setActivities] = useState<AgentActivityItem[]>([]);
+  const [tasks, setTasks] = useState<FieldTaskItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -40,9 +43,10 @@ export default function AgentDashboardPage() {
   });
 
   async function loadAgentDashboard(token: string) {
-    const [currentUser, recentActivities, notificationItems] = await Promise.all([
+    const [currentUser, recentActivities, taskItems, notificationItems] = await Promise.all([
       fetchCurrentUser(token),
       fetchAgentActivities(token),
+      fetchAgentTasks(token),
       fetchNotifications(token),
     ]);
 
@@ -52,7 +56,24 @@ export default function AgentDashboardPage() {
 
     setUser(currentUser);
     setActivities(recentActivities);
+    setTasks(taskItems);
     setNotifications(notificationItems);
+  }
+
+  async function handleTaskStatusUpdate(taskId: string, status: FieldTaskItem["status"]) {
+    const token = localStorage.getItem("picsNigeriaAgentToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      await updateAgentTask(token, taskId, { status });
+      await loadAgentDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Task update failed.");
+    }
   }
 
   useEffect(() => {
@@ -188,6 +209,10 @@ export default function AgentDashboardPage() {
           <h2>Recent Activity</h2>
           <div className="value">{activities.length}</div>
         </article>
+        <article className="panel card">
+          <h2>Open Tasks</h2>
+          <div className="value">{tasks.filter((task) => task.status !== "DONE").length}</div>
+        </article>
       </section>
 
       <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
@@ -258,6 +283,36 @@ export default function AgentDashboardPage() {
           <button className="button" type="submit">Submit incident</button>
         </form>
         {incidentMessage ? <p className="muted">{incidentMessage}</p> : null}
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <h2>Assigned Tasks</h2>
+        {tasks.length === 0 ? (
+          <p className="muted">No tasks assigned yet.</p>
+        ) : (
+          <div className="reward-list">
+            {tasks.map((task) => (
+              <article key={task.id} className="reward-item">
+                <div className="section-head compact">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p className="muted">{task.priority} | {task.status}</p>
+                  </div>
+                  <span className={`status-pill ${task.status === "DONE" ? "active" : task.status === "BLOCKED" ? "inactive" : ""}`}>{task.status}</span>
+                </div>
+                <p>{task.description}</p>
+                <p className="muted">
+                  Created by {task.creatorName} | Due {task.dueAt ? new Date(task.dueAt).toLocaleString() : "not set"}
+                </p>
+                <div className="action-row">
+                  <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "IN_PROGRESS")}>Start</button>
+                  <button className="button secondary" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "BLOCKED")}>Block</button>
+                  <button className="button" type="button" onClick={() => void handleTaskStatusUpdate(task.id, "DONE")}>Complete</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

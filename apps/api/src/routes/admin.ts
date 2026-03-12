@@ -4,7 +4,10 @@ import {
   AdminLevel,
   AgentActivityType,
   AssignmentPermissionType,
+  BroadcastAudience,
   CandidateOfficeType,
+  FieldTaskPriority,
+  FieldTaskStatus,
   IncidentSeverity,
   IncidentStatus,
   NotificationType,
@@ -25,11 +28,13 @@ import {
   serializeAdminMapSummary,
   serializeAdminSummary,
   serializeAgentActivitySummary,
+  serializeBroadcastMessageItem,
   serializeCandidateListItem,
   serializeFeedbackItem,
   serializeIncidentItem,
   serializePollingUnitCoverageSummary,
   serializeAuditLogItem,
+  serializeFieldTaskItem,
   serializeNotificationItem,
   serializeRewardRedemption,
   serializeTerritory,
@@ -268,6 +273,37 @@ const escalationSchema = z.object({
   escalationNote: z.string().trim().min(3).max(500),
 });
 
+const fieldTaskCreationSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(5).max(1000),
+  assignedToUserId: z.string().trim().min(1),
+  incidentId: z.string().trim().optional(),
+  priority: z.nativeEnum(FieldTaskPriority).default(FieldTaskPriority.MEDIUM),
+  dueAt: z.string().datetime().optional(),
+});
+
+const fieldTaskUpdateSchema = z.object({
+  status: z.nativeEnum(FieldTaskStatus).optional(),
+  priority: z.nativeEnum(FieldTaskPriority).optional(),
+  dueAt: z.string().datetime().nullable().optional(),
+  resolutionNote: z.string().trim().max(1000).nullable().optional(),
+});
+
+const broadcastCreationSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  message: z.string().trim().min(5).max(1500),
+  audience: z.nativeEnum(BroadcastAudience),
+  taskStatus: z.nativeEnum(FieldTaskStatus).optional(),
+  geoPoliticalZoneId: z.string().trim().optional(),
+  stateId: z.string().trim().optional(),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
+  lgaId: z.string().trim().optional(),
+  wardId: z.string().trim().optional(),
+  stateConstituencyId: z.string().trim().optional(),
+  pollingUnitId: z.string().trim().optional(),
+});
+
 function readRouteId(response: Response, value: string | string[] | undefined, label: string): string | null {
   if (typeof value !== "string" || value.trim().length === 0) {
     response.status(400).json({ message: `Invalid ${label}.` });
@@ -486,6 +522,81 @@ function getVoterScopeFilter(actor: Express.Request["authUser"]) {
     stateId: actor.adminProfile.stateId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
+  };
+}
+
+function getFieldTaskScopeFilter(actor: Express.Request["authUser"]) {
+  if (!actor || isSuperAdmin(actor)) {
+    return {};
+  }
+
+  if (!actor.adminProfile) {
+    return {};
+  }
+
+  return {
+    geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
+    stateId: actor.adminProfile.stateId || undefined,
+    senatorialDistrictId: actor.adminProfile.senatorialDistrictId || undefined,
+    federalConstituencyId: actor.adminProfile.federalConstituencyId || undefined,
+    lgaId: actor.adminProfile.lgaId || undefined,
+    wardId: actor.adminProfile.wardId || undefined,
+    stateConstituencyId: actor.adminProfile.stateConstituencyId || undefined,
+    pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
+  };
+}
+
+function buildBroadcastScope(data: z.infer<typeof broadcastCreationSchema>) {
+  return {
+    geoPoliticalZoneId: data.geoPoliticalZoneId || undefined,
+    stateId: data.stateId || undefined,
+    senatorialDistrictId: data.senatorialDistrictId || undefined,
+    federalConstituencyId: data.federalConstituencyId || undefined,
+    lgaId: data.lgaId || undefined,
+    wardId: data.wardId || undefined,
+    stateConstituencyId: data.stateConstituencyId || undefined,
+    pollingUnitId: data.pollingUnitId || undefined,
+  };
+}
+
+function buildBroadcastRecipientWhere(
+  audience: BroadcastAudience,
+  scope: ReturnType<typeof buildBroadcastScope>,
+  taskStatus?: FieldTaskStatus,
+) {
+  const adminClause = {
+    role: UserRole.ADMIN,
+    adminProfile: { is: scope },
+  };
+  const agentClause = {
+    role: UserRole.AGENT,
+    agentProfile: { is: scope },
+    ...(taskStatus ? { assignedTasks: { some: { status: taskStatus } } } : {}),
+  };
+  const voterClause = {
+    role: UserRole.VOTER,
+    voterProfile: { is: scope },
+  };
+  const candidateClause = {
+    role: UserRole.CANDIDATE,
+    candidateProfile: { is: scope },
+  };
+
+  if (audience === BroadcastAudience.ADMINS) {
+    return adminClause;
+  }
+  if (audience === BroadcastAudience.AGENTS) {
+    return agentClause;
+  }
+  if (audience === BroadcastAudience.VOTERS) {
+    return voterClause;
+  }
+  if (audience === BroadcastAudience.CANDIDATES) {
+    return candidateClause;
+  }
+
+  return {
+    OR: [adminClause, agentClause, voterClause, candidateClause],
   };
 }
 
@@ -2195,6 +2306,322 @@ router.patch("/incidents/:incidentId/escalate", requireAuth, requireRole("ADMIN"
   return response.json({
     message: "Incident escalated successfully.",
     incident: serializeIncidentItem(updatedIncident),
+  });
+});
+
+router.get("/tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const tasks = await prisma.fieldTask.findMany({
+    where: getFieldTaskScopeFilter(request.authUser),
+    include: {
+      createdByUser: { select: { name: true } },
+      assignedToUser: { select: { name: true } },
+    },
+    orderBy: [
+      { status: "asc" },
+      { priority: "desc" },
+      { createdAt: "desc" },
+    ],
+    take: 100,
+  });
+
+  return response.json({
+    tasks: tasks.map(serializeFieldTaskItem),
+  });
+});
+
+router.post("/tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = fieldTaskCreationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid task payload.", errors: parsed.error.flatten() });
+  }
+
+  const assignedAgent = await prisma.user.findUnique({
+    where: { id: parsed.data.assignedToUserId },
+    include: { agentProfile: true },
+  });
+
+  if (!assignedAgent?.agentProfile) {
+    return response.status(400).json({ message: "Assigned user must be an agent." });
+  }
+
+  if (request.authUser && !canCreateAgentInScope(request.authUser, assignedAgent.agentProfile)) {
+    return response.status(403).json({ message: "You cannot assign tasks outside your agent scope." });
+  }
+
+  let linkedIncident: Awaited<ReturnType<typeof prisma.incident.findUnique>> | null = null;
+  if (parsed.data.incidentId) {
+    linkedIncident = await prisma.incident.findUnique({ where: { id: parsed.data.incidentId } });
+    if (!linkedIncident) {
+      return response.status(404).json({ message: "Linked incident was not found." });
+    }
+
+    if (request.authUser && !isWithinAdminScope(request.authUser, linkedIncident)) {
+      return response.status(403).json({ message: "You cannot create tasks for this incident." });
+    }
+  }
+
+  const territory = linkedIncident
+    ? {
+        geoPoliticalZoneId: linkedIncident.geoPoliticalZoneId ?? assignedAgent.agentProfile.geoPoliticalZoneId,
+        stateId: linkedIncident.stateId,
+        senatorialDistrictId: linkedIncident.senatorialDistrictId ?? assignedAgent.agentProfile.senatorialDistrictId,
+        federalConstituencyId: assignedAgent.agentProfile.federalConstituencyId,
+        lgaId: linkedIncident.lgaId,
+        wardId: linkedIncident.wardId ?? assignedAgent.agentProfile.wardId,
+        stateConstituencyId: assignedAgent.agentProfile.stateConstituencyId,
+        pollingUnitId: linkedIncident.pollingUnitId ?? assignedAgent.agentProfile.pollingUnitId,
+      }
+    : {
+        geoPoliticalZoneId: assignedAgent.agentProfile.geoPoliticalZoneId,
+        stateId: assignedAgent.agentProfile.stateId,
+        senatorialDistrictId: assignedAgent.agentProfile.senatorialDistrictId,
+        federalConstituencyId: assignedAgent.agentProfile.federalConstituencyId,
+        lgaId: assignedAgent.agentProfile.lgaId,
+        wardId: assignedAgent.agentProfile.wardId,
+        stateConstituencyId: assignedAgent.agentProfile.stateConstituencyId,
+        pollingUnitId: assignedAgent.agentProfile.pollingUnitId,
+      };
+
+  const taskId = await prisma.$transaction(async (transaction) => {
+    const createdTask = await transaction.fieldTask.create({
+      data: {
+        title: parsed.data.title,
+        description: parsed.data.description,
+        assignedToUserId: assignedAgent.id,
+        createdByUserId: request.authUser!.id,
+        incidentId: parsed.data.incidentId || null,
+        priority: parsed.data.priority,
+        dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
+        geoPoliticalZoneId: territory.geoPoliticalZoneId || undefined,
+        stateId: territory.stateId,
+        senatorialDistrictId: territory.senatorialDistrictId || undefined,
+        federalConstituencyId: territory.federalConstituencyId || undefined,
+        lgaId: territory.lgaId,
+        wardId: territory.wardId,
+        stateConstituencyId: territory.stateConstituencyId || undefined,
+        pollingUnitId: territory.pollingUnitId || undefined,
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: assignedAgent.id,
+      type: NotificationType.SYSTEM,
+      title: "New field task assigned",
+      message: `${createdTask.title} has been assigned to you.`,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "FIELD_TASK_CREATED",
+      targetType: "FieldTask",
+      targetId: createdTask.id,
+      metadata: {
+        assignedToUserId: assignedAgent.id,
+        incidentId: parsed.data.incidentId || null,
+        priority: parsed.data.priority,
+      },
+    });
+
+    return createdTask.id;
+  });
+
+  const task = await prisma.fieldTask.findUnique({
+    where: { id: taskId },
+    include: {
+      createdByUser: { select: { name: true } },
+      assignedToUser: { select: { name: true } },
+    },
+  });
+
+  if (!task) {
+    return response.status(500).json({ message: "Field task was created but could not be loaded." });
+  }
+
+  return response.status(201).json({
+    message: "Field task created successfully.",
+    task: serializeFieldTaskItem(task),
+  });
+});
+
+router.patch("/tasks/:taskId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = fieldTaskUpdateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid task update payload.", errors: parsed.error.flatten() });
+  }
+
+  const taskId = readRouteId(response, request.params.taskId, "task id");
+  if (!taskId) {
+    return;
+  }
+
+  const task = await prisma.fieldTask.findUnique({
+    where: { id: taskId },
+    include: {
+      createdByUser: { select: { name: true } },
+      assignedToUser: { select: { name: true } },
+    },
+  });
+
+  if (!task) {
+    return response.status(404).json({ message: "Task was not found." });
+  }
+
+  if (request.authUser && !isWithinAdminScope(request.authUser, task)) {
+    return response.status(403).json({ message: "You cannot update this task." });
+  }
+
+  const updatedTask = await prisma.$transaction(async (transaction) => {
+    const nextTask = await transaction.fieldTask.update({
+      where: { id: task.id },
+      data: {
+        status: parsed.data.status,
+        priority: parsed.data.priority,
+        dueAt: parsed.data.dueAt === undefined ? undefined : parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
+        resolutionNote: parsed.data.resolutionNote === undefined ? undefined : parsed.data.resolutionNote,
+        completedAt:
+          parsed.data.status === undefined
+            ? undefined
+            : parsed.data.status === FieldTaskStatus.DONE
+              ? new Date()
+              : null,
+      },
+      include: {
+        createdByUser: { select: { name: true } },
+        assignedToUser: { select: { name: true } },
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: nextTask.assignedToUserId,
+      type: NotificationType.SYSTEM,
+      title: "Field task updated",
+      message: `${nextTask.title} is now ${nextTask.status}.`,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "FIELD_TASK_UPDATED",
+      targetType: "FieldTask",
+      targetId: nextTask.id,
+      metadata: {
+        status: nextTask.status,
+        priority: nextTask.priority,
+      },
+    });
+
+    return nextTask;
+  });
+
+  return response.json({
+    message: "Field task updated successfully.",
+    task: serializeFieldTaskItem(updatedTask),
+  });
+});
+
+router.get("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const broadcasts = await prisma.broadcastMessage.findMany({
+    where: getFieldTaskScopeFilter(request.authUser),
+    include: {
+      createdByUser: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  return response.json({
+    broadcasts: broadcasts.map(serializeBroadcastMessageItem),
+  });
+});
+
+router.post("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = broadcastCreationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid broadcast payload.", errors: parsed.error.flatten() });
+  }
+
+  const targetScope = buildBroadcastScope(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(targetScope);
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  if (request.authUser && !isWithinAdminScope(request.authUser, targetScope)) {
+    return response.status(403).json({ message: "You cannot broadcast outside your territory scope." });
+  }
+
+  if (parsed.data.taskStatus && !["AGENTS", "ALL"].includes(parsed.data.audience)) {
+    return response.status(400).json({ message: "Task-status targeting is only available for agent-inclusive broadcasts." });
+  }
+
+  const recipients = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      ...buildBroadcastRecipientWhere(parsed.data.audience, targetScope, parsed.data.taskStatus),
+    },
+    select: { id: true },
+    take: 500,
+  });
+
+  const recipientIds = recipients.map((recipient) => recipient.id);
+
+  const broadcastId = await prisma.$transaction(async (transaction) => {
+    const broadcast = await transaction.broadcastMessage.create({
+      data: {
+        title: parsed.data.title,
+        message: parsed.data.message,
+        audience: parsed.data.audience,
+        taskStatus: parsed.data.taskStatus || null,
+        createdByUserId: request.authUser!.id,
+        recipientCount: recipientIds.length,
+        geoPoliticalZoneId: targetScope.geoPoliticalZoneId,
+        stateId: targetScope.stateId,
+        senatorialDistrictId: targetScope.senatorialDistrictId,
+        federalConstituencyId: targetScope.federalConstituencyId,
+        lgaId: targetScope.lgaId,
+        wardId: targetScope.wardId,
+        stateConstituencyId: targetScope.stateConstituencyId,
+        pollingUnitId: targetScope.pollingUnitId,
+      },
+    });
+
+    for (const recipientId of recipientIds) {
+      await createNotification(transaction, {
+        userId: recipientId,
+        type: NotificationType.SYSTEM,
+        title: parsed.data.title,
+        message: parsed.data.message,
+      });
+    }
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "BROADCAST_CREATED",
+      targetType: "BroadcastMessage",
+      targetId: broadcast.id,
+      metadata: {
+        audience: parsed.data.audience,
+        recipientCount: recipientIds.length,
+        taskStatus: parsed.data.taskStatus || null,
+      },
+    });
+
+    return broadcast.id;
+  });
+
+  const broadcast = await prisma.broadcastMessage.findUnique({
+    where: { id: broadcastId },
+    include: {
+      createdByUser: { select: { name: true } },
+    },
+  });
+
+  if (!broadcast) {
+    return response.status(500).json({ message: "Broadcast was created but could not be loaded." });
+  }
+
+  return response.status(201).json({
+    message: "Broadcast sent successfully.",
+    broadcast: serializeBroadcastMessageItem(broadcast),
   });
 });
 

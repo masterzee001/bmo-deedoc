@@ -6,7 +6,9 @@ import type {
   AgentActivitySummary,
   AuthUserProfile,
   AuditLogItem,
+  BroadcastMessageItem,
   CandidateListItem,
+  FieldTaskItem,
   FeedbackListItem,
   GeoPoliticalZoneItem,
   IncidentListItem,
@@ -175,6 +177,26 @@ export async function fetchAdminRedemptions(token: string): Promise<RewardRedemp
 
   const payload = await readJson<{ redemptions: RewardRedemptionItem[] }>(response);
   return payload.redemptions;
+}
+
+export async function fetchAdminTasks(token: string): Promise<FieldTaskItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/tasks`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ tasks: FieldTaskItem[] }>(response);
+  return payload.tasks;
+}
+
+export async function fetchAdminBroadcasts(token: string): Promise<BroadcastMessageItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/broadcasts`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ broadcasts: BroadcastMessageItem[] }>(response);
+  return payload.broadcasts;
 }
 
 export async function fetchGeoPoliticalZones(token: string): Promise<GeoPoliticalZoneItem[]> {
@@ -483,6 +505,70 @@ export async function createAgent(token: string, body: {
   return readJson(response);
 }
 
+export async function createAdminTask(token: string, body: {
+  title: string;
+  description: string;
+  assignedToUserId: string;
+  incidentId?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  dueAt?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/tasks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; task: FieldTaskItem }>(response);
+}
+
+export async function createAdminBroadcast(token: string, body: {
+  title: string;
+  message: string;
+  audience: "ALL" | "ADMINS" | "AGENTS" | "VOTERS" | "CANDIDATES";
+  taskStatus?: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+  pollingUnitId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/broadcasts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; broadcast: BroadcastMessageItem }>(response);
+}
+
+export async function updateAdminTask(token: string, taskId: string, body: {
+  status?: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+  priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  dueAt?: string | null;
+  resolutionNote?: string | null;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; task: FieldTaskItem }>(response);
+}
+
 export async function updateAdminUser(token: string, userId: string, body: {
   name: string;
   adminLevel: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
@@ -745,6 +831,16 @@ export async function fetchAgentActivities(token: string): Promise<Array<{
   return payload.activities;
 }
 
+export async function fetchAgentTasks(token: string): Promise<FieldTaskItem[]> {
+  const response = await fetch(`${API_BASE_URL}/agent/tasks`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ tasks: FieldTaskItem[] }>(response);
+  return payload.tasks;
+}
+
 export async function createAgentActivity(
   token: string,
   path: "check-in" | "check-out" | "location",
@@ -790,4 +886,20 @@ export async function createAgentIncident(
   });
 
   return readJson(response);
+}
+
+export async function updateAgentTask(token: string, taskId: string, body: {
+  status: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+  resolutionNote?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/agent/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; task: FieldTaskItem }>(response);
 }

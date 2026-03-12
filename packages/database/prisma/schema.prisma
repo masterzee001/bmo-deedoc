@@ -102,6 +102,28 @@ enum NotificationType {
   SYSTEM
 }
 
+enum FieldTaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum FieldTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum BroadcastAudience {
+  ALL
+  ADMINS
+  AGENTS
+  VOTERS
+  CANDIDATES
+}
+
 model User {
   id                     String                     @id @default(cuid())
   name                   String
@@ -137,6 +159,9 @@ model User {
   reportedIncidents      Incident[]                 @relation("IncidentReporter")
   assignedIncidents      Incident[]                 @relation("IncidentAssignedAdmin")
   escalatedIncidents     Incident[]                 @relation("IncidentEscalatedBy")
+  assignedTasks          FieldTask[]                @relation("FieldTaskAssignee")
+  createdTasks           FieldTask[]                @relation("FieldTaskCreator")
+  createdBroadcasts      BroadcastMessage[]         @relation("BroadcastCreator")
   notifications          Notification[]
   auditLogs              AuditLog[]
   mediaAttachments       MediaAttachment[]          @relation("MediaUploader")
@@ -549,6 +574,7 @@ model Incident {
   pollingUnit    PollingUnit? @relation(fields: [pollingUnitId], references: [id])
   assignedAdminUser User?  @relation("IncidentAssignedAdmin", fields: [assignedAdminUserId], references: [id])
   escalatedByUser User? @relation("IncidentEscalatedBy", fields: [escalatedByUserId], references: [id])
+  tasks            FieldTask[]
   mediaAttachments MediaAttachment[]
 
   @@index([geoPoliticalZoneId])
@@ -561,6 +587,87 @@ model Incident {
   @@index([assignedAdminUserId])
   @@index([escalatedByUserId])
   @@index([createdAt])
+}
+
+model FieldTask {
+  id                   String            @id @default(cuid())
+  title                String
+  description          String
+  status               FieldTaskStatus   @default(TODO)
+  priority             FieldTaskPriority @default(MEDIUM)
+  createdByUserId      String
+  assignedToUserId     String
+  incidentId           String?
+  dueAt                DateTime?
+  completedAt          DateTime?
+  resolutionNote       String?
+  geoPoliticalZoneId   String?
+  stateId              String
+  senatorialDistrictId String?
+  federalConstituencyId String?
+  lgaId                String
+  wardId               String
+  stateConstituencyId  String?
+  pollingUnitId        String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  createdByUser        User              @relation("FieldTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  assignedToUser       User              @relation("FieldTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: Cascade)
+  incident             Incident?         @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  geoPoliticalZone     GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                State             @relation(fields: [stateId], references: [id])
+  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency  FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                  LGA               @relation(fields: [lgaId], references: [id])
+  ward                 Ward              @relation(fields: [wardId], references: [id])
+  stateConstituency    StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit          PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
+
+  @@index([assignedToUserId, status])
+  @@index([createdByUserId, createdAt])
+  @@index([incidentId])
+  @@index([stateId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+  @@index([priority])
+  @@index([dueAt])
+}
+
+model BroadcastMessage {
+  id                   String            @id @default(cuid())
+  title                String
+  message              String
+  audience             BroadcastAudience
+  taskStatus           FieldTaskStatus?
+  createdByUserId      String
+  recipientCount       Int               @default(0)
+  geoPoliticalZoneId   String?
+  stateId              String?
+  senatorialDistrictId String?
+  federalConstituencyId String?
+  lgaId                String?
+  wardId               String?
+  stateConstituencyId  String?
+  pollingUnitId        String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  createdByUser        User              @relation("BroadcastCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone     GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                State?            @relation(fields: [stateId], references: [id])
+  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency  FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                  LGA?              @relation(fields: [lgaId], references: [id])
+  ward                 Ward?             @relation(fields: [wardId], references: [id])
+  stateConstituency    StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit          PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
+
+  @@index([audience, createdAt])
+  @@index([taskStatus])
+  @@index([stateId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([pollingUnitId])
 }
 
 model RewardRedemption {
@@ -647,6 +754,8 @@ model GeoPoliticalZone {
   feedbackItems      Feedback[]
   agentActivities    AgentActivity[]
   incidents          Incident[]
+  fieldTasks         FieldTask[]
+  broadcastMessages  BroadcastMessage[]
 }
 
 model PoliticalParty {
@@ -680,6 +789,8 @@ model State {
   feedbackItems         Feedback[]
   agentActivities       AgentActivity[]
   incidents             Incident[]
+  fieldTasks            FieldTask[]
+  broadcastMessages     BroadcastMessage[]
   @@index([geoPoliticalZoneId])
 }
 
@@ -699,6 +810,8 @@ model SenatorialDistrict {
   posts                 Post[]
   feedbackItems         Feedback[]
   incidents             Incident[]
+  fieldTasks            FieldTask[]
+  broadcastMessages     BroadcastMessage[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -719,6 +832,8 @@ model FederalConstituency {
   voterProfiles        VoterProfile[]
   polls                Poll[]
   posts                Post[]
+  fieldTasks           FieldTask[]
+  broadcastMessages    BroadcastMessage[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -744,6 +859,8 @@ model LGA {
   feedbackItems       Feedback[]
   agentActivities     AgentActivity[]
   incidents           Incident[]
+  fieldTasks          FieldTask[]
+  broadcastMessages   BroadcastMessage[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -768,6 +885,8 @@ model Ward {
   feedbackItems     Feedback[]
   agentActivities   AgentActivity[]
   incidents         Incident[]
+  fieldTasks        FieldTask[]
+  broadcastMessages BroadcastMessage[]
 
   @@unique([lgaId, name])
   @@index([stateId])
@@ -789,6 +908,8 @@ model StateConstituency {
   voterProfiles     VoterProfile[]
   polls             Poll[]
   posts             Post[]
+  fieldTasks        FieldTask[]
+  broadcastMessages BroadcastMessage[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -814,6 +935,8 @@ model PollingUnit {
   feedbackItems     Feedback[]
   agentActivities   AgentActivity[]
   incidents         Incident[]
+  fieldTasks        FieldTask[]
+  broadcastMessages BroadcastMessage[]
 
   @@unique([wardId, name])
   @@index([stateId])
