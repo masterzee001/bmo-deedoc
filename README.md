@@ -37,7 +37,7 @@ Reward balances currently assume that `PENDING`, `APPROVED`, and `PAID` redempti
 ### `.env`
 
 ```env
-DATABASE_URL="file:./packages/database/prisma/dev.db"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pics_nigeria?schema=public"
 JWT_SECRET="replace-with-a-long-random-secret"
 JWT_EXPIRES_IN="7d"
 PORT=4000
@@ -60,12 +60,13 @@ NEXT_PUBLIC_API_BASE_URL="http://localhost:4000"
 - Import the repo in Render as a Blueprint or create a web service that uses the same commands:
   - Build command: `npm install && npm run build`
   - Start command: `npm run start:render --workspace @pics-nigeria/api`
-- This app uses SQLite, so Render must keep the attached disk from `render.yaml`.
+- This app is configured for PostgreSQL in production. Set `DATABASE_URL` in Render to your Render Postgres connection string.
 - Required secret env vars in Render:
+  - `DATABASE_URL`
   - `JWT_SECRET`
   - `SUPER_ADMIN_EMAIL`
   - `SUPER_ADMIN_PASSWORD`
-- The production database path is `file:/var/data/pics-nigeria.db`.
+- Use the Render Postgres internal connection string when the database and web service are in the same Render region.
 
 ### Vercel Web
 

@@ -9,17 +9,13 @@ services:
     startCommand: npm run start:render --workspace @pics-nigeria/api
     healthCheckPath: /health
     autoDeploy: true
-    disk:
-      name: pics-nigeria-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        value: file:/var/data/pics-nigeria.db
+        sync: false
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: JWT_SECRET

@@ -42,7 +42,7 @@ function requireValue(name: string, fallback?: string): string {
 }
 
 export const env: ApiEnv = {
-  DATABASE_URL: requireValue("DATABASE_URL", "file:./dev.db"),
+  DATABASE_URL: requireValue("DATABASE_URL"),
   JWT_SECRET: requireValue("JWT_SECRET"),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "7d",
   PORT: Number(process.env.PORT || 4000),
