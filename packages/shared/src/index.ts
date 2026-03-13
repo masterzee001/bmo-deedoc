@@ -128,6 +128,11 @@ export const CAMPAIGN_MEDIA_TYPES = [
   "DOCUMENT",
 ] as const;
 
+export const CAMPAIGN_EVENT_RSVP_STATUSES = [
+  "INTERESTED",
+  "GOING",
+] as const;
+
 export type UserRole = (typeof USER_ROLES)[number];
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export type CandidateOfficeType = (typeof CANDIDATE_OFFICE_TYPES)[number];
@@ -144,6 +149,7 @@ export type FieldTaskPriority = (typeof FIELD_TASK_PRIORITIES)[number];
 export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
 export type VoterEngagementTaskType = (typeof VOTER_ENGAGEMENT_TASK_TYPES)[number];
 export type CampaignMediaType = (typeof CAMPAIGN_MEDIA_TYPES)[number];
+export type CampaignEventRsvpStatus = (typeof CAMPAIGN_EVENT_RSVP_STATUSES)[number];
 
 export type TerritoryScope = {
   geoPoliticalZoneId?: string | null;
@@ -251,6 +257,7 @@ export type CandidatePublicProfile = CandidatePublicListItem & {
   instagramUrl: string | null;
   xUrl: string | null;
   materials: CampaignMaterialItem[];
+  upcomingEvents: CampaignEventItem[];
 };
 
 export type CandidateProfileEditorItem = {
@@ -424,6 +431,45 @@ export type PostListItem = {
 };
 
 export type CampaignMaterialItem = PostListItem;
+
+export type CampaignEventItem = {
+  id: string;
+  candidateUserId: string;
+  createdByUserId: string;
+  title: string;
+  description: string;
+  venue: string;
+  coverImageUrl: string | null;
+  registrationUrl: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  isPublished: boolean;
+  createdAt: string;
+  updatedAt: string;
+  territory: TerritorySummary;
+  territoryLabels: {
+    geoPoliticalZone: string | null;
+    state: string | null;
+    senatorialDistrict: string | null;
+    federalConstituency: string | null;
+    lga: string | null;
+    ward: string | null;
+    stateConstituency: string | null;
+    pollingUnit: string | null;
+  };
+  candidate: {
+    userId: string;
+    name: string;
+    portraitUrl: string | null;
+    officeType: CandidateOfficeType;
+    partyName: string | null;
+  } | null;
+  rsvp: {
+    status: CampaignEventRsvpStatus;
+    createdAt: string;
+  } | null;
+  rsvpCount: number;
+};
 
 export type AdminDashboardSummary = {
   totalVotersInScope: number;

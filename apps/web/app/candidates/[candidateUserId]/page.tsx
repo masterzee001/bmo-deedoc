@@ -183,6 +183,44 @@ export default function CandidateDetailPage({ params }: Props) {
           </div>
         )}
       </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <div>
+            <h2>Upcoming campaign events</h2>
+            <p className="muted">Territory-aware rallies, town halls, and mobilization moments published by this candidate.</p>
+          </div>
+        </div>
+        {candidate.upcomingEvents.length === 0 ? (
+          <section className="empty-state">
+            <h3>No published events yet</h3>
+            <p className="muted">Return later for campaign dates, venues, and mobilization updates.</p>
+          </section>
+        ) : (
+          <div className="campaign-event-grid">
+            {candidate.upcomingEvents.map((event) => (
+              <article key={event.id} className="campaign-event-card">
+                {event.coverImageUrl ? (
+                  <img src={event.coverImageUrl} alt={event.title} className="campaign-event-cover" />
+                ) : (
+                  <div className="campaign-event-cover fallback">Event</div>
+                )}
+                <div className="campaign-event-copy">
+                  <p className="eyebrow">{event.territoryLabels.state || "National campaign event"}</p>
+                  <h3>{event.title}</h3>
+                  <p>{event.description}</p>
+                  <p className="muted">{new Date(event.startsAt).toLocaleString()} | {event.venue}</p>
+                  {event.registrationUrl ? (
+                    <a href={event.registrationUrl} target="_blank" rel="noreferrer">
+                      Open registration
+                    </a>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

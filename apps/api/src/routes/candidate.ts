@@ -2,12 +2,13 @@ import { Router } from "express";
 import type { Response } from "express";
 import { AssignmentPermissionType, BroadcastAudience, NotificationType, Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
-import { CAMPAIGN_MEDIA_TYPES, type CampaignMediaType } from "@pics-nigeria/shared";
+import { CAMPAIGN_MEDIA_TYPES } from "@pics-nigeria/shared";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
 import {
   serializeBroadcastMessageItem,
+  serializeCampaignEventItem,
   serializeCandidateProfileEditorItem,
   serializeCandidatePublicListItem,
   serializeCandidatePublicProfile,
@@ -83,6 +84,44 @@ const publicCandidateQuerySchema = z.object({
 const candidateBroadcastSchema = z.object({
   title: z.string().trim().min(3),
   message: z.string().trim().min(10),
+});
+
+const candidateEventSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(10).max(2000),
+  venue: z.string().trim().min(3).max(160),
+  coverImageUrl: z.string().url().optional().or(z.literal("")),
+  registrationUrl: z.string().url().optional().or(z.literal("")),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime().optional().or(z.literal("")),
+  isPublished: z.boolean().optional(),
+}).superRefine((data, context) => {
+  if (data.endsAt && data.endsAt !== "" && new Date(data.endsAt) < new Date(data.startsAt)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "endsAt must be after startsAt.",
+      path: ["endsAt"],
+    });
+  }
+});
+
+const candidateEventUpdateSchema = z.object({
+  title: z.string().trim().min(3).max(120).optional(),
+  description: z.string().trim().min(10).max(2000).optional(),
+  venue: z.string().trim().min(3).max(160).optional(),
+  coverImageUrl: z.string().url().optional().or(z.literal("")),
+  registrationUrl: z.string().url().optional().or(z.literal("")),
+  startsAt: z.string().datetime().optional(),
+  endsAt: z.string().datetime().optional().or(z.literal("")).nullable(),
+  isPublished: z.boolean().optional(),
+}).superRefine((data, context) => {
+  if (data.startsAt && data.endsAt && data.endsAt !== "" && new Date(data.endsAt) < new Date(data.startsAt)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "endsAt must be after startsAt.",
+      path: ["endsAt"],
+    });
+  }
 });
 
 function buildCandidateScope(candidateProfile: NonNullable<Express.Request["authUser"]>["candidateProfile"]) {
@@ -166,6 +205,29 @@ const candidatePublicInclude = {
     },
   },
 } satisfies Prisma.UserInclude;
+
+const campaignEventInclude = {
+  candidateUser: {
+    include: {
+      candidateProfile: {
+        include: {
+          politicalParty: { select: { name: true } },
+        },
+      },
+    },
+  },
+  geoPoliticalZone: { select: { name: true } },
+  state: { select: { name: true } },
+  senatorialDistrict: { select: { name: true } },
+  federalConstituency: { select: { name: true } },
+  lga: { select: { name: true } },
+  ward: { select: { name: true } },
+  stateConstituency: { select: { name: true } },
+  pollingUnit: { select: { name: true } },
+  _count: {
+    select: { rsvps: true },
+  },
+} satisfies Prisma.CampaignEventInclude;
 
 type CandidateScopedProfile = {
   geoPoliticalZoneId: string | null;
@@ -301,6 +363,16 @@ router.get("/public/:candidateUserId", async (request, response) => {
     orderBy: { createdAt: "desc" },
     take: 50,
   });
+  const upcomingEvents = await prisma.campaignEvent.findMany({
+    where: {
+      candidateUserId,
+      isPublished: true,
+      startsAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+    },
+    include: campaignEventInclude,
+    orderBy: { startsAt: "asc" },
+    take: 12,
+  });
 
   return response.json({
     candidate: serializeCandidatePublicProfile({
@@ -333,6 +405,7 @@ router.get("/public/:candidateUserId", async (request, response) => {
       stateConstituency: candidate.candidateProfile.stateConstituency,
       pollingUnit: candidate.candidateProfile.pollingUnit,
       materials,
+      upcomingEvents,
     }),
   });
 });
@@ -418,6 +491,155 @@ router.patch("/profile", requireAuth, requireRole("CANDIDATE"), async (request, 
       pollingUnitId: updated.pollingUnitId,
     }),
   });
+});
+
+router.get("/events", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const events = await prisma.campaignEvent.findMany({
+    where: { candidateUserId: request.authUser!.id },
+    include: campaignEventInclude,
+    orderBy: [{ startsAt: "asc" }, { createdAt: "desc" }],
+  });
+
+  return response.json({
+    events: events.map(serializeCampaignEventItem),
+  });
+});
+
+router.post("/events", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const parsed = candidateEventSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid campaign event payload.", errors: parsed.error.flatten() });
+  }
+
+  const candidateProfile = request.authUser?.candidateProfile;
+  if (!candidateProfile) {
+    return response.status(403).json({ message: "Candidate profile is required." });
+  }
+
+  const eventTerritory = buildCandidateMaterialTerritory(candidateProfile);
+  const territoryReferenceError = await validateTerritoryReferences(eventTerritory);
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  const created = await prisma.$transaction(async (transaction) => {
+    const event = await transaction.campaignEvent.create({
+      data: {
+        candidateUserId: request.authUser!.id,
+        createdByUserId: request.authUser!.id,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        venue: parsed.data.venue,
+        coverImageUrl: toNullableString(parsed.data.coverImageUrl),
+        registrationUrl: toNullableString(parsed.data.registrationUrl),
+        startsAt: new Date(parsed.data.startsAt),
+        endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
+        isPublished: parsed.data.isPublished ?? false,
+        ...eventTerritory,
+      },
+      include: campaignEventInclude,
+    });
+
+    if (event.isPublished) {
+      const recipients = await transaction.user.findMany({
+        where: {
+          role: UserRole.VOTER,
+          isActive: true,
+          voterProfile: {
+            is: {
+              ...buildCandidateScope(candidateProfile),
+              contactConsent: true,
+            },
+          },
+        },
+        select: { id: true },
+        take: 500,
+      });
+
+      for (const recipient of recipients) {
+        await createNotification(transaction, {
+          userId: recipient.id,
+          type: NotificationType.SYSTEM,
+          title: `New event from ${request.authUser!.name}`,
+          message: event.title,
+        });
+      }
+    }
+
+    return event;
+  });
+
+  return response.status(201).json({
+    message: created.isPublished ? "Campaign event created and published." : "Campaign event saved as draft.",
+    event: serializeCampaignEventItem(created),
+  });
+});
+
+router.patch("/events/:eventId", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const parsed = candidateEventUpdateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid campaign event update payload.", errors: parsed.error.flatten() });
+  }
+
+  const eventId = readRouteId(response, request.params.eventId, "event id");
+  if (!eventId) {
+    return;
+  }
+
+  const existingEvent = await prisma.campaignEvent.findUnique({
+    where: { id: eventId },
+  });
+
+  if (!existingEvent || existingEvent.candidateUserId !== request.authUser!.id || !request.authUser!.candidateProfile) {
+    return response.status(404).json({ message: "Campaign event was not found." });
+  }
+
+  const nextStartsAt = parsed.data.startsAt ? new Date(parsed.data.startsAt) : existingEvent.startsAt;
+  const nextEndsAtRaw = parsed.data.endsAt === undefined ? existingEvent.endsAt : parsed.data.endsAt === null || parsed.data.endsAt === "" ? null : new Date(parsed.data.endsAt);
+  if (nextEndsAtRaw && nextEndsAtRaw < nextStartsAt) {
+    return response.status(400).json({ message: "endsAt must be after startsAt." });
+  }
+
+  const updated = await prisma.campaignEvent.update({
+    where: { id: eventId },
+    data: {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      venue: parsed.data.venue,
+      coverImageUrl: parsed.data.coverImageUrl === undefined ? undefined : toNullableString(parsed.data.coverImageUrl),
+      registrationUrl: parsed.data.registrationUrl === undefined ? undefined : toNullableString(parsed.data.registrationUrl),
+      startsAt: parsed.data.startsAt ? new Date(parsed.data.startsAt) : undefined,
+      endsAt: parsed.data.endsAt === undefined ? undefined : nextEndsAtRaw,
+      isPublished: parsed.data.isPublished,
+      ...buildCandidateMaterialTerritory(request.authUser!.candidateProfile),
+    },
+    include: campaignEventInclude,
+  });
+
+  return response.json({
+    message: "Campaign event updated successfully.",
+    event: serializeCampaignEventItem(updated),
+  });
+});
+
+router.delete("/events/:eventId", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const eventId = readRouteId(response, request.params.eventId, "event id");
+  if (!eventId) {
+    return;
+  }
+
+  const existingEvent = await prisma.campaignEvent.findUnique({
+    where: { id: eventId },
+    select: { candidateUserId: true },
+  });
+
+  if (!existingEvent || existingEvent.candidateUserId !== request.authUser!.id) {
+    return response.status(404).json({ message: "Campaign event was not found." });
+  }
+
+  await prisma.campaignEvent.delete({ where: { id: eventId } });
+
+  return response.json({ message: "Campaign event deleted successfully." });
 });
 
 router.post("/posts", requireAuth, requireRole("CANDIDATE", "ADMIN", "SUPER_ADMIN"), async (request, response) => {

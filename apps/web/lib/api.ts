@@ -7,6 +7,7 @@ import type {
   AuthUserProfile,
   AuditLogItem,
   BroadcastMessageItem,
+  CampaignEventItem,
   CandidateProfileEditorItem,
   CandidatePublicListItem,
   CandidatePublicProfile,
@@ -928,6 +929,16 @@ export async function fetchCandidateBroadcasts(token: string): Promise<Broadcast
   return payload.broadcasts;
 }
 
+export async function fetchCandidateEvents(token: string): Promise<CampaignEventItem[]> {
+  const response = await fetch(`${API_BASE_URL}/candidate/events`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ events: CampaignEventItem[] }>(response);
+  return payload.events;
+}
+
 export async function createCandidateBroadcast(
   token: string,
   body: { title: string; message: string },
@@ -966,6 +977,66 @@ export async function createCandidatePost(
   });
 
   return readJson<{ message: string; post: PostListItem }>(response);
+}
+
+export async function createCandidateEvent(
+  token: string,
+  body: {
+    title: string;
+    description: string;
+    venue: string;
+    coverImageUrl?: string;
+    registrationUrl?: string;
+    startsAt: string;
+    endsAt?: string;
+    isPublished?: boolean;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/candidate/events`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; event: CampaignEventItem }>(response);
+}
+
+export async function updateCandidateEvent(
+  token: string,
+  eventId: string,
+  body: {
+    title?: string;
+    description?: string;
+    venue?: string;
+    coverImageUrl?: string;
+    registrationUrl?: string;
+    startsAt?: string;
+    endsAt?: string | null;
+    isPublished?: boolean;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/candidate/events/${eventId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; event: CampaignEventItem }>(response);
+}
+
+export async function deleteCandidateEvent(token: string, eventId: string) {
+  const response = await fetch(`${API_BASE_URL}/candidate/events/${eventId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string }>(response);
 }
 
 export async function updateCandidatePost(
@@ -1062,6 +1133,16 @@ export async function fetchVoterPosts(token: string): Promise<PostListItem[]> {
   return payload.posts;
 }
 
+export async function fetchVoterEvents(token: string): Promise<CampaignEventItem[]> {
+  const response = await fetch(`${API_BASE_URL}/voter/events`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ events: CampaignEventItem[] }>(response);
+  return payload.events;
+}
+
 export async function fetchPublicCandidates(query?: {
   search?: string;
   stateId?: string;
@@ -1104,6 +1185,23 @@ export async function fetchVoterEngagementTasks(token: string): Promise<VoterEng
 
   const payload = await readJson<{ tasks: VoterEngagementTaskItem[] }>(response);
   return payload.tasks;
+}
+
+export async function rsvpToCampaignEvent(
+  token: string,
+  eventId: string,
+  body: { status: "INTERESTED" | "GOING" },
+) {
+  const response = await fetch(`${API_BASE_URL}/voter/events/${eventId}/rsvp`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; event: CampaignEventItem | null }>(response);
 }
 
 export async function claimVoterEngagementTask(token: string, taskId: string) {

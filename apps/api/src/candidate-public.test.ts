@@ -208,6 +208,81 @@ const cases: Case[] = [
       assert.ok(candidates.every((candidate) => candidate.officeType === "CHAIRMANSHIP"));
     },
   },
+  {
+    name: "public candidate profile shows only published upcoming events",
+    run: async () => {
+      const token = await login("candidate@pics.ng", "Candidate123!");
+
+      const published = await apiRequest("/candidate/events", {
+        method: "POST",
+        token,
+        body: {
+          title: `Town hall ${Date.now()}`,
+          description: "A published statewide town hall.",
+          venue: "Ikeja Civic Centre",
+          startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          isPublished: true,
+        },
+      });
+      assert.equal(published.status, 201);
+
+      const draft = await apiRequest("/candidate/events", {
+        method: "POST",
+        token,
+        body: {
+          title: `Draft strategy meeting ${Date.now()}`,
+          description: "This event should stay private.",
+          venue: "Campaign office",
+          startsAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+          isPublished: false,
+        },
+      });
+      assert.equal(draft.status, 201);
+
+      const publicProfile = await apiRequest("/candidate/public/seed-user-candidate");
+      assert.equal(publicProfile.status, 200);
+      const candidate = publicProfile.payload.candidate as { upcomingEvents?: Array<{ title?: string }> };
+      assert.ok(candidate.upcomingEvents?.some((item) => item.title?.startsWith("Town hall")));
+      assert.ok(!candidate.upcomingEvents?.some((item) => item.title?.startsWith("Draft strategy meeting")));
+    },
+  },
+  {
+    name: "voter sees only published in-scope events and can RSVP",
+    run: async () => {
+      const token = await login("candidate@pics.ng", "Candidate123!");
+      const voterToken = await login("voter@pics.ng", "Voter123!");
+
+      const event = await apiRequest("/candidate/events", {
+        method: "POST",
+        token,
+        body: {
+          title: `Ward rally ${Date.now()}`,
+          description: "A published rally visible to in-scope voters.",
+          venue: "Ward field office",
+          startsAt: new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(),
+          isPublished: true,
+        },
+      });
+      assert.equal(event.status, 201);
+      const created = event.payload.event as { id?: string } | undefined;
+      assert.ok(created?.id);
+
+      const visible = await apiRequest("/voter/events", {
+        token: voterToken,
+      });
+      assert.equal(visible.status, 200);
+      const events = visible.payload.events as Array<{ id?: string }>;
+      assert.ok(events.some((item) => item.id === created.id));
+
+      const rsvp = await apiRequest(`/voter/events/${created.id}/rsvp`, {
+        method: "POST",
+        token: voterToken,
+        body: { status: "GOING" },
+      });
+      assert.equal(rsvp.status, 201);
+      assert.equal(rsvp.payload.message, "Campaign event RSVP saved as going.");
+    },
+  },
 ];
 
 async function setup() {

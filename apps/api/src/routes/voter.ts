@@ -1,12 +1,14 @@
 import { Router } from "express";
 import type { Response } from "express";
-import { IncidentSeverity, IncidentStatus, IncidentType, NotificationType, RewardRedemptionStatus, RewardType } from "@prisma/client";
+import { CampaignEventRsvpStatus, IncidentSeverity, IncidentStatus, IncidentType, NotificationType, RewardRedemptionStatus, RewardType } from "@prisma/client";
 import { z } from "zod";
+import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
 import {
+  serializeCampaignEventItem,
   serializeFeedbackItem,
   serializeIncidentItem,
   serializePollListItem,
@@ -54,6 +56,33 @@ const redemptionSchema = z.object({
   amountRequested: z.number().positive().optional(),
   note: z.string().trim().max(500).optional(),
 });
+
+const campaignEventRsvpSchema = z.object({
+  status: z.enum(CAMPAIGN_EVENT_RSVP_STATUSES).default("GOING"),
+});
+
+const campaignEventInclude = {
+  candidateUser: {
+    include: {
+      candidateProfile: {
+        include: {
+          politicalParty: { select: { name: true } },
+        },
+      },
+    },
+  },
+  geoPoliticalZone: { select: { name: true } },
+  state: { select: { name: true } },
+  senatorialDistrict: { select: { name: true } },
+  federalConstituency: { select: { name: true } },
+  lga: { select: { name: true } },
+  ward: { select: { name: true } },
+  stateConstituency: { select: { name: true } },
+  pollingUnit: { select: { name: true } },
+  _count: {
+    select: { rsvps: true },
+  },
+} as const;
 
 function readRouteId(response: Response, value: string | string[] | undefined, label: string): string | null {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -309,6 +338,33 @@ router.get("/polls", requireAuth, requireRole("VOTER"), async (request, response
   });
 });
 
+router.get("/events", requireAuth, requireRole("VOTER"), async (request, response) => {
+  const voterProfile = request.authUser?.voterProfile;
+  if (!voterProfile) {
+    return response.json({ events: [] });
+  }
+
+  const events = await prisma.campaignEvent.findMany({
+    where: {
+      isPublished: true,
+      startsAt: { gte: new Date(Date.now() - 6 * 60 * 60 * 1000) },
+    },
+    include: {
+      ...campaignEventInclude,
+      rsvps: {
+        where: { voterUserId: request.authUser!.id },
+        select: { status: true, createdAt: true },
+      },
+    },
+    orderBy: { startsAt: "asc" },
+    take: 50,
+  });
+
+  return response.json({
+    events: events.filter((event) => matchesTaskScope(voterProfile, event)).map(serializeCampaignEventItem),
+  });
+});
+
 router.get("/engagement-tasks", requireAuth, requireRole("VOTER"), async (request, response) => {
   const voterProfile = request.authUser?.voterProfile;
 
@@ -408,6 +464,79 @@ router.post("/engagement-tasks/:taskId/claim", requireAuth, requireRole("VOTER")
 
   return response.status(201).json({
     message: "Engagement task claimed successfully.",
+  });
+});
+
+router.post("/events/:eventId/rsvp", requireAuth, requireRole("VOTER"), async (request, response) => {
+  const parsed = campaignEventRsvpSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid campaign event RSVP payload.", errors: parsed.error.flatten() });
+  }
+
+  const eventId = readRouteId(response, request.params.eventId, "event id");
+  if (!eventId) {
+    return;
+  }
+
+  const event = await prisma.campaignEvent.findUnique({
+    where: { id: eventId },
+    include: {
+      ...campaignEventInclude,
+      rsvps: {
+        where: { voterUserId: request.authUser!.id },
+        select: { status: true, createdAt: true },
+      },
+    },
+  });
+
+  if (!event || !event.isPublished) {
+    return response.status(404).json({ message: "Campaign event was not found." });
+  }
+
+  if (!matchesTaskScope(request.authUser?.voterProfile || null, event)) {
+    return response.status(403).json({ message: "This campaign event is outside your territory." });
+  }
+
+  const updated = await prisma.$transaction(async (transaction) => {
+    const rsvp = await transaction.campaignEventRsvp.upsert({
+      where: {
+        eventId_voterUserId: {
+          eventId,
+          voterUserId: request.authUser!.id,
+        },
+      },
+      create: {
+        eventId,
+        voterUserId: request.authUser!.id,
+        status: parsed.data.status as CampaignEventRsvpStatus,
+      },
+      update: {
+        status: parsed.data.status as CampaignEventRsvpStatus,
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: event.candidateUserId,
+      type: NotificationType.SYSTEM,
+      title: "New campaign event RSVP",
+      message: `${request.authUser!.name} responded ${parsed.data.status.toLowerCase()} to ${event.title}.`,
+    });
+
+    return transaction.campaignEvent.findUnique({
+      where: { id: eventId },
+      include: {
+        ...campaignEventInclude,
+        rsvps: {
+          where: { voterUserId: request.authUser!.id },
+          select: { status: true, createdAt: true },
+        },
+      },
+    });
+  });
+
+  return response.status(201).json({
+    message: `Campaign event RSVP saved as ${parsed.data.status.toLowerCase()}.`,
+    event: updated ? serializeCampaignEventItem(updated) : null,
   });
 });
 

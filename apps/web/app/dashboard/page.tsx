@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary, VoterEngagementTaskItem } from "@pics-nigeria/shared";
+import type { AuthUserProfile, CampaignEventItem, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary, VoterEngagementTaskItem } from "@pics-nigeria/shared";
 import {
   ApiError,
   claimVoterEngagementTask,
   createVoterRedemption,
   fetchCurrentUser,
   fetchNotifications,
+  fetchVoterEvents,
   fetchVoterEngagementTasks,
   fetchVoterPosts,
   fetchVoterRedemptions,
   fetchVoterRewards,
+  rsvpToCampaignEvent,
 } from "../../lib/api";
 
 export default function DashboardPage() {
@@ -22,6 +24,7 @@ export default function DashboardPage() {
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<PostListItem[]>([]);
+  const [events, setEvents] = useState<CampaignEventItem[]>([]);
   const [engagementTasks, setEngagementTasks] = useState<VoterEngagementTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,12 +32,13 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
 
   async function loadDashboard(token: string) {
-    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts, nextEngagementTasks] = await Promise.all([
+    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts, visibleEvents, nextEngagementTasks] = await Promise.all([
       fetchCurrentUser(token),
       fetchVoterRewards(token),
       fetchVoterRedemptions(token),
       fetchNotifications(token),
       fetchVoterPosts(token),
+      fetchVoterEvents(token),
       fetchVoterEngagementTasks(token),
     ]);
 
@@ -48,6 +52,7 @@ export default function DashboardPage() {
     setRedemptions(redemptionData.redemptions);
     setNotifications(notificationItems);
     setPosts(visiblePosts);
+    setEvents(visibleEvents);
     setEngagementTasks(nextEngagementTasks);
   }
 
@@ -115,6 +120,23 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleEventRsvp(eventId: string, status: "INTERESTED" | "GOING") {
+    const token = localStorage.getItem("picsNigeriaToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setMessage("");
+    try {
+      const result = await rsvpToCampaignEvent(token, eventId, { status });
+      setMessage(result.message);
+      await loadDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save your event RSVP.");
+    }
+  }
+
   if (loading) {
     return (
       <main className="shell">
@@ -142,11 +164,18 @@ export default function DashboardPage() {
 
   return (
     <main className="shell">
-      <section className="panel hero">
-        <h1>Welcome, {user.name}</h1>
-        <p>
-          Your referral code is <strong>{user.voterProfile?.referralCode}</strong>.
-        </p>
+      <section className="panel hero voter-hero">
+        <div>
+          <p className="eyebrow">Grassroots participation</p>
+          <h1>Welcome, {user.name}</h1>
+          <p>
+            Your referral code is <strong>{user.voterProfile?.referralCode}</strong>.
+          </p>
+        </div>
+        <div className="hero-callout">
+          <strong>{events.length}</strong>
+          <span>live events in your territory</span>
+        </div>
       </section>
 
       <section className="grid stats">
@@ -166,6 +195,46 @@ export default function DashboardPage() {
           <h2>Available Balance</h2>
           <div className="value">{balance.availablePoints}</div>
         </article>
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <div>
+            <h2>Upcoming campaign events</h2>
+            <p className="muted">RSVP to published rallies, ward meetings, town halls, and voter-mobilization activities in your territory.</p>
+          </div>
+          <Link href="/candidates">Browse candidates</Link>
+        </div>
+        {events.length === 0 ? (
+          <p className="muted">No published campaign events are currently visible in your territory.</p>
+        ) : (
+          <div className="campaign-event-grid">
+            {events.slice(0, 6).map((item) => (
+              <article key={item.id} className="campaign-event-card">
+                {item.coverImageUrl ? (
+                  <img src={item.coverImageUrl} alt={item.title} className="campaign-event-cover" />
+                ) : (
+                  <div className="campaign-event-cover fallback">Event</div>
+                )}
+                <div className="campaign-event-copy">
+                  <p className="eyebrow">{item.candidate?.name || "Campaign event"}</p>
+                  <h3>{item.title}</h3>
+                  <p>{item.description}</p>
+                  <p className="muted">{new Date(item.startsAt).toLocaleString()} | {item.venue}</p>
+                  <p className="muted">{item.territoryLabels.state || "National"}{item.territoryLabels.lga ? ` | ${item.territoryLabels.lga}` : ""}</p>
+                  <div className="action-row">
+                    <button className="button secondary" type="button" onClick={() => void handleEventRsvp(item.id, "INTERESTED")}>
+                      {item.rsvp?.status === "INTERESTED" ? "Interested" : "Mark interested"}
+                    </button>
+                    <button className="button" type="button" onClick={() => void handleEventRsvp(item.id, "GOING")}>
+                      {item.rsvp?.status === "GOING" ? "Going" : "RSVP going"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

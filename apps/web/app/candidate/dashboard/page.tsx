@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type {
   AuthUserProfile,
   BroadcastMessageItem,
+  CampaignEventItem,
   CandidateProfileEditorItem,
   CandidateVoterItem,
   FeedbackListItem,
@@ -15,9 +16,12 @@ import type {
 import {
   ApiError,
   createCandidateBroadcast,
+  createCandidateEvent,
   createCandidatePost,
+  deleteCandidateEvent,
   deleteCandidatePost,
   fetchCandidateBroadcasts,
+  fetchCandidateEvents,
   fetchCandidateFeedback,
   fetchCandidateIncidents,
   fetchCandidatePosts,
@@ -27,6 +31,7 @@ import {
   fetchNotifications,
   markAllNotificationsRead,
   updateCandidatePost,
+  updateCandidateEvent,
   updateCandidateProfile,
 } from "../../../lib/api";
 
@@ -44,6 +49,7 @@ type CandidateDashboardData = {
   currentUser: AuthUserProfile;
   profile: CandidateProfileEditorItem;
   nextPosts: PostListItem[];
+  nextEvents: CampaignEventItem[];
   nextBroadcasts: BroadcastMessageItem[];
   nextVoters: CandidateVoterItem[];
   nextFeedback: { totalFeedback: number; feedback: FeedbackListItem[] };
@@ -52,11 +58,12 @@ type CandidateDashboardData = {
 };
 
 async function loadCandidateDashboard(token: string): Promise<CandidateDashboardData> {
-  const [currentUser, profile, nextPosts, nextBroadcasts, nextVoters, nextFeedback, nextIncidents, nextNotifications] =
+  const [currentUser, profile, nextPosts, nextEvents, nextBroadcasts, nextVoters, nextFeedback, nextIncidents, nextNotifications] =
     await Promise.all([
       fetchCurrentUser(token),
       fetchCandidateProfileEditor(token),
       fetchCandidatePosts(token),
+      fetchCandidateEvents(token),
       fetchCandidateBroadcasts(token),
       fetchCandidateVoters(token),
       fetchCandidateFeedback(token),
@@ -72,6 +79,7 @@ async function loadCandidateDashboard(token: string): Promise<CandidateDashboard
     currentUser,
     profile,
     nextPosts,
+    nextEvents,
     nextBroadcasts,
     nextVoters,
     nextFeedback,
@@ -101,6 +109,7 @@ export default function CandidateDashboardPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [profile, setProfile] = useState<CandidateProfileEditorItem | null>(null);
   const [posts, setPosts] = useState<PostListItem[]>([]);
+  const [events, setEvents] = useState<CampaignEventItem[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastMessageItem[]>([]);
   const [voters, setVoters] = useState<CandidateVoterItem[]>([]);
   const [feedback, setFeedback] = useState<FeedbackListItem[]>([]);
@@ -114,8 +123,10 @@ export default function CandidateDashboardPage() {
   const [submittingProfile, setSubmittingProfile] = useState(false);
   const [submittingMaterial, setSubmittingMaterial] = useState(false);
   const [submittingBroadcast, setSubmittingBroadcast] = useState(false);
+  const [submittingEvent, setSubmittingEvent] = useState(false);
   const [markingNotifications, setMarkingNotifications] = useState(false);
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
     portraitUrl: "",
     campaignSlogan: "",
@@ -139,12 +150,23 @@ export default function CandidateDashboardPage() {
     title: "",
     message: "",
   });
+  const [eventForm, setEventForm] = useState({
+    title: "",
+    description: "",
+    venue: "",
+    coverImageUrl: "",
+    registrationUrl: "",
+    startsAt: "",
+    endsAt: "",
+    isPublished: true,
+  });
 
   async function hydrateDashboard(token: string) {
     const data = await loadCandidateDashboard(token);
     setUser(data.currentUser);
     setProfile(data.profile);
     setPosts(data.nextPosts);
+    setEvents(data.nextEvents);
     setBroadcasts(data.nextBroadcasts);
     setVoters(data.nextVoters);
     setFeedback(data.nextFeedback.feedback);
@@ -276,6 +298,65 @@ export default function CandidateDashboardPage() {
     }
   }
 
+  async function handleEventSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setError("");
+    setStatusMessage("");
+    setSubmittingEvent(true);
+
+    try {
+      if (editingEventId) {
+        await updateCandidateEvent(token, editingEventId, {
+          title: eventForm.title,
+          description: eventForm.description,
+          venue: eventForm.venue,
+          coverImageUrl: eventForm.coverImageUrl,
+          registrationUrl: eventForm.registrationUrl,
+          startsAt: new Date(eventForm.startsAt).toISOString(),
+          endsAt: eventForm.endsAt ? new Date(eventForm.endsAt).toISOString() : null,
+          isPublished: eventForm.isPublished,
+        });
+        setStatusMessage("Campaign event updated successfully.");
+      } else {
+        await createCandidateEvent(token, {
+          title: eventForm.title,
+          description: eventForm.description,
+          venue: eventForm.venue,
+          coverImageUrl: eventForm.coverImageUrl,
+          registrationUrl: eventForm.registrationUrl,
+          startsAt: new Date(eventForm.startsAt).toISOString(),
+          endsAt: eventForm.endsAt ? new Date(eventForm.endsAt).toISOString() : undefined,
+          isPublished: eventForm.isPublished,
+        });
+        setStatusMessage(eventForm.isPublished ? "Campaign event published successfully." : "Campaign event saved as draft.");
+      }
+
+      setEditingEventId(null);
+      setEventForm({
+        title: "",
+        description: "",
+        venue: "",
+        coverImageUrl: "",
+        registrationUrl: "",
+        startsAt: "",
+        endsAt: "",
+        isPublished: true,
+      });
+      await hydrateDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not save your campaign event.");
+    } finally {
+      setSubmittingEvent(false);
+    }
+  }
+
   async function handleMarkNotificationsRead() {
     const token = localStorage.getItem("picsNigeriaCandidateToken");
 
@@ -353,6 +434,61 @@ export default function CandidateDashboardPage() {
     }
   }
 
+  function beginEditEvent(item: CampaignEventItem) {
+    setEditingEventId(item.id);
+    setEventForm({
+      title: item.title,
+      description: item.description,
+      venue: item.venue,
+      coverImageUrl: item.coverImageUrl || "",
+      registrationUrl: item.registrationUrl || "",
+      startsAt: item.startsAt.slice(0, 16),
+      endsAt: item.endsAt ? item.endsAt.slice(0, 16) : "",
+      isPublished: item.isPublished,
+    });
+  }
+
+  async function handleToggleEvent(item: CampaignEventItem) {
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setError("");
+    setStatusMessage("");
+
+    try {
+      await updateCandidateEvent(token, item.id, { isPublished: !item.isPublished });
+      setStatusMessage(item.isPublished ? "Campaign event moved to draft." : "Campaign event published.");
+      await hydrateDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update campaign event status.");
+    }
+  }
+
+  async function handleDeleteEvent(eventId: string) {
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setError("");
+    setStatusMessage("");
+
+    try {
+      await deleteCandidateEvent(token, eventId);
+      if (editingEventId === eventId) {
+        setEditingEventId(null);
+      }
+      setStatusMessage("Campaign event deleted successfully.");
+      await hydrateDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not delete campaign event.");
+    }
+  }
+
   function handleLogout() {
     localStorage.removeItem("picsNigeriaCandidateToken");
     window.location.href = "/candidate/login";
@@ -426,12 +562,12 @@ export default function CandidateDashboardPage() {
           <div className="value">{posts.length}</div>
         </article>
         <article className="panel card">
-          <h2>Visible Feedback</h2>
-          <div className="value">{feedbackCount}</div>
+          <h2>Upcoming Events</h2>
+          <div className="value">{events.length}</div>
         </article>
         <article className="panel card">
-          <h2>Visible Incidents</h2>
-          <div className="value">{incidentCount}</div>
+          <h2>Visible Feedback</h2>
+          <div className="value">{feedbackCount}</div>
         </article>
         <article className="panel card">
           <h2>Consented Voters</h2>
@@ -600,6 +736,75 @@ export default function CandidateDashboardPage() {
         </section>
 
         <section className="panel card">
+          <h2>{editingEventId ? "Edit Campaign Event" : "Create Campaign Event"}</h2>
+          <p className="muted">Publish rallies, town halls, ward meetings, and mobilization activities inside your campaign territory.</p>
+          <form className="form" onSubmit={handleEventSubmit}>
+            <label className="field">
+              <span>Event title</span>
+              <input value={eventForm.title} onChange={(event) => setEventForm({ ...eventForm, title: event.target.value })} minLength={3} required />
+            </label>
+            <label className="field">
+              <span>Description</span>
+              <textarea rows={5} value={eventForm.description} onChange={(event) => setEventForm({ ...eventForm, description: event.target.value })} minLength={10} required />
+            </label>
+            <label className="field">
+              <span>Venue</span>
+              <input value={eventForm.venue} onChange={(event) => setEventForm({ ...eventForm, venue: event.target.value })} minLength={3} required />
+            </label>
+            <label className="field">
+              <span>Cover image URL</span>
+              <input value={eventForm.coverImageUrl} onChange={(event) => setEventForm({ ...eventForm, coverImageUrl: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Registration URL</span>
+              <input value={eventForm.registrationUrl} onChange={(event) => setEventForm({ ...eventForm, registrationUrl: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>Starts at</span>
+              <input type="datetime-local" value={eventForm.startsAt} onChange={(event) => setEventForm({ ...eventForm, startsAt: event.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Ends at</span>
+              <input type="datetime-local" value={eventForm.endsAt} onChange={(event) => setEventForm({ ...eventForm, endsAt: event.target.value })} />
+            </label>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={eventForm.isPublished}
+                onChange={(event) => setEventForm({ ...eventForm, isPublished: event.target.checked })}
+              />
+              <span>Publish for voter discovery</span>
+            </label>
+            <div className="action-row">
+              <button className="button" type="submit" disabled={submittingEvent}>
+                {submittingEvent ? "Saving..." : editingEventId ? "Update event" : "Create event"}
+              </button>
+              {editingEventId ? (
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    setEditingEventId(null);
+                    setEventForm({
+                      title: "",
+                      description: "",
+                      venue: "",
+                      coverImageUrl: "",
+                      registrationUrl: "",
+                      startsAt: "",
+                      endsAt: "",
+                      isPublished: true,
+                    });
+                  }}
+                >
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
+          </form>
+        </section>
+
+        <section className="panel card">
           <h2>Consent-Based Voter Messaging</h2>
           <p className="muted">This reaches only active voters in your territory who opted in during registration.</p>
           <form className="form" onSubmit={handleBroadcastSubmit}>
@@ -619,6 +824,39 @@ export default function CandidateDashboardPage() {
       </section>
 
       <section className="candidate-dashboard-grid">
+        <section className="panel card">
+          <h2>Campaign Events</h2>
+          {events.length === 0 ? (
+            <p className="muted">No campaign events yet. Publish your next town hall, ward meeting, or rally here.</p>
+          ) : (
+            <div className="campaign-event-grid compact">
+              {events.map((item) => (
+                <article key={item.id} className="campaign-event-card">
+                  {item.coverImageUrl ? (
+                    <img src={item.coverImageUrl} alt={item.title} className="campaign-event-cover" />
+                  ) : (
+                    <div className="campaign-event-cover fallback">Event</div>
+                  )}
+                  <div className="campaign-event-copy">
+                    <p className="eyebrow">{item.territoryLabels.state || "National event"}</p>
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
+                    <p className="muted">{new Date(item.startsAt).toLocaleString()} | {item.venue}</p>
+                    <p className="muted">{item.rsvpCount} RSVP{item.rsvpCount === 1 ? "" : "s"} | {item.isPublished ? "Published" : "Draft"}</p>
+                    <div className="action-row">
+                      <button className="button secondary" type="button" onClick={() => beginEditEvent(item)}>Edit</button>
+                      <button className="button secondary" type="button" onClick={() => void handleToggleEvent(item)}>
+                        {item.isPublished ? "Unpublish" : "Publish"}
+                      </button>
+                      <button className="button danger" type="button" onClick={() => void handleDeleteEvent(item.id)}>Delete</button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section className="panel card">
           <h2>Voter Register Snapshot</h2>
           {voters.length === 0 ? (

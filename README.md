@@ -357,6 +357,7 @@ Participation example:
 - posts now double as campaign materials and support `TEXT`, `IMAGE`, `VIDEO`, and `DOCUMENT` with `mediaUrl` / `thumbnailUrl`
 - candidate-authored materials are always scoped to the candidate's assigned campaign territory
 - voters and public discovery pages only see published materials
+- candidates can also create territory-scoped campaign events with draft/publish control and voter RSVP
 
 ```json
 {
@@ -374,8 +375,11 @@ Additional candidate routes:
 - `GET /candidate/profile`
 - `PATCH /candidate/profile`
 - `GET /candidate/posts`
+- `GET /candidate/events`
 - `PATCH /candidate/posts/:postId`
+- `PATCH /candidate/events/:eventId`
 - `DELETE /candidate/posts/:postId`
+- `DELETE /candidate/events/:eventId`
 - `GET /candidate/feedback`
 - `GET /candidate/incidents`
 - `GET /candidate/public`
@@ -388,12 +392,13 @@ Candidate public profile fields:
 - manifesto / bio summary
 - website / social links
 - publish toggle for voter discovery
+- upcoming published campaign events on the public profile
 
 Deploy note:
 
-- this feature adds the Prisma migration `20260313234500_add_candidate_public_profiles_and_media`
+- this feature adds the Prisma migrations `20260313234500_add_candidate_public_profiles_and_media` and `20260314001000_add_campaign_events`
 - redeploy the Render API so the migration is applied
-- redeploy the Vercel frontend so `/candidates`, `/candidates/[candidateUserId]`, and the updated candidate dashboard go live
+- redeploy the Vercel frontend so `/candidates`, `/candidates/[candidateUserId]`, `/dashboard`, and the updated candidate dashboard go live
 
 ## Voter routes
 
@@ -401,6 +406,8 @@ Deploy note:
 - `GET /voter/polls`
 - `POST /voter/polls/:pollId/respond`
 - `GET /voter/posts`
+- `GET /voter/events`
+- `POST /voter/events/:eventId/rsvp`
 - `POST /voter/feedback`
 - `POST /voter/incidents`
 - `POST /voter/redemptions`

@@ -4,6 +4,8 @@ import type {
   AgentActivitySummary,
   AuditLogItem,
   BroadcastMessageItem,
+  CampaignEventItem,
+  CampaignEventRsvpStatus,
   CampaignMediaType,
   CampaignMaterialItem,
   CandidateListItem,
@@ -23,7 +25,7 @@ import type {
   VoterEngagementTaskType,
   VoterEngagementTaskItem,
 } from "@pics-nigeria/shared";
-import { CAMPAIGN_MEDIA_TYPES, VOTER_ENGAGEMENT_TASK_TYPES } from "@pics-nigeria/shared";
+import { CAMPAIGN_EVENT_RSVP_STATUSES, CAMPAIGN_MEDIA_TYPES, VOTER_ENGAGEMENT_TASK_TYPES } from "@pics-nigeria/shared";
 
 function normalizeEngagementTaskType(value: string): VoterEngagementTaskType {
   if (VOTER_ENGAGEMENT_TASK_TYPES.includes(value as VoterEngagementTaskType)) {
@@ -39,6 +41,14 @@ function normalizeCampaignMediaType(value: string): CampaignMediaType {
   }
 
   throw new Error(`Unsupported campaign media type: ${value}`);
+}
+
+function normalizeCampaignEventRsvpStatus(value: string): CampaignEventRsvpStatus {
+  if (CAMPAIGN_EVENT_RSVP_STATUSES.includes(value as CampaignEventRsvpStatus)) {
+    return value as CampaignEventRsvpStatus;
+  }
+
+  throw new Error(`Unsupported campaign event RSVP status: ${value}`);
 }
 
 export function serializeTerritory(source: {
@@ -323,6 +333,7 @@ export function serializeCandidatePublicProfile(candidate: {
     logoUrl: string | null;
   } | null;
   materials: Parameters<typeof serializeCampaignMaterialItem>[0][];
+  upcomingEvents: Parameters<typeof serializeCampaignEventItem>[0][];
 }): CandidatePublicProfile {
   return {
     ...serializeCandidatePublicListItem(candidate),
@@ -331,6 +342,95 @@ export function serializeCandidatePublicProfile(candidate: {
     instagramUrl: candidate.instagramUrl,
     xUrl: candidate.xUrl,
     materials: candidate.materials.map(serializeCampaignMaterialItem),
+    upcomingEvents: candidate.upcomingEvents.map(serializeCampaignEventItem),
+  };
+}
+
+export function serializeCampaignEventItem(event: {
+  id: string;
+  candidateUserId: string;
+  createdByUserId: string;
+  title: string;
+  description: string;
+  venue: string;
+  coverImageUrl: string | null;
+  registrationUrl: string | null;
+  startsAt: Date;
+  endsAt: Date | null;
+  isPublished: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+  geoPoliticalZone?: { name: string } | null;
+  state?: { name: string } | null;
+  senatorialDistrict?: { name: string } | null;
+  federalConstituency?: { name: string } | null;
+  lga?: { name: string } | null;
+  ward?: { name: string } | null;
+  stateConstituency?: { name: string } | null;
+  pollingUnit?: { name: string } | null;
+  candidateUser?: {
+    id: string;
+    name: string;
+    candidateProfile?: {
+      officeType: CandidatePublicProfile["officeType"];
+      portraitUrl: string | null;
+      politicalParty?: { name: string } | null;
+    } | null;
+  } | null;
+  rsvps?: Array<{ status: string; createdAt: Date; voterUserId?: string }>;
+  _count?: { rsvps?: number };
+}): CampaignEventItem {
+  const firstRsvp = event.rsvps?.[0] || null;
+
+  return {
+    id: event.id,
+    candidateUserId: event.candidateUserId,
+    createdByUserId: event.createdByUserId,
+    title: event.title,
+    description: event.description,
+    venue: event.venue,
+    coverImageUrl: event.coverImageUrl ?? null,
+    registrationUrl: event.registrationUrl ?? null,
+    startsAt: event.startsAt.toISOString(),
+    endsAt: event.endsAt ? event.endsAt.toISOString() : null,
+    isPublished: event.isPublished,
+    createdAt: event.createdAt.toISOString(),
+    updatedAt: event.updatedAt.toISOString(),
+    territory: serializeTerritory(event),
+    territoryLabels: {
+      geoPoliticalZone: event.geoPoliticalZone?.name || null,
+      state: event.state?.name || null,
+      senatorialDistrict: event.senatorialDistrict?.name || null,
+      federalConstituency: event.federalConstituency?.name || null,
+      lga: event.lga?.name || null,
+      ward: event.ward?.name || null,
+      stateConstituency: event.stateConstituency?.name || null,
+      pollingUnit: event.pollingUnit?.name || null,
+    },
+    candidate: event.candidateUser
+      ? {
+          userId: event.candidateUser.id,
+          name: event.candidateUser.name,
+          portraitUrl: event.candidateUser.candidateProfile?.portraitUrl ?? null,
+          officeType: event.candidateUser.candidateProfile?.officeType || "PRESIDENTIAL",
+          partyName: event.candidateUser.candidateProfile?.politicalParty?.name ?? null,
+        }
+      : null,
+    rsvp: firstRsvp
+      ? {
+          status: normalizeCampaignEventRsvpStatus(firstRsvp.status),
+          createdAt: firstRsvp.createdAt.toISOString(),
+        }
+      : null,
+    rsvpCount: event._count?.rsvps || 0,
   };
 }
 
