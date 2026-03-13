@@ -50,8 +50,8 @@ const registerVoterSchema = z.object({
   stateConstituencyId: z.string().trim().optional(),
   pollingUnitId: z.string().trim().min(1),
   referredByCode: z.string().trim().min(4).optional(),
-  acceptTerms: z.literal(true),
-  contactConsent: z.literal(true),
+  acceptTerms: z.boolean().optional(),
+  contactConsent: z.boolean().optional(),
 });
 
 router.post("/login", async (request, response) => {
@@ -254,6 +254,13 @@ router.post("/register-voter", async (request, response) => {
     return response.status(400).json({ message: "Invalid voter registration payload.", errors: parsed.error.flatten() });
   }
 
+  // Legacy frontend bundles may omit these fields until all public clients refresh.
+  if (parsed.data.acceptTerms === false || parsed.data.contactConsent === false) {
+    return response.status(400).json({
+      message: "You must accept the terms and consent agreement to register.",
+    });
+  }
+
   const email = normalizeEmail(parsed.data.email);
   const voterCardNumber = parsed.data.voterCardNumber.trim().toUpperCase();
 
@@ -340,7 +347,7 @@ router.post("/register-voter", async (request, response) => {
     voterCardNumber,
     referralCode,
     referredByUserId: referrer?.id || null,
-    contactConsent: parsed.data.contactConsent,
+    contactConsent: parsed.data.contactConsent ?? true,
     termsAcceptedAt: new Date(),
     stateId: parsed.data.stateId,
     senatorialDistrictId: parsed.data.senatorialDistrictId || null,
