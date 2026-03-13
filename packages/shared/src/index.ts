@@ -278,9 +278,23 @@ export type VoterUserItem = {
   userId: string;
   name: string;
   email: string;
+  phone: string | null;
   isActive: boolean;
   voterCardNumber: string;
   referralCode: string;
+  contactConsent: boolean;
+  termsAcceptedAt: string | null;
+  territory: TerritorySummary;
+};
+
+export type CandidateVoterItem = {
+  userId: string;
+  name: string;
+  emailMask: string;
+  phoneMask: string;
+  voterCardNumber: string;
+  contactConsent: boolean;
+  termsAcceptedAt: string | null;
   territory: TerritorySummary;
 };
 

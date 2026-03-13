@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { AssignmentPermissionType, NotificationType, UserRole } from "@prisma/client";
+import { AssignmentPermissionType, BroadcastAudience, NotificationType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
-import { serializeFeedbackItem, serializeIncidentItem, serializePostListItem } from "../lib/serializers";
+import { serializeBroadcastMessageItem, serializeFeedbackItem, serializeIncidentItem, serializePostListItem, serializeTerritory } from "../lib/serializers";
 import { canViewCandidate, isAdminUser, isCandidateUser } from "../scope";
 import { validateTerritoryReferences } from "../lib/territory";
 
@@ -24,6 +24,46 @@ const postSchema = z.object({
   isPublished: z.boolean().optional(),
   audience: z.enum(["VOTERS", "AGENTS", "ALL"]).optional(),
 });
+
+const candidateBroadcastSchema = z.object({
+  title: z.string().trim().min(3),
+  message: z.string().trim().min(10),
+});
+
+function buildCandidateScope(candidateProfile: NonNullable<Express.Request["authUser"]>["candidateProfile"]) {
+  return {
+    geoPoliticalZoneId: candidateProfile?.geoPoliticalZoneId || undefined,
+    stateId: candidateProfile?.stateId || undefined,
+    senatorialDistrictId: candidateProfile?.senatorialDistrictId || undefined,
+    federalConstituencyId: candidateProfile?.federalConstituencyId || undefined,
+    lgaId: candidateProfile?.lgaId || undefined,
+    wardId: candidateProfile?.wardId || undefined,
+    stateConstituencyId: candidateProfile?.stateConstituencyId || undefined,
+    pollingUnitId: candidateProfile?.pollingUnitId || undefined,
+  };
+}
+
+function maskEmail(value: string): string {
+  const [localPart, domain] = value.split("@");
+  if (!localPart || !domain) {
+    return value;
+  }
+
+  return `${localPart.slice(0, 2)}${"*".repeat(Math.max(localPart.length - 2, 2))}@${domain}`;
+}
+
+function maskPhone(value: string | null): string {
+  if (!value) {
+    return "Not provided";
+  }
+
+  const digits = value.replace(/\s+/g, "");
+  if (digits.length <= 4) {
+    return "*".repeat(digits.length);
+  }
+
+  return `${"*".repeat(Math.max(digits.length - 4, 4))}${digits.slice(-4)}`;
+}
 
 async function canAdminPublishForCandidate(actorId: string, candidateUserId: string) {
   const assignment = await prisma.adminCandidateAssignment.findFirst({
@@ -119,12 +159,14 @@ router.post("/posts", requireAuth, requireRole("CANDIDATE", "ADMIN", "SUPER_ADMI
 
     if (isCandidateUser(actor) && createdPost.isPublished && parsed.data.audience) {
       const recipientWhere = {
+        ...(createdPost.geoPoliticalZoneId ? { geoPoliticalZoneId: createdPost.geoPoliticalZoneId } : {}),
         ...(createdPost.stateId ? { stateId: createdPost.stateId } : {}),
         ...(createdPost.senatorialDistrictId ? { senatorialDistrictId: createdPost.senatorialDistrictId } : {}),
         ...(createdPost.federalConstituencyId ? { federalConstituencyId: createdPost.federalConstituencyId } : {}),
         ...(createdPost.lgaId ? { lgaId: createdPost.lgaId } : {}),
         ...(createdPost.wardId ? { wardId: createdPost.wardId } : {}),
         ...(createdPost.stateConstituencyId ? { stateConstituencyId: createdPost.stateConstituencyId } : {}),
+        ...(createdPost.pollingUnitId ? { pollingUnitId: createdPost.pollingUnitId } : {}),
       };
 
       const recipientIds = new Set<string>();
@@ -134,7 +176,10 @@ router.post("/posts", requireAuth, requireRole("CANDIDATE", "ADMIN", "SUPER_ADMI
           where: {
             role: UserRole.VOTER,
             voterProfile: {
-              is: recipientWhere,
+              is: {
+                ...recipientWhere,
+                contactConsent: true,
+              },
             },
           },
           select: { id: true },
@@ -245,6 +290,141 @@ router.get("/incidents", requireAuth, requireRole("CANDIDATE"), async (request, 
   return response.json({
     totalIncidents: incidents.length,
     incidents: incidents.map(serializeIncidentItem),
+  });
+});
+
+router.get("/voters", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const candidateProfile = request.authUser?.candidateProfile;
+
+  if (!candidateProfile) {
+    return response.status(403).json({ message: "Candidate profile is required." });
+  }
+
+  const scope = buildCandidateScope(candidateProfile);
+  const voters = await prisma.user.findMany({
+    where: {
+      role: UserRole.VOTER,
+      isActive: true,
+      voterProfile: {
+        is: {
+          ...scope,
+          contactConsent: true,
+        },
+      },
+    },
+    include: { voterProfile: true },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+
+  return response.json({
+    voters: voters
+      .filter((voter) => voter.voterProfile)
+      .map((voter) => ({
+        userId: voter.id,
+        name: voter.name,
+        emailMask: maskEmail(voter.email),
+        phoneMask: maskPhone(voter.phone),
+        voterCardNumber: voter.voterProfile!.voterCardNumber,
+        contactConsent: voter.voterProfile!.contactConsent,
+        termsAcceptedAt: voter.voterProfile!.termsAcceptedAt?.toISOString() || null,
+        territory: serializeTerritory(voter.voterProfile!),
+      })),
+  });
+});
+
+router.get("/broadcasts", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const broadcasts = await prisma.broadcastMessage.findMany({
+    where: {
+      createdByUserId: request.authUser!.id,
+      audience: BroadcastAudience.VOTERS,
+    },
+    include: {
+      createdByUser: { select: { name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  return response.json({
+    broadcasts: broadcasts.map(serializeBroadcastMessageItem),
+  });
+});
+
+router.post("/broadcasts", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const parsed = candidateBroadcastSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid broadcast payload.", errors: parsed.error.flatten() });
+  }
+
+  const candidateProfile = request.authUser?.candidateProfile;
+
+  if (!candidateProfile) {
+    return response.status(403).json({ message: "Candidate profile is required." });
+  }
+
+  const scope = buildCandidateScope(candidateProfile);
+  const recipients = await prisma.user.findMany({
+    where: {
+      role: UserRole.VOTER,
+      isActive: true,
+      voterProfile: {
+        is: {
+          ...scope,
+          contactConsent: true,
+        },
+      },
+    },
+    select: { id: true },
+    take: 500,
+  });
+
+  const recipientIds = recipients.map((recipient) => recipient.id);
+  const broadcastId = await prisma.$transaction(async (transaction) => {
+    const broadcast = await transaction.broadcastMessage.create({
+      data: {
+        title: parsed.data.title,
+        message: parsed.data.message,
+        audience: BroadcastAudience.VOTERS,
+        createdByUserId: request.authUser!.id,
+        recipientCount: recipientIds.length,
+        geoPoliticalZoneId: scope.geoPoliticalZoneId || null,
+        stateId: scope.stateId || null,
+        senatorialDistrictId: scope.senatorialDistrictId || null,
+        federalConstituencyId: scope.federalConstituencyId || null,
+        lgaId: scope.lgaId || null,
+        wardId: scope.wardId || null,
+        stateConstituencyId: scope.stateConstituencyId || null,
+        pollingUnitId: scope.pollingUnitId || null,
+      },
+    });
+
+    for (const recipientId of recipientIds) {
+      await createNotification(transaction, {
+        userId: recipientId,
+        type: NotificationType.SYSTEM,
+        title: parsed.data.title,
+        message: parsed.data.message,
+      });
+    }
+
+    return broadcast.id;
+  });
+
+  const broadcast = await prisma.broadcastMessage.findUnique({
+    where: { id: broadcastId },
+    include: {
+      createdByUser: { select: { name: true } },
+    },
+  });
+
+  if (!broadcast) {
+    return response.status(500).json({ message: "Broadcast was created but could not be loaded." });
+  }
+
+  return response.status(201).json({
+    message: "Campaign message sent to consented voters.",
+    broadcast: serializeBroadcastMessageItem(broadcast),
   });
 });
 

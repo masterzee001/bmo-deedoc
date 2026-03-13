@@ -7,6 +7,7 @@ import type {
   AuthUserProfile,
   AuditLogItem,
   BroadcastMessageItem,
+  CandidateVoterItem,
   CandidateListItem,
   FieldTaskItem,
   FeedbackListItem,
@@ -91,6 +92,8 @@ export async function registerVoterUser(body: {
   wardId: string;
   pollingUnitId: string;
   referredByCode?: string;
+  acceptTerms: true;
+  contactConsent: true;
 }): Promise<{ message: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
     method: "POST",
@@ -479,6 +482,30 @@ export async function fetchVoters(token: string): Promise<VoterUserItem[]> {
   return payload.voters;
 }
 
+export async function downloadSuperAdminVoterContacts(token: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/admin/voters/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    let message = "Request failed.";
+
+    try {
+      const payload = await response.json();
+      message = payload.message || message;
+      throw new ApiError(message, response.status, payload);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      throw new ApiError(message, response.status);
+    }
+  }
+
+  return response.blob();
+}
+
 export async function createGeoPoliticalZone(token: string, body: { id: string; name: string }) {
   const response = await fetch(`${API_BASE_URL}/admin/geo-political-zones`, {
     method: "POST",
@@ -802,6 +829,42 @@ export async function fetchCandidatePosts(token: string): Promise<PostListItem[]
 
   const payload = await readJson<{ posts: PostListItem[] }>(response);
   return payload.posts;
+}
+
+export async function fetchCandidateVoters(token: string): Promise<CandidateVoterItem[]> {
+  const response = await fetch(`${API_BASE_URL}/candidate/voters`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ voters: CandidateVoterItem[] }>(response);
+  return payload.voters;
+}
+
+export async function fetchCandidateBroadcasts(token: string): Promise<BroadcastMessageItem[]> {
+  const response = await fetch(`${API_BASE_URL}/candidate/broadcasts`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ broadcasts: BroadcastMessageItem[] }>(response);
+  return payload.broadcasts;
+}
+
+export async function createCandidateBroadcast(
+  token: string,
+  body: { title: string; message: string },
+): Promise<{ message: string; broadcast: BroadcastMessageItem }> {
+  const response = await fetch(`${API_BASE_URL}/candidate/broadcasts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
 }
 
 export async function createCandidatePost(

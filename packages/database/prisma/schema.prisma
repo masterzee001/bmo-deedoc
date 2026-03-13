@@ -285,6 +285,8 @@ model VoterProfile {
   voterCardNumber  String   @unique
   referralCode     String   @unique
   referredByUserId String?
+  contactConsent   Boolean  @default(false)
+  termsAcceptedAt  DateTime?
   geoPoliticalZoneId String?
   stateId          String
   senatorialDistrictId String?

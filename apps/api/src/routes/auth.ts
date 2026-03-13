@@ -49,6 +49,8 @@ const registerVoterSchema = z.object({
   stateConstituencyId: z.string().trim().optional(),
   pollingUnitId: z.string().trim().min(1),
   referredByCode: z.string().trim().min(4).optional(),
+  acceptTerms: z.literal(true),
+  contactConsent: z.literal(true),
 });
 
 router.post("/login", async (request, response) => {
@@ -251,6 +253,24 @@ router.post("/register-voter", async (request, response) => {
     return response.status(400).json({ message: "Territory selection is inconsistent." });
   }
 
+  const pollingUnit = await prisma.pollingUnit.findUnique({
+    where: { id: parsed.data.pollingUnitId },
+    include: { ward: true },
+  });
+
+  if (!pollingUnit) {
+    return response.status(400).json({ message: "Selected polling unit does not exist." });
+  }
+
+  if (
+    pollingUnit.wardId !== parsed.data.wardId ||
+    pollingUnit.lgaId !== parsed.data.lgaId ||
+    pollingUnit.stateId !== parsed.data.stateId ||
+    pollingUnit.ward.lgaId !== parsed.data.lgaId
+  ) {
+    return response.status(400).json({ message: "Polling unit does not belong to the selected ward." });
+  }
+
   let referrer: { id: string; email: string } | null = null;
   const referralCodeInput = parsed.data.referredByCode?.trim().toUpperCase();
 
@@ -281,6 +301,8 @@ router.post("/register-voter", async (request, response) => {
     voterCardNumber,
     referralCode,
     referredByUserId: referrer?.id || null,
+    contactConsent: parsed.data.contactConsent,
+    termsAcceptedAt: new Date(),
     stateId: parsed.data.stateId,
     senatorialDistrictId: parsed.data.senatorialDistrictId || null,
     federalConstituencyId: parsed.data.federalConstituencyId || null,

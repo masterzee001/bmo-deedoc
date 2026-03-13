@@ -42,6 +42,7 @@ import {
   createCandidate,
   createGeoPoliticalZone,
   createPoliticalParty,
+  downloadSuperAdminVoterContacts,
   deleteGeoPoliticalZone,
   deletePoliticalParty,
   fetchAdminAgentActivitySummaries,
@@ -268,6 +269,7 @@ export default function AdminDashboardPage() {
     pollingUnitId: "",
   });
   const [loading, setLoading] = useState(true);
+  const [exportingVoterContacts, setExportingVoterContacts] = useState(false);
   const [error, setError] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
   const [profileForm, setProfileForm] = useState({ name: "", email: "", phone: "" });
@@ -607,6 +609,33 @@ export default function AdminDashboardPage() {
       setAdminMessage("Broadcast sent.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not send broadcast.");
+    }
+  }
+
+  async function handleExportVoterContacts() {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setError("");
+    setAdminMessage("");
+    setExportingVoterContacts(true);
+
+    try {
+      const blob = await downloadSuperAdminVoterContacts(token);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `voters-consented-${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
+      window.URL.revokeObjectURL(url);
+      setAdminMessage("Consented voter contacts exported successfully.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not export voter contacts.");
+    } finally {
+      setExportingVoterContacts(false);
     }
   }
 
@@ -1211,6 +1240,11 @@ export default function AdminDashboardPage() {
         <article className="panel card">
           <h2>Voters</h2>
           <div className="value">{summary.totalVotersInScope}</div>
+          {user.role === "SUPER_ADMIN" ? (
+            <button className="button secondary" type="button" onClick={() => void handleExportVoterContacts()} disabled={exportingVoterContacts}>
+              {exportingVoterContacts ? "Exporting..." : "Export consented contacts"}
+            </button>
+          ) : null}
         </article>
         <article className="panel card">
           <h2>Agents</h2>

@@ -2,13 +2,16 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, FeedbackListItem, IncidentListItem, NotificationItem, PostListItem } from "@pics-nigeria/shared";
+import type { AuthUserProfile, BroadcastMessageItem, CandidateVoterItem, FeedbackListItem, IncidentListItem, NotificationItem, PostListItem } from "@pics-nigeria/shared";
 import {
   ApiError,
+  createCandidateBroadcast,
   createCandidatePost,
+  fetchCandidateBroadcasts,
   fetchCandidateFeedback,
   fetchCandidateIncidents,
   fetchCandidatePosts,
+  fetchCandidateVoters,
   fetchCurrentUser,
   fetchNotifications,
   markAllNotificationsRead,
@@ -17,15 +20,19 @@ import {
 type CandidateDashboardData = {
   currentUser: AuthUserProfile;
   nextPosts: PostListItem[];
+  nextBroadcasts: BroadcastMessageItem[];
+  nextVoters: CandidateVoterItem[];
   nextFeedback: { totalFeedback: number; feedback: FeedbackListItem[] };
   nextIncidents: { totalIncidents: number; incidents: IncidentListItem[] };
   nextNotifications: NotificationItem[];
 };
 
 async function loadCandidateDashboard(token: string): Promise<CandidateDashboardData> {
-  const [currentUser, nextPosts, nextFeedback, nextIncidents, nextNotifications] = await Promise.all([
+  const [currentUser, nextPosts, nextBroadcasts, nextVoters, nextFeedback, nextIncidents, nextNotifications] = await Promise.all([
     fetchCurrentUser(token),
     fetchCandidatePosts(token),
+    fetchCandidateBroadcasts(token),
+    fetchCandidateVoters(token),
     fetchCandidateFeedback(token),
     fetchCandidateIncidents(token),
     fetchNotifications(token),
@@ -38,6 +45,8 @@ async function loadCandidateDashboard(token: string): Promise<CandidateDashboard
   return {
     currentUser,
     nextPosts,
+    nextBroadcasts,
+    nextVoters,
     nextFeedback,
     nextIncidents,
     nextNotifications,
@@ -47,6 +56,8 @@ async function loadCandidateDashboard(token: string): Promise<CandidateDashboard
 export default function CandidateDashboardPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [posts, setPosts] = useState<PostListItem[]>([]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastMessageItem[]>([]);
+  const [voters, setVoters] = useState<CandidateVoterItem[]>([]);
   const [feedback, setFeedback] = useState<FeedbackListItem[]>([]);
   const [feedbackCount, setFeedbackCount] = useState(0);
   const [incidents, setIncidents] = useState<IncidentListItem[]>([]);
@@ -57,17 +68,24 @@ export default function CandidateDashboardPage() {
   const [postMessage, setPostMessage] = useState("");
   const [notificationMessage, setNotificationMessage] = useState("");
   const [submittingPost, setSubmittingPost] = useState(false);
+  const [submittingBroadcast, setSubmittingBroadcast] = useState(false);
   const [markingNotifications, setMarkingNotifications] = useState(false);
   const [postForm, setPostForm] = useState({
     title: "",
     content: "",
     audience: "ALL" as "VOTERS" | "AGENTS" | "ALL",
   });
+  const [broadcastForm, setBroadcastForm] = useState({
+    title: "",
+    message: "",
+  });
 
   async function hydrateDashboard(token: string) {
     const data = await loadCandidateDashboard(token);
     setUser(data.currentUser);
     setPosts(data.nextPosts);
+    setBroadcasts(data.nextBroadcasts);
+    setVoters(data.nextVoters);
     setFeedback(data.nextFeedback.feedback);
     setFeedbackCount(data.nextFeedback.totalFeedback);
     setIncidents(data.nextIncidents.incidents);
@@ -141,6 +159,31 @@ export default function CandidateDashboardPage() {
       setError(caughtError instanceof Error ? caughtError.message : "Could not update notifications.");
     } finally {
       setMarkingNotifications(false);
+    }
+  }
+
+  async function handleBroadcastSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setError("");
+    setPostMessage("");
+    setSubmittingBroadcast(true);
+
+    try {
+      await createCandidateBroadcast(token, broadcastForm);
+      setBroadcastForm({ title: "", message: "" });
+      setPostMessage("Campaign message sent to consented voters.");
+      await hydrateDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not send your campaign message.");
+    } finally {
+      setSubmittingBroadcast(false);
     }
   }
 
@@ -218,6 +261,10 @@ export default function CandidateDashboardPage() {
           <h2>Visible Incidents</h2>
           <div className="value">{incidentCount}</div>
         </article>
+        <article className="panel card">
+          <h2>Consented Voters</h2>
+          <div className="value">{voters.length}</div>
+        </article>
       </section>
 
       <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "minmax(280px, 1.1fr) minmax(280px, 1fr)" }}>
@@ -281,6 +328,56 @@ export default function CandidateDashboardPage() {
         </section>
       </section>
 
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "minmax(280px, 1fr) minmax(280px, 1fr)" }}>
+        <section className="panel card">
+          <h2>Consent-Based Voter Messaging</h2>
+          <p className="muted">
+            This reaches only active voters in your campaign territory who accepted the registration terms and contact consent.
+          </p>
+          <form className="form" onSubmit={handleBroadcastSubmit}>
+            <label className="field">
+              <span>Title</span>
+              <input
+                value={broadcastForm.title}
+                onChange={(event) => setBroadcastForm({ ...broadcastForm, title: event.target.value })}
+                minLength={3}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Message</span>
+              <textarea
+                rows={5}
+                value={broadcastForm.message}
+                onChange={(event) => setBroadcastForm({ ...broadcastForm, message: event.target.value })}
+                minLength={10}
+                required
+              />
+            </label>
+            <button className="button" type="submit" disabled={submittingBroadcast}>
+              {submittingBroadcast ? "Sending..." : "Send to consented voters"}
+            </button>
+          </form>
+        </section>
+
+        <section className="panel card">
+          <h2>Voter Register Snapshot</h2>
+          {voters.length === 0 ? (
+            <p className="muted">No consented voters are available in your territory yet.</p>
+          ) : (
+            <div className="reward-list">
+              {voters.slice(0, 8).map((voter) => (
+                <article key={voter.userId} className="reward-item">
+                  <strong>{voter.name}</strong>
+                  <p>{voter.emailMask} | {voter.phoneMask}</p>
+                  <p className="muted">{voter.territory.pollingUnitId || voter.territory.wardId || "Scoped territory voter"}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </section>
+
       <section className="panel card" style={{ marginTop: 24 }}>
         <h2>Posts</h2>
         {posts.length === 0 ? (
@@ -292,6 +389,23 @@ export default function CandidateDashboardPage() {
                 <strong>{post.title}</strong>
                 <p>{post.content}</p>
                 <p className="muted">{new Date(post.createdAt).toLocaleString()}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <h2>Recent Campaign Messages</h2>
+        {broadcasts.length === 0 ? (
+          <p className="muted">No direct voter messages sent yet.</p>
+        ) : (
+          <div className="reward-list">
+            {broadcasts.slice(0, 6).map((broadcast) => (
+              <article key={broadcast.id} className="reward-item">
+                <strong>{broadcast.title}</strong>
+                <p>{broadcast.message}</p>
+                <p className="muted">{broadcast.recipientCount} consented voters | {new Date(broadcast.createdAt).toLocaleString()}</p>
               </article>
             ))}
           </div>

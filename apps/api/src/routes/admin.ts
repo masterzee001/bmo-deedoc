@@ -575,7 +575,12 @@ function buildBroadcastRecipientWhere(
   };
   const voterClause = {
     role: UserRole.VOTER,
-    voterProfile: { is: scope },
+    voterProfile: {
+      is: {
+        ...scope,
+        contactConsent: true,
+      },
+    },
   };
   const candidateClause = {
     role: UserRole.CANDIDATE,
@@ -604,6 +609,11 @@ function getTodayStart() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today;
+}
+
+function escapeCsvValue(value: string | null | undefined): string {
+  const normalized = value ?? "";
+  return `"${normalized.replace(/"/g, "\"\"")}"`;
 }
 
 function getDateRange(input: { dateFrom?: string; dateTo?: string }) {
@@ -1610,13 +1620,67 @@ router.get("/voters", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
       userId: voter.id,
       name: voter.name,
       email: voter.email,
+      phone: voter.phone,
       isActive: voter.isActive,
       voterCardNumber: voter.voterProfile!.voterCardNumber,
       referralCode: voter.voterProfile!.referralCode,
+      contactConsent: voter.voterProfile!.contactConsent,
+      termsAcceptedAt: voter.voterProfile!.termsAcceptedAt?.toISOString() || null,
       territory: serializeTerritory(voter.voterProfile!),
     }));
 
   return response.json({ voters: voterUsers });
+});
+
+router.get("/voters/export", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+  const voters = await prisma.user.findMany({
+    where: {
+      role: UserRole.VOTER,
+      isActive: true,
+      voterProfile: {
+        is: {
+          contactConsent: true,
+        },
+      },
+    },
+    include: { voterProfile: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const rows = [
+    [
+      "name",
+      "email",
+      "phone",
+      "voterCardNumber",
+      "referralCode",
+      "termsAcceptedAt",
+      "stateId",
+      "lgaId",
+      "wardId",
+      "pollingUnitId",
+    ].join(","),
+    ...voters
+      .filter((voter) => voter.voterProfile)
+      .map((voter) =>
+        [
+          escapeCsvValue(voter.name),
+          escapeCsvValue(voter.email),
+          escapeCsvValue(voter.phone),
+          escapeCsvValue(voter.voterProfile!.voterCardNumber),
+          escapeCsvValue(voter.voterProfile!.referralCode),
+          escapeCsvValue(voter.voterProfile!.termsAcceptedAt?.toISOString() || ""),
+          escapeCsvValue(voter.voterProfile!.stateId),
+          escapeCsvValue(voter.voterProfile!.lgaId),
+          escapeCsvValue(voter.voterProfile!.wardId),
+          escapeCsvValue(voter.voterProfile!.pollingUnitId || ""),
+        ].join(","),
+      ),
+  ];
+
+  response.setHeader("Content-Type", "text/csv; charset=utf-8");
+  response.setHeader("Content-Disposition", `attachment; filename="voters-consented-${new Date().toISOString().slice(0, 10)}.csv"`);
+  return response.status(200).send(rows.join("\n"));
 });
 
 router.patch("/users/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {

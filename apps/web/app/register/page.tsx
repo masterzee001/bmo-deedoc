@@ -16,6 +16,8 @@ type FormState = {
   wardId: string;
   pollingUnitId: string;
   referredByCode: string;
+  acceptTerms: boolean;
+  contactConsent: boolean;
 };
 
 const initialForm: FormState = {
@@ -29,6 +31,8 @@ const initialForm: FormState = {
   wardId: "",
   pollingUnitId: "",
   referredByCode: "",
+  acceptTerms: false,
+  contactConsent: false,
 };
 
 export default function RegisterPage() {
@@ -130,6 +134,8 @@ export default function RegisterPage() {
       const result = await registerVoterUser({
         ...form,
         referredByCode: form.referredByCode.trim() || undefined,
+        acceptTerms: true,
+        contactConsent: true,
       });
 
       setMessage(result.message);
@@ -246,10 +252,25 @@ export default function RegisterPage() {
             />
           </label>
 
+          <label className="field" style={{ alignItems: "flex-start" }}>
+            <span>Terms and Consent</span>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.acceptTerms}
+                onChange={(event) => setForm({ ...form, acceptTerms: event.target.checked, contactConsent: event.target.checked })}
+                required
+              />
+              <span>
+                I agree to the <Link href="/terms">terms and conditions</Link>, including consent for election and civic updates within my registered territory, and contact handling by authorized platform operators.
+              </span>
+            </label>
+          </label>
+
           {error ? <p className="error">{error}</p> : null}
           {message ? <p className="muted">{message}</p> : null}
 
-          <button className="button" type="submit" disabled={loading}>
+          <button className="button" type="submit" disabled={loading || !form.acceptTerms}>
             {loading ? "Creating account..." : "Create account"}
           </button>
         </form>
