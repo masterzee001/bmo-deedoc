@@ -1,0 +1,269 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import { createApp } from "./app";
+import { prisma } from "./prisma";
+
+type Case = {
+  name: string;
+  run: () => Promise<void>;
+};
+
+let baseUrl = "";
+let server: http.Server | null = null;
+const createdUserEmails = new Set<string>();
+
+async function login(email: string, password: string): Promise<string> {
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const payload = (await response.json()) as { token?: string; message?: string };
+  assert.equal(response.status, 200, payload.message || "Login failed.");
+  assert.ok(payload.token, "Login response did not include a token.");
+  return payload.token;
+}
+
+async function apiRequest(
+  path: string,
+  options?: {
+    method?: string;
+    token?: string;
+    body?: Record<string, unknown>;
+  },
+) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: options?.method || "GET",
+    headers: {
+      ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: options?.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  const payload = (await response.json()) as Record<string, unknown>;
+  return { status: response.status, payload };
+}
+
+function readUserId(payload: Record<string, unknown>): string {
+  const user = payload.user as { id?: string } | undefined;
+  assert.ok(user?.id, "Response payload did not include a user id.");
+  return user.id;
+}
+
+async function createCandidateFixture(token: string, suffix: string, officeType: string) {
+  const email = `candidate-public-${suffix}@pics.ng`;
+  createdUserEmails.add(email);
+  const created = await apiRequest("/admin/candidates", {
+    method: "POST",
+    token,
+    body: {
+      name: `Public Candidate ${suffix}`,
+      email,
+      password: "TestCandidate123!",
+      officeType,
+      geoPoliticalZoneId: "seed-zone-south-west",
+      stateId: "seed-state-lagos",
+      ...(officeType === "CHAIRMANSHIP" ? { lgaId: "seed-lga-ikeja" } : {}),
+      ...(officeType === "COUNCILLOR" ? { lgaId: "seed-lga-ikeja", wardId: "seed-ward-ikeja-ward-a" } : {}),
+    },
+  });
+  assert.equal(created.status, 201);
+  return { email, userId: readUserId(created.payload) };
+}
+
+const cases: Case[] = [
+  {
+    name: "candidate can update own public profile",
+    run: async () => {
+      const token = await login("candidate@pics.ng", "Candidate123!");
+      const updated = await apiRequest("/candidate/profile", {
+        method: "PATCH",
+        token,
+        body: {
+          portraitUrl: "https://example.com/portrait.jpg",
+          campaignSlogan: "Forward with Lagos.",
+          bio: "A practical manifesto for public service.",
+          websiteUrl: "https://example.com",
+          isProfilePublished: true,
+        },
+      });
+
+      assert.equal(updated.status, 200);
+      assert.equal(updated.payload.message, "Candidate profile updated successfully.");
+    },
+  },
+  {
+    name: "candidate cannot edit another candidates materials",
+    run: async () => {
+      const adminToken = await login("superadmin@pics.ng", "ChangeMe123!");
+      const first = await createCandidateFixture(adminToken, `${Date.now()}-a`, "GOVERNORSHIP");
+      const second = await createCandidateFixture(adminToken, `${Date.now()}-b`, "GOVERNORSHIP");
+      const firstToken = await login(first.email, "TestCandidate123!");
+      const secondToken = await login(second.email, "TestCandidate123!");
+
+      const createdPost = await apiRequest("/candidate/posts", {
+        method: "POST",
+        token: firstToken,
+        body: {
+          title: "Campaign launch",
+          content: "We are launching a disciplined statewide campaign.",
+          isPublished: true,
+        },
+      });
+      assert.equal(createdPost.status, 201);
+      const created = createdPost.payload.post as { id?: string } | undefined;
+      assert.ok(created?.id);
+
+      const denied = await apiRequest(`/candidate/posts/${created.id}`, {
+        method: "PATCH",
+        token: secondToken,
+        body: {
+          title: "Unauthorized edit",
+        },
+      });
+      assert.equal(denied.status, 403);
+    },
+  },
+  {
+    name: "public candidate profile shows only published materials",
+    run: async () => {
+      const token = await login("candidate@pics.ng", "Candidate123!");
+
+      const profile = await apiRequest("/candidate/profile", {
+        method: "PATCH",
+        token,
+        body: {
+          campaignSlogan: "Working for every ward.",
+          bio: "Published profile for public discovery tests.",
+          isProfilePublished: true,
+        },
+      });
+      assert.equal(profile.status, 200);
+
+      const published = await apiRequest("/candidate/posts", {
+        method: "POST",
+        token,
+        body: {
+          title: `Published material ${Date.now()}`,
+          content: "This material should be visible publicly.",
+          isPublished: true,
+          mediaType: "IMAGE",
+          mediaUrl: "https://example.com/banner.jpg",
+        },
+      });
+      assert.equal(published.status, 201);
+
+      const draft = await apiRequest("/candidate/posts", {
+        method: "POST",
+        token,
+        body: {
+          title: `Draft material ${Date.now()}`,
+          content: "This material should stay private.",
+          isPublished: false,
+        },
+      });
+      assert.equal(draft.status, 201);
+
+      const publicProfile = await apiRequest("/candidate/public/seed-user-candidate");
+      assert.equal(publicProfile.status, 200);
+      const candidate = publicProfile.payload.candidate as { materials?: Array<{ title?: string }> };
+      assert.ok(candidate.materials?.some((item) => item.title?.startsWith("Published material")));
+      assert.ok(!candidate.materials?.some((item) => item.title?.startsWith("Draft material")));
+    },
+  },
+  {
+    name: "public candidate filters return matching candidates",
+    run: async () => {
+      const adminToken = await login("superadmin@pics.ng", "ChangeMe123!");
+      const governorship = await createCandidateFixture(adminToken, `${Date.now()}-gov`, "GOVERNORSHIP");
+      const chairmanship = await createCandidateFixture(adminToken, `${Date.now()}-chair`, "CHAIRMANSHIP");
+      const governorshipToken = await login(governorship.email, "TestCandidate123!");
+      const chairmanshipToken = await login(chairmanship.email, "TestCandidate123!");
+
+      await apiRequest("/candidate/profile", {
+        method: "PATCH",
+        token: governorshipToken,
+        body: {
+          campaignSlogan: "Statewide reform",
+          bio: "Governorship candidate",
+          isProfilePublished: true,
+        },
+      });
+      await apiRequest("/candidate/profile", {
+        method: "PATCH",
+        token: chairmanshipToken,
+        body: {
+          campaignSlogan: "Local accountability",
+          bio: "Chairmanship candidate",
+          isProfilePublished: true,
+        },
+      });
+
+      const filtered = await apiRequest("/candidate/public?officeType=CHAIRMANSHIP&stateId=seed-state-lagos&search=Public");
+      assert.equal(filtered.status, 200);
+      const candidates = filtered.payload.candidates as Array<{ officeType?: string }>;
+      assert.ok(candidates.length >= 1);
+      assert.ok(candidates.every((candidate) => candidate.officeType === "CHAIRMANSHIP"));
+    },
+  },
+];
+
+async function setup() {
+  server = http.createServer(createApp());
+  await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Test server did not start.");
+  }
+
+  baseUrl = `http://127.0.0.1:${address.port}`;
+}
+
+async function teardown() {
+  if (createdUserEmails.size > 0) {
+    await prisma.user.deleteMany({
+      where: { email: { in: Array.from(createdUserEmails) } },
+    });
+  }
+
+  await prisma.$disconnect();
+
+  if (server) {
+    await new Promise<void>((resolve, reject) => {
+      server!.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+}
+
+export async function runCandidatePublicTests() {
+  await setup();
+  const failures: string[] = [];
+
+  try {
+    for (const testCase of cases) {
+      try {
+        await testCase.run();
+        console.log(`PASS ${testCase.name}`);
+      } catch (error) {
+        failures.push(`${testCase.name}: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`FAIL ${testCase.name}`);
+      }
+    }
+  } finally {
+    await teardown();
+  }
+
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n"));
+  }
+}

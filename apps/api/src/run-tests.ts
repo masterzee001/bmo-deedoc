@@ -1,6 +1,10 @@
 import { runAdminGlobalStructureTests } from "./admin-global-structures.test";
+import { runCandidatePublicTests } from "./candidate-public.test";
 
-void runAdminGlobalStructureTests().catch((error) => {
+void (async () => {
+  await runAdminGlobalStructureTests();
+  await runCandidatePublicTests();
+})().catch((error) => {
   console.error(error);
   process.exit(1);
 });

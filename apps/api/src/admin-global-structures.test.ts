@@ -128,6 +128,10 @@ async function createVoterFixture(suffix: string) {
       stateId: "seed-state-lagos",
       lgaId: "seed-lga-ikeja",
       wardId: "seed-ward-ikeja-ward-a",
+      pollingUnitId: "seed-pu-ikeja-001",
+      acceptTerms: true,
+      contactConsent: true,
+      confirmAdult: true,
     }),
   });
   const payload = (await response.json()) as Record<string, unknown>;

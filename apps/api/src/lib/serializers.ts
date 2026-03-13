@@ -4,7 +4,12 @@ import type {
   AgentActivitySummary,
   AuditLogItem,
   BroadcastMessageItem,
+  CampaignMediaType,
+  CampaignMaterialItem,
   CandidateListItem,
+  CandidateProfileEditorItem,
+  CandidatePublicListItem,
+  CandidatePublicProfile,
   FieldTaskItem,
   FeedbackListItem,
   IncidentListItem,
@@ -18,7 +23,7 @@ import type {
   VoterEngagementTaskType,
   VoterEngagementTaskItem,
 } from "@pics-nigeria/shared";
-import { VOTER_ENGAGEMENT_TASK_TYPES } from "@pics-nigeria/shared";
+import { CAMPAIGN_MEDIA_TYPES, VOTER_ENGAGEMENT_TASK_TYPES } from "@pics-nigeria/shared";
 
 function normalizeEngagementTaskType(value: string): VoterEngagementTaskType {
   if (VOTER_ENGAGEMENT_TASK_TYPES.includes(value as VoterEngagementTaskType)) {
@@ -26,6 +31,14 @@ function normalizeEngagementTaskType(value: string): VoterEngagementTaskType {
   }
 
   throw new Error(`Unsupported voter engagement task type: ${value}`);
+}
+
+function normalizeCampaignMediaType(value: string): CampaignMediaType {
+  if (CAMPAIGN_MEDIA_TYPES.includes(value as CampaignMediaType)) {
+    return value as CampaignMediaType;
+  }
+
+  throw new Error(`Unsupported campaign media type: ${value}`);
 }
 
 export function serializeTerritory(source: {
@@ -138,19 +151,186 @@ export function serializePostListItem(post: {
   id: string;
   title: string;
   content: string;
+  mediaType?: string | null;
+  mediaUrl?: string | null;
+  thumbnailUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
   authorUserId: string;
   candidateUserId: string | null;
+  isPublished: boolean;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
 }): PostListItem {
   return {
     id: post.id,
     title: post.title,
     content: post.content,
+    mediaType: normalizeCampaignMediaType(post.mediaType || "TEXT"),
+    mediaUrl: post.mediaUrl ?? null,
+    thumbnailUrl: post.thumbnailUrl ?? null,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
     authorUserId: post.authorUserId,
     candidateUserId: post.candidateUserId,
+    isPublished: post.isPublished,
+    territory: serializeTerritory(post),
+  };
+}
+
+export function serializeCampaignMaterialItem(post: Parameters<typeof serializePostListItem>[0]): CampaignMaterialItem {
+  return serializePostListItem(post);
+}
+
+export function serializeCandidateProfileEditorItem(candidate: {
+  userId: string;
+  name: string;
+  officeType: CandidateProfileEditorItem["officeType"];
+  politicalPartyId: string | null;
+  portraitUrl: string | null;
+  campaignSlogan: string | null;
+  bio: string | null;
+  websiteUrl: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xUrl: string | null;
+  isProfilePublished: boolean;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+}): CandidateProfileEditorItem {
+  return {
+    userId: candidate.userId,
+    name: candidate.name,
+    officeType: candidate.officeType,
+    politicalPartyId: candidate.politicalPartyId,
+    portraitUrl: candidate.portraitUrl,
+    campaignSlogan: candidate.campaignSlogan,
+    bio: candidate.bio,
+    websiteUrl: candidate.websiteUrl,
+    facebookUrl: candidate.facebookUrl,
+    instagramUrl: candidate.instagramUrl,
+    xUrl: candidate.xUrl,
+    isProfilePublished: candidate.isProfilePublished,
+    territory: serializeTerritory(candidate),
+  };
+}
+
+export function serializeCandidatePublicListItem(candidate: {
+  userId: string;
+  name: string;
+  officeType: CandidatePublicListItem["officeType"];
+  portraitUrl: string | null;
+  campaignSlogan: string | null;
+  bio: string | null;
+  isProfilePublished: boolean;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+  geoPoliticalZone?: { name: string } | null;
+  state?: { name: string } | null;
+  senatorialDistrict?: { name: string } | null;
+  federalConstituency?: { name: string } | null;
+  lga?: { name: string } | null;
+  ward?: { name: string } | null;
+  stateConstituency?: { name: string } | null;
+  pollingUnit?: { name: string } | null;
+  politicalParty?: {
+    id: string;
+    name: string;
+    code: string;
+    logoUrl: string | null;
+  } | null;
+}): CandidatePublicListItem {
+  return {
+    userId: candidate.userId,
+    name: candidate.name,
+    portraitUrl: candidate.portraitUrl,
+    officeType: candidate.officeType,
+    campaignSlogan: candidate.campaignSlogan,
+    bio: candidate.bio,
+    isProfilePublished: candidate.isProfilePublished,
+    party: candidate.politicalParty
+      ? {
+          id: candidate.politicalParty.id,
+          name: candidate.politicalParty.name,
+          code: candidate.politicalParty.code,
+          logoUrl: candidate.politicalParty.logoUrl,
+        }
+      : null,
+    territory: serializeTerritory(candidate),
+    territoryLabels: {
+      geoPoliticalZone: candidate.geoPoliticalZone?.name || null,
+      state: candidate.state?.name || null,
+      senatorialDistrict: candidate.senatorialDistrict?.name || null,
+      federalConstituency: candidate.federalConstituency?.name || null,
+      lga: candidate.lga?.name || null,
+      ward: candidate.ward?.name || null,
+      stateConstituency: candidate.stateConstituency?.name || null,
+      pollingUnit: candidate.pollingUnit?.name || null,
+    },
+  };
+}
+
+export function serializeCandidatePublicProfile(candidate: {
+  userId: string;
+  name: string;
+  officeType: CandidatePublicProfile["officeType"];
+  portraitUrl: string | null;
+  campaignSlogan: string | null;
+  bio: string | null;
+  websiteUrl: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xUrl: string | null;
+  isProfilePublished: boolean;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+  geoPoliticalZone?: { name: string } | null;
+  state?: { name: string } | null;
+  senatorialDistrict?: { name: string } | null;
+  federalConstituency?: { name: string } | null;
+  lga?: { name: string } | null;
+  ward?: { name: string } | null;
+  stateConstituency?: { name: string } | null;
+  pollingUnit?: { name: string } | null;
+  politicalParty?: {
+    id: string;
+    name: string;
+    code: string;
+    logoUrl: string | null;
+  } | null;
+  materials: Parameters<typeof serializeCampaignMaterialItem>[0][];
+}): CandidatePublicProfile {
+  return {
+    ...serializeCandidatePublicListItem(candidate),
+    websiteUrl: candidate.websiteUrl,
+    facebookUrl: candidate.facebookUrl,
+    instagramUrl: candidate.instagramUrl,
+    xUrl: candidate.xUrl,
+    materials: candidate.materials.map(serializeCampaignMaterialItem),
   };
 }
 

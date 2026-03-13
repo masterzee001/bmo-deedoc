@@ -124,6 +124,13 @@ enum BroadcastAudience {
   CANDIDATES
 }
 
+enum CampaignMediaType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+}
+
 model User {
   id                     String                     @id @default(cuid())
   name                   String
@@ -213,6 +220,14 @@ model CandidateProfile {
   officeType            CandidateOfficeType
   geoPoliticalZoneId    String?
   politicalPartyId      String?
+  portraitUrl           String?
+  campaignSlogan        String?
+  bio                   String?
+  websiteUrl            String?
+  facebookUrl           String?
+  instagramUrl          String?
+  xUrl                  String?
+  isProfilePublished    Boolean              @default(false)
   stateId               String?
   senatorialDistrictId  String?
   federalConstituencyId String?
@@ -236,6 +251,7 @@ model CandidateProfile {
   @@index([officeType])
   @@index([geoPoliticalZoneId])
   @@index([politicalPartyId])
+  @@index([isProfilePublished])
   @@index([stateId])
   @@index([senatorialDistrictId])
   @@index([federalConstituencyId])
@@ -504,6 +520,9 @@ model Post {
   geoPoliticalZoneId    String?
   title                 String
   content               String
+  mediaType             CampaignMediaType    @default(TEXT)
+  mediaUrl              String?
+  thumbnailUrl          String?
   stateId               String?
   senatorialDistrictId  String?
   federalConstituencyId String?
@@ -530,6 +549,7 @@ model Post {
   @@index([authorUserId])
   @@index([candidateUserId])
   @@index([isPublished])
+  @@index([mediaType])
   @@index([stateId])
   @@index([senatorialDistrictId])
   @@index([federalConstituencyId])
@@ -824,6 +844,7 @@ model PoliticalParty {
   id                 String             @id
   name               String             @unique
   code               String             @unique
+  logoUrl            String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   candidateProfiles  CandidateProfile[]

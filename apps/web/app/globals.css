@@ -469,6 +469,170 @@ textarea {
   cursor: pointer;
 }
 
+.candidate-hero,
+.candidate-profile-hero,
+.candidate-discovery-hero {
+  display: grid;
+  gap: 20px;
+}
+
+.candidate-identity {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.candidate-portrait {
+  width: 104px;
+  height: 104px;
+  border-radius: 28px;
+  object-fit: cover;
+  border: 3px solid rgba(0, 104, 55, 0.18);
+  box-shadow: 0 20px 36px rgba(0, 48, 24, 0.14);
+}
+
+.candidate-portrait.fallback,
+.candidate-card-media.fallback,
+.campaign-material-preview.fallback {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(0, 104, 55, 0.92), rgba(247, 247, 244, 0.95));
+  color: #fff;
+  font-weight: 700;
+}
+
+.candidate-office {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.status-badge.live {
+  background: rgba(0, 104, 55, 0.12);
+  color: #075c35;
+}
+
+.status-badge.draft {
+  background: rgba(120, 120, 120, 0.12);
+  color: #555;
+}
+
+.candidate-dashboard-grid {
+  margin-top: 24px;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checkbox-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.checkbox-field input {
+  width: 18px;
+  height: 18px;
+}
+
+.candidate-material-list,
+.candidate-material-gallery,
+.candidate-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.candidate-material-item,
+.candidate-material-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.candidate-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 24px;
+}
+
+.candidate-card {
+  overflow: hidden;
+  padding: 0;
+}
+
+.candidate-card-media {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: linear-gradient(135deg, rgba(0, 104, 55, 0.16), rgba(255, 255, 255, 0.92));
+}
+
+.candidate-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.candidate-filter-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  align-items: end;
+}
+
+.candidate-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.campaign-material-preview {
+  width: 100%;
+  min-height: 220px;
+  border-radius: 18px;
+  object-fit: cover;
+  background: rgba(0, 104, 55, 0.06);
+}
+
+.candidate-material-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.candidate-mini-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.value.small {
+  font-size: 1.8rem;
+}
+
+.empty-state {
+  text-align: center;
+  display: grid;
+  gap: 10px;
+}
+
 @keyframes map-pulse {
   0% {
     transform: scale(0.95);
@@ -494,6 +658,15 @@ textarea {
   .section-head {
     flex-direction: column;
   }
+
+  .candidate-identity {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .candidate-filter-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 960px) {
@@ -503,5 +676,9 @@ textarea {
 
   .live-map-stage {
     min-height: 320px;
+  }
+
+  .candidate-dashboard-grid {
+    grid-template-columns: 1fr;
   }
 }

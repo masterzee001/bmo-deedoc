@@ -121,6 +121,13 @@ export const VOTER_ENGAGEMENT_TASK_TYPES = [
   "POLL_RESPONSE",
 ] as const;
 
+export const CAMPAIGN_MEDIA_TYPES = [
+  "TEXT",
+  "IMAGE",
+  "VIDEO",
+  "DOCUMENT",
+] as const;
+
 export type UserRole = (typeof USER_ROLES)[number];
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export type CandidateOfficeType = (typeof CANDIDATE_OFFICE_TYPES)[number];
@@ -136,6 +143,7 @@ export type FieldTaskStatus = (typeof FIELD_TASK_STATUSES)[number];
 export type FieldTaskPriority = (typeof FIELD_TASK_PRIORITIES)[number];
 export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
 export type VoterEngagementTaskType = (typeof VOTER_ENGAGEMENT_TASK_TYPES)[number];
+export type CampaignMediaType = (typeof CAMPAIGN_MEDIA_TYPES)[number];
 
 export type TerritoryScope = {
   geoPoliticalZoneId?: string | null;
@@ -208,6 +216,57 @@ export type CandidateListItem = {
   politicalPartyId: string | null;
   territory: TerritorySummary;
   assignmentPermissions: AssignmentPermissionType[];
+};
+
+export type CandidatePublicListItem = {
+  userId: string;
+  name: string;
+  portraitUrl: string | null;
+  officeType: CandidateOfficeType;
+  campaignSlogan: string | null;
+  bio: string | null;
+  isProfilePublished: boolean;
+  party: {
+    id: string;
+    name: string;
+    code: string;
+    logoUrl: string | null;
+  } | null;
+  territory: TerritorySummary;
+  territoryLabels: {
+    geoPoliticalZone: string | null;
+    state: string | null;
+    senatorialDistrict: string | null;
+    federalConstituency: string | null;
+    lga: string | null;
+    ward: string | null;
+    stateConstituency: string | null;
+    pollingUnit: string | null;
+  };
+};
+
+export type CandidatePublicProfile = CandidatePublicListItem & {
+  websiteUrl: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xUrl: string | null;
+  materials: CampaignMaterialItem[];
+};
+
+export type CandidateProfileEditorItem = {
+  userId: string;
+  name: string;
+  officeType: CandidateOfficeType;
+  politicalPartyId: string | null;
+  portraitUrl: string | null;
+  campaignSlogan: string | null;
+  bio: string | null;
+  websiteUrl: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  xUrl: string | null;
+  isProfilePublished: boolean;
+  territory: TerritorySummary;
 };
 
 export type GeoPoliticalZoneItem = {
@@ -353,11 +412,18 @@ export type PostListItem = {
   id: string;
   title: string;
   content: string;
+  mediaType: CampaignMediaType;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
   createdAt: string;
   updatedAt: string;
   authorUserId: string;
   candidateUserId: string | null;
+  isPublished: boolean;
+  territory: TerritorySummary;
 };
+
+export type CampaignMaterialItem = PostListItem;
 
 export type AdminDashboardSummary = {
   totalVotersInScope: number;

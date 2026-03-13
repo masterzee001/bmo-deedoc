@@ -354,23 +354,46 @@ Participation example:
 
 - candidate can create their own posts
 - authorized admin can create posts for an assigned candidate with `MANAGE` or `PUBLISH`
+- posts now double as campaign materials and support `TEXT`, `IMAGE`, `VIDEO`, and `DOCUMENT` with `mediaUrl` / `thumbnailUrl`
+- candidate-authored materials are always scoped to the candidate's assigned campaign territory
+- voters and public discovery pages only see published materials
 
 ```json
 {
-  "candidateUserId": "candidate-user-id",
   "title": "Campaign priorities",
   "content": "Jobs, accountability, and local development remain central.",
-  "stateId": "seed-state-lagos",
-  "federalConstituencyId": "seed-fed-ikeja",
+  "mediaType": "IMAGE",
+  "mediaUrl": "https://cdn.example.com/campaign/banner.jpg",
+  "thumbnailUrl": "https://cdn.example.com/campaign/banner-thumb.jpg",
   "isPublished": true
 }
 ```
 
 Additional candidate routes:
 
+- `GET /candidate/profile`
+- `PATCH /candidate/profile`
 - `GET /candidate/posts`
+- `PATCH /candidate/posts/:postId`
+- `DELETE /candidate/posts/:postId`
 - `GET /candidate/feedback`
 - `GET /candidate/incidents`
+- `GET /candidate/public`
+- `GET /candidate/public/:candidateUserId`
+
+Candidate public profile fields:
+
+- portrait URL
+- campaign slogan
+- manifesto / bio summary
+- website / social links
+- publish toggle for voter discovery
+
+Deploy note:
+
+- this feature adds the Prisma migration `20260313234500_add_candidate_public_profiles_and_media`
+- redeploy the Render API so the migration is applied
+- redeploy the Vercel frontend so `/candidates`, `/candidates/[candidateUserId]`, and the updated candidate dashboard go live
 
 ## Voter routes
 

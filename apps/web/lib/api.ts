@@ -7,6 +7,9 @@ import type {
   AuthUserProfile,
   AuditLogItem,
   BroadcastMessageItem,
+  CandidateProfileEditorItem,
+  CandidatePublicListItem,
+  CandidatePublicProfile,
   CandidateVoterItem,
   CandidateListItem,
   FieldTaskItem,
@@ -870,6 +873,41 @@ export async function fetchCandidatePosts(token: string): Promise<PostListItem[]
   return payload.posts;
 }
 
+export async function fetchCandidateProfileEditor(token: string): Promise<CandidateProfileEditorItem> {
+  const response = await fetch(`${API_BASE_URL}/candidate/profile`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ profile: CandidateProfileEditorItem }>(response);
+  return payload.profile;
+}
+
+export async function updateCandidateProfile(
+  token: string,
+  body: {
+    portraitUrl?: string;
+    campaignSlogan?: string;
+    bio?: string;
+    websiteUrl?: string;
+    facebookUrl?: string;
+    instagramUrl?: string;
+    xUrl?: string;
+    isProfilePublished: boolean;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/candidate/profile`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; profile: CandidateProfileEditorItem }>(response);
+}
+
 export async function fetchCandidateVoters(token: string): Promise<CandidateVoterItem[]> {
   const response = await fetch(`${API_BASE_URL}/candidate/voters`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -911,10 +949,13 @@ export async function createCandidatePost(
   body: {
     title: string;
     content: string;
+    mediaType?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
+    mediaUrl?: string;
+    thumbnailUrl?: string;
     isPublished?: boolean;
     audience?: "VOTERS" | "AGENTS" | "ALL";
   },
-): Promise<PostListItem> {
+): Promise<{ message: string; post: PostListItem }> {
   const response = await fetch(`${API_BASE_URL}/candidate/posts`, {
     method: "POST",
     headers: {
@@ -924,8 +965,40 @@ export async function createCandidatePost(
     body: JSON.stringify(body),
   });
 
-  const payload = await readJson<{ post: PostListItem }>(response);
-  return payload.post;
+  return readJson<{ message: string; post: PostListItem }>(response);
+}
+
+export async function updateCandidatePost(
+  token: string,
+  postId: string,
+  body: {
+    title?: string;
+    content?: string;
+    mediaType?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
+    mediaUrl?: string;
+    thumbnailUrl?: string;
+    isPublished?: boolean;
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/candidate/posts/${postId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; post: PostListItem }>(response);
+}
+
+export async function deleteCandidatePost(token: string, postId: string) {
+  const response = await fetch(`${API_BASE_URL}/candidate/posts/${postId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string }>(response);
 }
 
 export async function fetchCandidateFeedback(
@@ -987,6 +1060,40 @@ export async function fetchVoterPosts(token: string): Promise<PostListItem[]> {
 
   const payload = await readJson<{ posts: PostListItem[] }>(response);
   return payload.posts;
+}
+
+export async function fetchPublicCandidates(query?: {
+  search?: string;
+  stateId?: string;
+  officeType?: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
+}): Promise<CandidatePublicListItem[]> {
+  const params = new URLSearchParams();
+  if (query?.search) {
+    params.set("search", query.search);
+  }
+  if (query?.stateId) {
+    params.set("stateId", query.stateId);
+  }
+  if (query?.officeType) {
+    params.set("officeType", query.officeType);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/candidate/public${suffix}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ candidates: CandidatePublicListItem[] }>(response);
+  return payload.candidates;
+}
+
+export async function fetchPublicCandidateProfile(candidateUserId: string): Promise<CandidatePublicProfile> {
+  const response = await fetch(`${API_BASE_URL}/candidate/public/${candidateUserId}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ candidate: CandidatePublicProfile }>(response);
+  return payload.candidate;
 }
 
 export async function fetchVoterEngagementTasks(token: string): Promise<VoterEngagementTaskItem[]> {
