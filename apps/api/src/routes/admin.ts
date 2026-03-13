@@ -24,6 +24,7 @@ import { createNotification } from "../lib/notifications";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
+import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import {
   serializeAdminMapSummary,
   serializeAdminSummary,
@@ -869,6 +870,10 @@ router.get("/states", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     return response.status(400).json({ message: "Invalid state lookup query.", errors: parsed.error.flatten() });
   }
 
+  if ((await prisma.state.count()) < 37) {
+    await ensureNationalReferenceStates(prisma);
+  }
+
   const actor = request.authUser;
   const requestedZoneId = parsed.data.geoPoliticalZoneId;
   const actorZoneId = actor?.adminProfile?.geoPoliticalZoneId || null;
@@ -943,11 +948,20 @@ router.get("/lgas", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (req
     return response.status(403).json({ message: scopeError });
   }
 
-  const lgas = await prisma.lGA.findMany({
+  let lgas = await prisma.lGA.findMany({
     where: { stateId: parsed.data.stateId },
     orderBy: { name: "asc" },
     select: { id: true, name: true, stateId: true },
   });
+
+  if (lgas.length === 0) {
+    await syncLgasForState(prisma, parsed.data.stateId);
+    lgas = await prisma.lGA.findMany({
+      where: { stateId: parsed.data.stateId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, stateId: true },
+    });
+  }
 
   return response.json({ lgas });
 });
@@ -968,7 +982,7 @@ router.get("/wards", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (re
     return response.status(403).json({ message: lgaScopeError });
   }
 
-  const wards = await prisma.ward.findMany({
+  let wards = await prisma.ward.findMany({
     where: {
       stateId: parsed.data.stateId,
       lgaId: parsed.data.lgaId || undefined,
@@ -976,6 +990,18 @@ router.get("/wards", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (re
     orderBy: { name: "asc" },
     select: { id: true, name: true, stateId: true, lgaId: true },
   });
+
+  if (wards.length === 0 && parsed.data.stateId && parsed.data.lgaId) {
+    await syncWardsForLga(prisma, parsed.data.stateId, parsed.data.lgaId);
+    wards = await prisma.ward.findMany({
+      where: {
+        stateId: parsed.data.stateId,
+        lgaId: parsed.data.lgaId,
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, stateId: true, lgaId: true },
+    });
+  }
 
   return response.json({ wards });
 });
@@ -1024,7 +1050,7 @@ router.get("/polling-units", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), a
     return response.status(403).json({ message: lgaScopeError });
   }
 
-  const pollingUnits = await prisma.pollingUnit.findMany({
+  let pollingUnits = await prisma.pollingUnit.findMany({
     where: {
       stateId: parsed.data.stateId,
       lgaId: parsed.data.lgaId,
@@ -1033,6 +1059,19 @@ router.get("/polling-units", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), a
     orderBy: { name: "asc" },
     select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
   });
+
+  if (pollingUnits.length === 0 && parsed.data.stateId && parsed.data.wardId) {
+    await syncPollingUnitsForWard(prisma, parsed.data.stateId, parsed.data.lgaId, parsed.data.wardId);
+    pollingUnits = await prisma.pollingUnit.findMany({
+      where: {
+        stateId: parsed.data.stateId,
+        lgaId: parsed.data.lgaId,
+        wardId: parsed.data.wardId,
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
+    });
+  }
 
   return response.json({ pollingUnits });
 });

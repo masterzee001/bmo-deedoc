@@ -511,3 +511,5 @@ export function emptyTerritorySummary(): TerritorySummary {
     pollingUnitId: null,
   };
 }
+
+export * from "./nigeria-reference-data";
