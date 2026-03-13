@@ -115,6 +115,12 @@ export const BROADCAST_AUDIENCES = [
   "CANDIDATES",
 ] as const;
 
+export const VOTER_ENGAGEMENT_TASK_TYPES = [
+  "REGISTRATION",
+  "REFERRAL",
+  "POLL_RESPONSE",
+] as const;
+
 export type UserRole = (typeof USER_ROLES)[number];
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export type CandidateOfficeType = (typeof CANDIDATE_OFFICE_TYPES)[number];
@@ -129,6 +135,7 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 export type FieldTaskStatus = (typeof FIELD_TASK_STATUSES)[number];
 export type FieldTaskPriority = (typeof FIELD_TASK_PRIORITIES)[number];
 export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
+export type VoterEngagementTaskType = (typeof VOTER_ENGAGEMENT_TASK_TYPES)[number];
 
 export type TerritoryScope = {
   geoPoliticalZoneId?: string | null;
@@ -493,6 +500,23 @@ export type BroadcastMessageItem = {
   createdAt: string;
   updatedAt: string;
   territory: TerritorySummary;
+};
+
+export type VoterEngagementTaskItem = {
+  id: string;
+  title: string;
+  description: string;
+  type: VoterEngagementTaskType;
+  rewardPoints: number;
+  targetCount: number | null;
+  isActive: boolean;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  territory: TerritorySummary;
+  progressCount: number;
+  completed: boolean;
+  claimed: boolean;
 };
 
 export function normalizeEmail(email: string): string {

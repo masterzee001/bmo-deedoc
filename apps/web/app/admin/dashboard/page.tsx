@@ -30,6 +30,7 @@ import type {
   SenatorialDistrictItem,
   StateItem,
   StateConstituencyItem,
+  VoterEngagementTaskItem,
   VoterUserItem,
   WardItem,
 } from "@pics-nigeria/shared";
@@ -39,6 +40,7 @@ import {
   createAgent,
   createAdminTask,
   createAdminBroadcast,
+  createAdminEngagementTask,
   createCandidate,
   createGeoPoliticalZone,
   createPoliticalParty,
@@ -57,6 +59,7 @@ import {
   fetchAdminSummary,
   fetchAdminTasks,
   fetchAdminBroadcasts,
+  fetchAdminEngagementTasks,
   fetchCurrentUser,
   fetchManagedUsers,
   fetchAgents,
@@ -246,6 +249,7 @@ export default function AdminDashboardPage() {
   } | null>(null);
   const [tasks, setTasks] = useState<FieldTaskItem[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastMessageItem[]>([]);
+  const [engagementTasks, setEngagementTasks] = useState<VoterEngagementTaskItem[]>([]);
   const [mapSummary, setMapSummary] = useState<AdminMapSummary | null>(null);
   const [mapLayer, setMapLayer] = useState<MapLayerFilter>("ALL");
   const [mapSeverityFilter, setMapSeverityFilter] = useState<MapSeverityFilter>("ALL");
@@ -263,6 +267,17 @@ export default function AdminDashboardPage() {
     message: "",
     audience: "AGENTS" as BroadcastMessageItem["audience"],
     taskStatus: "",
+    stateId: "",
+    lgaId: "",
+    wardId: "",
+    pollingUnitId: "",
+  });
+  const [engagementTaskForm, setEngagementTaskForm] = useState({
+    title: "",
+    description: "",
+    type: "REFERRAL" as VoterEngagementTaskItem["type"],
+    rewardPoints: "10",
+    targetCount: "1",
     stateId: "",
     lgaId: "",
     wardId: "",
@@ -358,6 +373,7 @@ export default function AdminDashboardPage() {
           nextZones,
           nextParties,
           nextStates,
+          nextEngagementTasks,
         ] = await Promise.all([
           fetchCurrentUser(authToken),
           fetchAdminSummary(authToken),
@@ -379,6 +395,7 @@ export default function AdminDashboardPage() {
           fetchGeoPoliticalZones(authToken),
           fetchPoliticalParties(authToken),
           fetchStates(authToken),
+          fetchAdminEngagementTasks(authToken),
         ]);
 
         if (currentUser.role !== "ADMIN" && currentUser.role !== "SUPER_ADMIN") {
@@ -410,6 +427,7 @@ export default function AdminDashboardPage() {
         setZones(nextZones);
         setParties(nextParties);
         setStates(nextStates);
+        setEngagementTasks(nextEngagementTasks);
       } catch (caughtError) {
         localStorage.removeItem("picsNigeriaAdminToken");
         setError(caughtError instanceof Error ? caughtError.message : "Could not load your admin dashboard.");
@@ -609,6 +627,47 @@ export default function AdminDashboardPage() {
       setAdminMessage("Broadcast sent.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not send broadcast.");
+    }
+  }
+
+  async function handleCreateEngagementTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      const rewardPoints = Number(engagementTaskForm.rewardPoints);
+      const targetCount = Number(engagementTaskForm.targetCount);
+      await createAdminEngagementTask(token, {
+        title: engagementTaskForm.title,
+        description: engagementTaskForm.description,
+        type: engagementTaskForm.type,
+        rewardPoints,
+        targetCount: Number.isFinite(targetCount) ? targetCount : undefined,
+        stateId: engagementTaskForm.stateId || undefined,
+        lgaId: engagementTaskForm.lgaId || undefined,
+        wardId: engagementTaskForm.wardId || undefined,
+        pollingUnitId: engagementTaskForm.pollingUnitId || undefined,
+      });
+      setEngagementTasks(await fetchAdminEngagementTasks(token));
+      setEngagementTaskForm({
+        title: "",
+        description: "",
+        type: "REFERRAL",
+        rewardPoints: "10",
+        targetCount: "1",
+        stateId: "",
+        lgaId: "",
+        wardId: "",
+        pollingUnitId: "",
+      });
+      setAdminMessage("Voter engagement task created.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not create voter engagement task.");
     }
   }
 
@@ -1591,6 +1650,130 @@ export default function AdminDashboardPage() {
             </div>
           )}
         </section>
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <h2>Voter Engagement Tasks</h2>
+        <p className="muted">Create optional voter actions that can be claimed for redeemable points inside your territory scope.</p>
+        <div className="grid" style={{ gridTemplateColumns: "minmax(320px, 1fr) minmax(0, 1.3fr)", marginTop: 16 }}>
+          <section className="panel card">
+            <form className="form" onSubmit={handleCreateEngagementTask}>
+              <label className="field">
+                <span>Title</span>
+                <input value={engagementTaskForm.title} onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, title: event.target.value })} required />
+              </label>
+              <label className="field">
+                <span>Description</span>
+                <textarea value={engagementTaskForm.description} onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, description: event.target.value })} rows={4} required />
+              </label>
+              <label className="field">
+                <span>Task Type</span>
+                <select value={engagementTaskForm.type} onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, type: event.target.value as VoterEngagementTaskItem["type"] })}>
+                  <option value="REGISTRATION">Registration</option>
+                  <option value="REFERRAL">Referral</option>
+                  <option value="POLL_RESPONSE">Poll response</option>
+                </select>
+              </label>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                <label className="field">
+                  <span>Reward Points</span>
+                  <input value={engagementTaskForm.rewardPoints} onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, rewardPoints: event.target.value })} required />
+                </label>
+                <label className="field">
+                  <span>Target Count</span>
+                  <input value={engagementTaskForm.targetCount} onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, targetCount: event.target.value })} required />
+                </label>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+                <label className="field">
+                  <span>State</span>
+                  <select
+                    value={engagementTaskForm.stateId}
+                    onChange={(event) => {
+                      const stateId = event.target.value;
+                      setEngagementTaskForm({ ...engagementTaskForm, stateId, lgaId: "", wardId: "", pollingUnitId: "" });
+                      void refreshTerritoryOptions({ stateId });
+                    }}
+                  >
+                    <option value="">National</option>
+                    {states.map((state) => (
+                      <option key={state.id} value={state.id}>{state.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>LGA</span>
+                  <select
+                    value={engagementTaskForm.lgaId}
+                    disabled={!engagementTaskForm.stateId}
+                    onChange={(event) => {
+                      const lgaId = event.target.value;
+                      setEngagementTaskForm({ ...engagementTaskForm, lgaId, wardId: "", pollingUnitId: "" });
+                      void refreshTerritoryOptions({ stateId: engagementTaskForm.stateId, lgaId });
+                    }}
+                  >
+                    <option value="">All LGAs</option>
+                    {lgas.map((lga) => (
+                      <option key={lga.id} value={lga.id}>{lga.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Ward</span>
+                  <select
+                    value={engagementTaskForm.wardId}
+                    disabled={!engagementTaskForm.lgaId}
+                    onChange={(event) => {
+                      const wardId = event.target.value;
+                      setEngagementTaskForm({ ...engagementTaskForm, wardId, pollingUnitId: "" });
+                      void refreshTerritoryOptions({ stateId: engagementTaskForm.stateId, lgaId: engagementTaskForm.lgaId, wardId });
+                    }}
+                  >
+                    <option value="">All wards</option>
+                    {wards.map((ward) => (
+                      <option key={ward.id} value={ward.id}>{ward.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Polling Unit</span>
+                  <select
+                    value={engagementTaskForm.pollingUnitId}
+                    disabled={!engagementTaskForm.wardId}
+                    onChange={(event) => setEngagementTaskForm({ ...engagementTaskForm, pollingUnitId: event.target.value })}
+                  >
+                    <option value="">All polling units</option>
+                    {pollingUnits.map((pollingUnit) => (
+                      <option key={pollingUnit.id} value={pollingUnit.id}>{pollingUnit.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button className="button" type="submit">Create engagement task</button>
+            </form>
+          </section>
+
+          <section className="panel card">
+            {engagementTasks.length === 0 ? (
+              <p className="muted">No voter engagement tasks created yet.</p>
+            ) : (
+              <div className="reward-list">
+                {engagementTasks.slice(0, 8).map((task) => (
+                  <article key={task.id} className="reward-item">
+                    <strong>{task.title}</strong>
+                    <p>{task.description}</p>
+                    <p className="muted">
+                      {task.type} | {task.rewardPoints} points | target {task.targetCount || 1}
+                    </p>
+                    <p className="muted">
+                      {task.territory.stateId || "national"} | {task.territory.lgaId || "all LGAs"} | {new Date(task.createdAt).toLocaleString()}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

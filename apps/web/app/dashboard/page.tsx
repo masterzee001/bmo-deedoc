@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary } from "@pics-nigeria/shared";
+import type { AuthUserProfile, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary, VoterEngagementTaskItem } from "@pics-nigeria/shared";
 import {
   ApiError,
+  claimVoterEngagementTask,
   createVoterRedemption,
   fetchCurrentUser,
   fetchNotifications,
+  fetchVoterEngagementTasks,
   fetchVoterPosts,
   fetchVoterRedemptions,
   fetchVoterRewards,
@@ -20,18 +22,20 @@ export default function DashboardPage() {
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<PostListItem[]>([]);
+  const [engagementTasks, setEngagementTasks] = useState<VoterEngagementTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ pointsRequested: "", amountRequested: "", note: "" });
   const [message, setMessage] = useState("");
 
   async function loadDashboard(token: string) {
-    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts] = await Promise.all([
+    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts, nextEngagementTasks] = await Promise.all([
       fetchCurrentUser(token),
       fetchVoterRewards(token),
       fetchVoterRedemptions(token),
       fetchNotifications(token),
       fetchVoterPosts(token),
+      fetchVoterEngagementTasks(token),
     ]);
 
     if (currentUser.role !== "VOTER") {
@@ -44,6 +48,7 @@ export default function DashboardPage() {
     setRedemptions(redemptionData.redemptions);
     setNotifications(notificationItems);
     setPosts(visiblePosts);
+    setEngagementTasks(nextEngagementTasks);
   }
 
   useEffect(() => {
@@ -90,6 +95,23 @@ export default function DashboardPage() {
       await loadDashboard(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Redemption request failed.");
+    }
+  }
+
+  async function handleClaimTask(taskId: string) {
+    const token = localStorage.getItem("picsNigeriaToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    setMessage("");
+    try {
+      const result = await claimVoterEngagementTask(token, taskId);
+      setMessage(result.message);
+      await loadDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not claim engagement task.");
     }
   }
 
@@ -144,6 +166,28 @@ export default function DashboardPage() {
           <h2>Available Balance</h2>
           <div className="value">{balance.availablePoints}</div>
         </article>
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <h2>Optional Engagement Tasks</h2>
+        {engagementTasks.length === 0 ? (
+          <p className="muted">No optional engagement tasks are active in your territory right now.</p>
+        ) : (
+          <div className="reward-list">
+            {engagementTasks.slice(0, 6).map((task) => (
+              <article key={task.id} className="reward-item">
+                <strong>{task.title}</strong>
+                <p>{task.description}</p>
+                <p className="muted">
+                  {task.type} | {task.progressCount}/{task.targetCount || 1} | {task.rewardPoints} points
+                </p>
+                <button className="button secondary" type="button" disabled={!task.completed || task.claimed} onClick={() => void handleClaimTask(task.id)}>
+                  {task.claimed ? "Claimed" : task.completed ? "Claim task" : "In progress"}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
 import { createRewardEntryWithNotification } from "../lib/rewards";
+import { recordParticipationAndReward } from "../lib/participation";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth } from "../middleware/auth";
@@ -422,6 +423,13 @@ router.post("/register-voter", async (request, response) => {
         });
       }
     }
+
+    await recordParticipationAndReward(transaction, {
+      voterUserId: user.id,
+      type: "VOTER_REGISTRATION",
+      description: "Completed voter registration",
+      pointsAwarded: 10,
+    });
 
     return user;
   });

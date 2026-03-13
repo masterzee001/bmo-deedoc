@@ -13,6 +13,7 @@ import {
   serializePostListItem,
   serializeRewardBalance,
   serializeRewardRedemption,
+  serializeVoterEngagementTaskItem,
 } from "../lib/serializers";
 import { getRewardBalance } from "../lib/rewards";
 import { validateTerritoryReferences } from "../lib/territory";
@@ -61,6 +62,111 @@ function readRouteId(response: Response, value: string | string[] | undefined, l
   }
 
   return value;
+}
+
+function matchesTaskScope(
+  voterProfile: NonNullable<Express.Request["authUser"]>["voterProfile"],
+  task: {
+    geoPoliticalZoneId: string | null;
+    stateId: string | null;
+    senatorialDistrictId: string | null;
+    federalConstituencyId: string | null;
+    lgaId: string | null;
+    wardId: string | null;
+    stateConstituencyId: string | null;
+    pollingUnitId: string | null;
+  },
+) {
+  if (!voterProfile) {
+    return false;
+  }
+
+  if (task.geoPoliticalZoneId && task.geoPoliticalZoneId !== voterProfile.geoPoliticalZoneId) {
+    return false;
+  }
+  if (task.stateId && task.stateId !== voterProfile.stateId) {
+    return false;
+  }
+  if (task.senatorialDistrictId && task.senatorialDistrictId !== voterProfile.senatorialDistrictId) {
+    return false;
+  }
+  if (task.federalConstituencyId && task.federalConstituencyId !== voterProfile.federalConstituencyId) {
+    return false;
+  }
+  if (task.lgaId && task.lgaId !== voterProfile.lgaId) {
+    return false;
+  }
+  if (task.wardId && task.wardId !== voterProfile.wardId) {
+    return false;
+  }
+  if (task.stateConstituencyId && task.stateConstituencyId !== voterProfile.stateConstituencyId) {
+    return false;
+  }
+  if (task.pollingUnitId && task.pollingUnitId !== voterProfile.pollingUnitId) {
+    return false;
+  }
+
+  return true;
+}
+
+async function resolveEngagementProgress(voterUserId: string, task: {
+  id: string;
+  type: string;
+  targetCount: number | null;
+  createdAt: Date;
+  geoPoliticalZoneId: string | null;
+  stateId: string | null;
+  senatorialDistrictId: string | null;
+  federalConstituencyId: string | null;
+  lgaId: string | null;
+  wardId: string | null;
+  stateConstituencyId: string | null;
+  pollingUnitId: string | null;
+}) {
+  if (task.type === "REGISTRATION") {
+    return 1;
+  }
+
+  if (task.type === "REFERRAL") {
+    return prisma.voterProfile.count({
+      where: {
+        referredByUserId: voterUserId,
+        createdAt: { gte: task.createdAt },
+        geoPoliticalZoneId: task.geoPoliticalZoneId || undefined,
+        stateId: task.stateId || undefined,
+        senatorialDistrictId: task.senatorialDistrictId || undefined,
+        federalConstituencyId: task.federalConstituencyId || undefined,
+        lgaId: task.lgaId || undefined,
+        wardId: task.wardId || undefined,
+        stateConstituencyId: task.stateConstituencyId || undefined,
+        pollingUnitId: task.pollingUnitId || undefined,
+      },
+    });
+  }
+
+  if (task.type === "POLL_RESPONSE") {
+    return prisma.participationEvent.count({
+      where: {
+        voterUserId,
+        type: "POLL_RESPONSE",
+        createdAt: { gte: task.createdAt },
+        relatedPoll: {
+          is: {
+            geoPoliticalZoneId: task.geoPoliticalZoneId || undefined,
+            stateId: task.stateId || undefined,
+            senatorialDistrictId: task.senatorialDistrictId || undefined,
+            federalConstituencyId: task.federalConstituencyId || undefined,
+            lgaId: task.lgaId || undefined,
+            wardId: task.wardId || undefined,
+            stateConstituencyId: task.stateConstituencyId || undefined,
+            pollingUnitId: task.pollingUnitId || undefined,
+          },
+        },
+      },
+    });
+  }
+
+  return 0;
 }
 
 router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, response) => {
@@ -200,6 +306,108 @@ router.get("/polls", requireAuth, requireRole("VOTER"), async (request, response
 
   return response.json({
     polls: visiblePolls.map(serializePollListItem),
+  });
+});
+
+router.get("/engagement-tasks", requireAuth, requireRole("VOTER"), async (request, response) => {
+  const voterProfile = request.authUser?.voterProfile;
+
+  if (!voterProfile) {
+    return response.json({ tasks: [] });
+  }
+
+  const tasks = await prisma.voterEngagementTask.findMany({
+    where: { isActive: true },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  const visibleTasks = tasks.filter((task) => matchesTaskScope(voterProfile, task));
+  const claims = await prisma.voterEngagementClaim.findMany({
+    where: {
+      voterUserId: request.authUser!.id,
+      taskId: { in: visibleTasks.map((task) => task.id) },
+    },
+    select: { taskId: true, progressCount: true },
+  });
+
+  const claimsByTaskId = new Map(claims.map((claim) => [claim.taskId, claim]));
+  const taskItems = [];
+
+  for (const task of visibleTasks) {
+    const progressCount = await resolveEngagementProgress(request.authUser!.id, task);
+    const claimed = claimsByTaskId.has(task.id);
+    const completed = progressCount >= (task.targetCount || 1);
+
+    taskItems.push(
+      serializeVoterEngagementTaskItem({
+        ...task,
+        progressCount,
+        claimed,
+        completed,
+      }),
+    );
+  }
+
+  return response.json({ tasks: taskItems });
+});
+
+router.post("/engagement-tasks/:taskId/claim", requireAuth, requireRole("VOTER"), async (request, response) => {
+  const taskId = readRouteId(response, request.params.taskId, "task id");
+  if (!taskId) {
+    return;
+  }
+
+  const task = await prisma.voterEngagementTask.findUnique({
+    where: { id: taskId },
+  });
+
+  if (!task || !task.isActive) {
+    return response.status(404).json({ message: "Engagement task was not found." });
+  }
+
+  if (!matchesTaskScope(request.authUser?.voterProfile || null, task)) {
+    return response.status(403).json({ message: "This engagement task is outside your territory." });
+  }
+
+  const existingClaim = await prisma.voterEngagementClaim.findUnique({
+    where: {
+      taskId_voterUserId: {
+        taskId,
+        voterUserId: request.authUser!.id,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (existingClaim) {
+    return response.status(409).json({ message: "This engagement task has already been claimed." });
+  }
+
+  const progressCount = await resolveEngagementProgress(request.authUser!.id, task);
+  if (progressCount < (task.targetCount || 1)) {
+    return response.status(400).json({ message: "This engagement task is not complete yet." });
+  }
+
+  await prisma.$transaction(async (transaction) => {
+    await transaction.voterEngagementClaim.create({
+      data: {
+        taskId,
+        voterUserId: request.authUser!.id,
+        progressCount,
+      },
+    });
+
+    await recordParticipationAndReward(transaction, {
+      voterUserId: request.authUser!.id,
+      type: `ENGAGEMENT_TASK:${task.id}`,
+      description: `Engagement task completed: ${task.title}`,
+      pointsAwarded: task.rewardPoints,
+    });
+  });
+
+  return response.status(201).json({
+    message: "Engagement task claimed successfully.",
   });
 });
 

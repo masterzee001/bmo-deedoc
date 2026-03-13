@@ -39,6 +39,7 @@ import {
   serializeNotificationItem,
   serializeRewardRedemption,
   serializeTerritory,
+  serializeVoterEngagementTaskItem,
 } from "../lib/serializers";
 import { toScopeFilter, validateCandidateOfficeTerritory, validateTerritoryReferences } from "../lib/territory";
 import {
@@ -305,6 +306,22 @@ const broadcastCreationSchema = z.object({
   pollingUnitId: z.string().trim().optional(),
 });
 
+const engagementTaskCreationSchema = z.object({
+  title: z.string().trim().min(3),
+  description: z.string().trim().min(10),
+  type: z.enum(["REGISTRATION", "REFERRAL", "POLL_RESPONSE"]),
+  rewardPoints: z.number().int().min(1).max(1000),
+  targetCount: z.number().int().min(1).max(100).optional(),
+  geoPoliticalZoneId: z.string().trim().optional(),
+  stateId: z.string().trim().optional(),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
+  lgaId: z.string().trim().optional(),
+  wardId: z.string().trim().optional(),
+  stateConstituencyId: z.string().trim().optional(),
+  pollingUnitId: z.string().trim().optional(),
+});
+
 function readRouteId(response: Response, value: string | string[] | undefined, label: string): string | null {
   if (typeof value !== "string" || value.trim().length === 0) {
     response.status(400).json({ message: `Invalid ${label}.` });
@@ -548,6 +565,19 @@ function getFieldTaskScopeFilter(actor: Express.Request["authUser"]) {
 }
 
 function buildBroadcastScope(data: z.infer<typeof broadcastCreationSchema>) {
+  return {
+    geoPoliticalZoneId: data.geoPoliticalZoneId || undefined,
+    stateId: data.stateId || undefined,
+    senatorialDistrictId: data.senatorialDistrictId || undefined,
+    federalConstituencyId: data.federalConstituencyId || undefined,
+    lgaId: data.lgaId || undefined,
+    wardId: data.wardId || undefined,
+    stateConstituencyId: data.stateConstituencyId || undefined,
+    pollingUnitId: data.pollingUnitId || undefined,
+  };
+}
+
+function buildEngagementTaskScope(data: z.infer<typeof engagementTaskCreationSchema>) {
   return {
     geoPoliticalZoneId: data.geoPoliticalZoneId || undefined,
     stateId: data.stateId || undefined,
@@ -2725,6 +2755,83 @@ router.post("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
   return response.status(201).json({
     message: "Broadcast sent successfully.",
     broadcast: serializeBroadcastMessageItem(broadcast),
+  });
+});
+
+router.get("/engagement-tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const tasks = await prisma.voterEngagementTask.findMany({
+    where: getFieldTaskScopeFilter(request.authUser),
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  return response.json({
+    tasks: tasks.map((task) =>
+      serializeVoterEngagementTaskItem({
+        ...task,
+        progressCount: 0,
+        completed: false,
+        claimed: false,
+      }),
+    ),
+  });
+});
+
+router.post("/engagement-tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = engagementTaskCreationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid engagement task payload.", errors: parsed.error.flatten() });
+  }
+
+  const targetScope = buildEngagementTaskScope(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(targetScope);
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  if (request.authUser && !isWithinAdminScope(request.authUser, targetScope)) {
+    return response.status(403).json({ message: "You cannot create voter engagement tasks outside your territory scope." });
+  }
+
+  const task = await prisma.voterEngagementTask.create({
+    data: {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      type: parsed.data.type,
+      rewardPoints: parsed.data.rewardPoints,
+      targetCount: parsed.data.targetCount || 1,
+      createdByUserId: request.authUser!.id,
+      geoPoliticalZoneId: targetScope.geoPoliticalZoneId || null,
+      stateId: targetScope.stateId || null,
+      senatorialDistrictId: targetScope.senatorialDistrictId || null,
+      federalConstituencyId: targetScope.federalConstituencyId || null,
+      lgaId: targetScope.lgaId || null,
+      wardId: targetScope.wardId || null,
+      stateConstituencyId: targetScope.stateConstituencyId || null,
+      pollingUnitId: targetScope.pollingUnitId || null,
+    },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId: request.authUser!.id,
+    action: "VOTER_ENGAGEMENT_TASK_CREATED",
+    targetType: "VoterEngagementTask",
+    targetId: task.id,
+    metadata: {
+      type: task.type,
+      rewardPoints: task.rewardPoints,
+      targetCount: task.targetCount,
+    },
+  });
+
+  return response.status(201).json({
+    message: "Voter engagement task created successfully.",
+    task: serializeVoterEngagementTaskItem({
+      ...task,
+      progressCount: 0,
+      completed: false,
+      claimed: false,
+    }),
   });
 });
 

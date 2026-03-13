@@ -165,6 +165,8 @@ model User {
   notifications          Notification[]
   auditLogs              AuditLog[]
   mediaAttachments       MediaAttachment[]          @relation("MediaUploader")
+  createdEngagementTasks VoterEngagementTask[]      @relation("EngagementTaskCreator")
+  engagementTaskClaims   VoterEngagementClaim[]
 
   @@index([role])
   @@index([isActive])
@@ -317,6 +319,60 @@ model VoterProfile {
   @@index([stateConstituencyId])
   @@index([pollingUnitId])
   @@index([referredByUserId])
+}
+
+model VoterEngagementTask {
+  id                   String                 @id @default(cuid())
+  title                String
+  description          String
+  type                 String
+  rewardPoints         Int
+  targetCount          Int?
+  isActive             Boolean                @default(true)
+  createdByUserId      String
+  geoPoliticalZoneId   String?
+  stateId              String?
+  senatorialDistrictId String?
+  federalConstituencyId String?
+  lgaId                String?
+  wardId               String?
+  stateConstituencyId  String?
+  pollingUnitId        String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  createdByUser        User                   @relation("EngagementTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone     GeoPoliticalZone?      @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                State?                 @relation(fields: [stateId], references: [id])
+  senatorialDistrict   SenatorialDistrict?    @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency  FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
+  lga                  LGA?                   @relation(fields: [lgaId], references: [id])
+  ward                 Ward?                  @relation(fields: [wardId], references: [id])
+  stateConstituency    StateConstituency?     @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit          PollingUnit?           @relation(fields: [pollingUnitId], references: [id])
+  claims               VoterEngagementClaim[]
+
+  @@index([createdByUserId])
+  @@index([isActive])
+  @@index([geoPoliticalZoneId])
+  @@index([stateId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+}
+
+model VoterEngagementClaim {
+  id               String              @id @default(cuid())
+  taskId           String
+  voterUserId      String
+  progressCount    Int                 @default(0)
+  claimedAt        DateTime            @default(now())
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  task             VoterEngagementTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  voterUser        User                @relation(fields: [voterUserId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, voterUserId])
+  @@index([voterUserId])
 }
 
 model AdminCandidateAssignment {
@@ -761,6 +817,7 @@ model GeoPoliticalZone {
   incidents          Incident[]
   fieldTasks         FieldTask[]
   broadcastMessages  BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 }
 
 model PoliticalParty {
@@ -796,6 +853,7 @@ model State {
   incidents             Incident[]
   fieldTasks            FieldTask[]
   broadcastMessages     BroadcastMessage[]
+  voterEngagementTasks  VoterEngagementTask[]
   @@index([geoPoliticalZoneId])
 }
 
@@ -817,6 +875,7 @@ model SenatorialDistrict {
   incidents             Incident[]
   fieldTasks            FieldTask[]
   broadcastMessages     BroadcastMessage[]
+  voterEngagementTasks  VoterEngagementTask[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -839,6 +898,7 @@ model FederalConstituency {
   posts                Post[]
   fieldTasks           FieldTask[]
   broadcastMessages    BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -866,6 +926,7 @@ model LGA {
   incidents           Incident[]
   fieldTasks          FieldTask[]
   broadcastMessages   BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -892,6 +953,7 @@ model Ward {
   incidents         Incident[]
   fieldTasks        FieldTask[]
   broadcastMessages BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 
   @@unique([lgaId, name])
   @@index([stateId])
@@ -915,6 +977,7 @@ model StateConstituency {
   posts             Post[]
   fieldTasks        FieldTask[]
   broadcastMessages BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -943,6 +1006,7 @@ model PollingUnit {
   incidents         Incident[]
   fieldTasks        FieldTask[]
   broadcastMessages BroadcastMessage[]
+  voterEngagementTasks VoterEngagementTask[]
 
   @@unique([wardId, name])
   @@index([stateId])

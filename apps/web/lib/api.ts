@@ -28,6 +28,7 @@ import type {
   StateItem,
   StateConstituencyItem,
   FederalConstituencyItem,
+  VoterEngagementTaskItem,
   VoterUserItem,
   WardItem,
 } from "@pics-nigeria/shared";
@@ -310,6 +311,16 @@ export async function fetchAdminBroadcasts(token: string): Promise<BroadcastMess
 
   const payload = await readJson<{ broadcasts: BroadcastMessageItem[] }>(response);
   return payload.broadcasts;
+}
+
+export async function fetchAdminEngagementTasks(token: string): Promise<VoterEngagementTaskItem[]> {
+  const response = await fetch(`${API_BASE_URL}/admin/engagement-tasks`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ tasks: VoterEngagementTaskItem[] }>(response);
+  return payload.tasks;
 }
 
 export async function fetchGeoPoliticalZones(token: string): Promise<GeoPoliticalZoneItem[]> {
@@ -688,6 +699,33 @@ export async function createAdminBroadcast(token: string, body: {
   return readJson<{ message: string; broadcast: BroadcastMessageItem }>(response);
 }
 
+export async function createAdminEngagementTask(token: string, body: {
+  title: string;
+  description: string;
+  type: "REGISTRATION" | "REFERRAL" | "POLL_RESPONSE";
+  rewardPoints: number;
+  targetCount?: number;
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+  pollingUnitId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/engagement-tasks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; task: VoterEngagementTaskItem }>(response);
+}
+
 export async function updateAdminTask(token: string, taskId: string, body: {
   status?: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
   priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -949,6 +987,25 @@ export async function fetchVoterPosts(token: string): Promise<PostListItem[]> {
 
   const payload = await readJson<{ posts: PostListItem[] }>(response);
   return payload.posts;
+}
+
+export async function fetchVoterEngagementTasks(token: string): Promise<VoterEngagementTaskItem[]> {
+  const response = await fetch(`${API_BASE_URL}/voter/engagement-tasks`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ tasks: VoterEngagementTaskItem[] }>(response);
+  return payload.tasks;
+}
+
+export async function claimVoterEngagementTask(token: string, taskId: string) {
+  const response = await fetch(`${API_BASE_URL}/voter/engagement-tasks/${taskId}/claim`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string }>(response);
 }
 
 export async function fetchVoterRedemptions(

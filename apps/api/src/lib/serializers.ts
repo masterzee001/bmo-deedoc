@@ -15,7 +15,18 @@ import type {
   RewardBalanceSummary,
   RewardRedemptionItem,
   TerritorySummary,
+  VoterEngagementTaskType,
+  VoterEngagementTaskItem,
 } from "@pics-nigeria/shared";
+import { VOTER_ENGAGEMENT_TASK_TYPES } from "@pics-nigeria/shared";
+
+function normalizeEngagementTaskType(value: string): VoterEngagementTaskType {
+  if (VOTER_ENGAGEMENT_TASK_TYPES.includes(value as VoterEngagementTaskType)) {
+    return value as VoterEngagementTaskType;
+  }
+
+  throw new Error(`Unsupported voter engagement task type: ${value}`);
+}
 
 export function serializeTerritory(source: {
   geoPoliticalZoneId?: string | null;
@@ -348,5 +359,46 @@ export function serializeBroadcastMessageItem(broadcast: {
     createdAt: broadcast.createdAt.toISOString(),
     updatedAt: broadcast.updatedAt.toISOString(),
     territory: serializeTerritory(broadcast),
+  };
+}
+
+export function serializeVoterEngagementTaskItem(task: {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  rewardPoints: number;
+  targetCount: number | null;
+  isActive: boolean;
+  createdByUserId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+  progressCount: number;
+  completed: boolean;
+  claimed: boolean;
+}): VoterEngagementTaskItem {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    type: normalizeEngagementTaskType(task.type),
+    rewardPoints: task.rewardPoints,
+    targetCount: task.targetCount,
+    isActive: task.isActive,
+    createdByUserId: task.createdByUserId,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+    territory: serializeTerritory(task),
+    progressCount: task.progressCount,
+    completed: task.completed,
+    claimed: task.claimed,
   };
 }
