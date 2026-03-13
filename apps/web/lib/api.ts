@@ -94,6 +94,7 @@ export async function registerVoterUser(body: {
   referredByCode?: string;
   acceptTerms: true;
   contactConsent: true;
+  confirmAdult: true;
 }): Promise<{ message: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
     method: "POST",

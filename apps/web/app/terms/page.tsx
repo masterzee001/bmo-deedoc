@@ -14,6 +14,9 @@ export default function TermsPage() {
           By creating a voter account, you confirm that your registration details, including your polling unit and contact details, are accurate and belong to you.
         </p>
         <p>
+          You confirm that you are 18 years old or above and legally eligible to register and participate as a voter.
+        </p>
+        <p>
           You consent to receive election, civic participation, campaign, and operational messages connected to your registered territory from authorized PICS Nigeria administrators and candidates operating within their permitted scope.
         </p>
         <p>

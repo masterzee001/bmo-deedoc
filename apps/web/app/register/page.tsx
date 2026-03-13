@@ -18,6 +18,7 @@ type FormState = {
   referredByCode: string;
   acceptTerms: boolean;
   contactConsent: boolean;
+  confirmAdult: boolean;
 };
 
 const initialForm: FormState = {
@@ -33,6 +34,7 @@ const initialForm: FormState = {
   referredByCode: "",
   acceptTerms: false,
   contactConsent: false,
+  confirmAdult: false,
 };
 
 export default function RegisterPage() {
@@ -136,6 +138,7 @@ export default function RegisterPage() {
         referredByCode: form.referredByCode.trim() || undefined,
         acceptTerms: true,
         contactConsent: true,
+        confirmAdult: true,
       });
 
       setMessage(result.message);
@@ -173,21 +176,34 @@ export default function RegisterPage() {
 
           <label className="field">
             <span>Phone</span>
-            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} required />
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="\d{7,15}"
+              minLength={7}
+              maxLength={15}
+              value={form.phone}
+              onChange={(event) => setForm({ ...form, phone: event.target.value.replace(/\D/g, "") })}
+              required
+            />
+            <small className="muted">Enter digits only. Use at least 7 digits and no more than 15.</small>
           </label>
 
           <label className="field">
             <span>Password</span>
-            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+            <input type="password" minLength={8} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+            <small className="muted">Use at least 8 characters.</small>
           </label>
 
           <label className="field">
             <span>Voter Card Number</span>
             <input
               value={form.voterCardNumber}
-              onChange={(event) => setForm({ ...form, voterCardNumber: event.target.value })}
+              minLength={5}
+              onChange={(event) => setForm({ ...form, voterCardNumber: event.target.value.toUpperCase() })}
               required
             />
+            <small className="muted">Enter the voter card number exactly as printed on your PVC.</small>
           </label>
 
           <label className="field">
@@ -258,7 +274,13 @@ export default function RegisterPage() {
               <input
                 type="checkbox"
                 checked={form.acceptTerms}
-                onChange={(event) => setForm({ ...form, acceptTerms: event.target.checked, contactConsent: event.target.checked })}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    acceptTerms: event.target.checked,
+                    contactConsent: event.target.checked,
+                  })
+                }
                 required
               />
               <span>
@@ -267,10 +289,23 @@ export default function RegisterPage() {
             </label>
           </label>
 
+          <label className="field" style={{ alignItems: "flex-start" }}>
+            <span>Age Confirmation</span>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.confirmAdult}
+                onChange={(event) => setForm({ ...form, confirmAdult: event.target.checked })}
+                required
+              />
+              <span>I confirm that I am 18 years old or above and legally eligible to register as a voter.</span>
+            </label>
+          </label>
+
           {error ? <p className="error">{error}</p> : null}
           {message ? <p className="muted">{message}</p> : null}
 
-          <button className="button" type="submit" disabled={loading || !form.acceptTerms}>
+          <button className="button" type="submit" disabled={loading || !form.acceptTerms || !form.confirmAdult}>
             {loading ? "Creating account..." : "Create account"}
           </button>
         </form>

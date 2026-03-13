@@ -39,7 +39,7 @@ const updatePasswordSchema = z.object({
 const registerVoterSchema = z.object({
   fullName: z.string().trim().min(2),
   email: z.string().email(),
-  phone: z.string().trim().min(7),
+  phone: z.string().trim().regex(/^\d{7,15}$/),
   password: z.string().min(8),
   voterCardNumber: z.string().trim().min(5),
   stateId: z.string().trim().min(1),
@@ -52,6 +52,7 @@ const registerVoterSchema = z.object({
   referredByCode: z.string().trim().min(4).optional(),
   acceptTerms: z.boolean().optional(),
   contactConsent: z.boolean().optional(),
+  confirmAdult: z.boolean().optional(),
 });
 
 router.post("/login", async (request, response) => {
@@ -261,20 +262,39 @@ router.post("/register-voter", async (request, response) => {
     });
   }
 
+  if (parsed.data.confirmAdult === false) {
+    return response.status(400).json({
+      message: "You must confirm that you are 18 years or older to register.",
+    });
+  }
+
   const email = normalizeEmail(parsed.data.email);
   const voterCardNumber = parsed.data.voterCardNumber.trim().toUpperCase();
 
   const [existingUser, existingVoterCard] = await Promise.all([
-    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+    prisma.user.findUnique({
+      where: { email },
+      include: {
+        voterProfile: {
+          select: { id: true },
+        },
+      },
+    }),
     prisma.voterProfile.findUnique({ where: { voterCardNumber }, select: { id: true } }),
   ]);
 
-  if (existingUser) {
-    return response.status(409).json({ message: "Email is already registered." });
+  if (existingUser?.voterProfile) {
+    return response.status(409).json({ message: "Voter details already exist for this email." });
   }
 
   if (existingVoterCard) {
     return response.status(409).json({ message: "Voter card number is already registered." });
+  }
+
+  if (existingUser && !(await verifyPassword(parsed.data.password, existingUser.passwordHash))) {
+    return response.status(401).json({
+      message: "This email already belongs to an existing account. Use the same account password to add voter details.",
+    });
   }
 
   const territoryReferenceError = await validateTerritoryReferences(parsed.data);
@@ -359,18 +379,28 @@ router.post("/register-voter", async (request, response) => {
   };
 
   const createdUser = await prisma.$transaction(async (transaction) => {
-    const user = await transaction.user.create({
-      data: {
-        name: parsed.data.fullName.trim(),
-        email,
-        phone: parsed.data.phone.trim(),
-        passwordHash,
-        role: UserRole.VOTER,
-        voterProfile: {
-          create: voterProfileData,
-        },
-      },
-    });
+    const user = existingUser
+      ? await transaction.user.update({
+          where: { id: existingUser.id },
+          data: {
+            phone: existingUser.phone || parsed.data.phone.trim(),
+            voterProfile: {
+              create: voterProfileData,
+            },
+          },
+        })
+      : await transaction.user.create({
+          data: {
+            name: parsed.data.fullName.trim(),
+            email,
+            phone: parsed.data.phone.trim(),
+            passwordHash,
+            role: UserRole.VOTER,
+            voterProfile: {
+              create: voterProfileData,
+            },
+          },
+        });
 
     if (referrer) {
       const existingReward = await transaction.rewardLedger.findFirst({
