@@ -10,8 +10,12 @@ import type {
   CandidateVoterItem,
   FeedbackListItem,
   IncidentListItem,
+  LgaItem,
   NotificationItem,
+  PollingUnitItem,
   PostListItem,
+  StateItem,
+  WardItem,
 } from "@pics-nigeria/shared";
 import {
   ApiError,
@@ -29,7 +33,12 @@ import {
   fetchCandidateVoters,
   fetchCurrentUser,
   fetchNotifications,
+  fetchPublicLgas,
+  fetchPublicPollingUnits,
+  fetchPublicStates,
+  fetchPublicWards,
   markAllNotificationsRead,
+  uploadCandidateImage,
   updateCandidatePost,
   updateCandidateEvent,
   updateCandidateProfile,
@@ -117,6 +126,10 @@ export default function CandidateDashboardPage() {
   const [incidents, setIncidents] = useState<IncidentListItem[]>([]);
   const [incidentCount, setIncidentCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [states, setStates] = useState<StateItem[]>([]);
+  const [lgas, setLgas] = useState<LgaItem[]>([]);
+  const [wards, setWards] = useState<WardItem[]>([]);
+  const [pollingUnits, setPollingUnits] = useState<PollingUnitItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
@@ -128,6 +141,7 @@ export default function CandidateDashboardPage() {
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
+    portraitAssetId: "",
     portraitUrl: "",
     campaignSlogan: "",
     bio: "",
@@ -154,12 +168,22 @@ export default function CandidateDashboardPage() {
     title: "",
     description: "",
     venue: "",
+    coverImageAssetId: "",
     coverImageUrl: "",
-    registrationUrl: "",
+    stateId: "",
+    lgaId: "",
+    wardId: "",
+    pollingUnitId: "",
     startsAt: "",
     endsAt: "",
     isPublished: true,
   });
+  const canNarrowEventTerritory = Boolean(
+    profile &&
+      !profile.territory.senatorialDistrictId &&
+      !profile.territory.federalConstituencyId &&
+      !profile.territory.stateConstituencyId,
+  );
 
   async function hydrateDashboard(token: string) {
     const data = await loadCandidateDashboard(token);
@@ -176,6 +200,7 @@ export default function CandidateDashboardPage() {
     setNotifications(data.nextNotifications);
     setProfileForm({
       portraitUrl: data.profile.portraitUrl || "",
+      portraitAssetId: data.profile.portraitAssetId || "",
       campaignSlogan: data.profile.campaignSlogan || "",
       bio: data.profile.bio || "",
       websiteUrl: data.profile.websiteUrl || "",
@@ -184,6 +209,7 @@ export default function CandidateDashboardPage() {
       xUrl: data.profile.xUrl || "",
       isProfilePublished: data.profile.isProfilePublished,
     });
+    setStates(await fetchPublicStates());
   }
 
   useEffect(() => {
@@ -201,6 +227,39 @@ export default function CandidateDashboardPage() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!eventForm.stateId) {
+      setLgas([]);
+      return;
+    }
+
+    fetchPublicLgas(eventForm.stateId)
+      .then(setLgas)
+      .catch(() => setLgas([]));
+  }, [eventForm.stateId]);
+
+  useEffect(() => {
+    if (!eventForm.stateId || !eventForm.lgaId) {
+      setWards([]);
+      return;
+    }
+
+    fetchPublicWards(eventForm.stateId, eventForm.lgaId)
+      .then(setWards)
+      .catch(() => setWards([]));
+  }, [eventForm.stateId, eventForm.lgaId]);
+
+  useEffect(() => {
+    if (!eventForm.stateId || !eventForm.lgaId || !eventForm.wardId) {
+      setPollingUnits([]);
+      return;
+    }
+
+    fetchPublicPollingUnits(eventForm.stateId, eventForm.lgaId, eventForm.wardId)
+      .then(setPollingUnits)
+      .catch(() => setPollingUnits([]));
+  }, [eventForm.stateId, eventForm.lgaId, eventForm.wardId]);
 
   async function handleProfileSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -223,6 +282,48 @@ export default function CandidateDashboardPage() {
       setError(caughtError instanceof Error ? caughtError.message : "Could not update your candidate profile.");
     } finally {
       setSubmittingProfile(false);
+    }
+  }
+
+  async function handleProfileImageUpload(file: File | null) {
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+    if (!token || !file) {
+      return;
+    }
+
+    setError("");
+    setStatusMessage("");
+    try {
+      const result = await uploadCandidateImage(token, "profile-photo", file);
+      setProfileForm((current) => ({
+        ...current,
+        portraitAssetId: result.asset.id,
+        portraitUrl: result.asset.fileUrl || current.portraitUrl,
+      }));
+      setStatusMessage(result.message);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not upload profile photo.");
+    }
+  }
+
+  async function handleEventCoverUpload(file: File | null) {
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+    if (!token || !file) {
+      return;
+    }
+
+    setError("");
+    setStatusMessage("");
+    try {
+      const result = await uploadCandidateImage(token, "event-cover", file);
+      setEventForm((current) => ({
+        ...current,
+        coverImageAssetId: result.asset.id,
+        coverImageUrl: result.asset.fileUrl || current.coverImageUrl,
+      }));
+      setStatusMessage(result.message);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not upload event cover.");
     }
   }
 
@@ -317,8 +418,11 @@ export default function CandidateDashboardPage() {
           title: eventForm.title,
           description: eventForm.description,
           venue: eventForm.venue,
-          coverImageUrl: eventForm.coverImageUrl,
-          registrationUrl: eventForm.registrationUrl,
+          coverImageAssetId: eventForm.coverImageAssetId || undefined,
+          stateId: eventForm.stateId || undefined,
+          lgaId: eventForm.lgaId || undefined,
+          wardId: eventForm.wardId || undefined,
+          pollingUnitId: eventForm.pollingUnitId || undefined,
           startsAt: new Date(eventForm.startsAt).toISOString(),
           endsAt: eventForm.endsAt ? new Date(eventForm.endsAt).toISOString() : null,
           isPublished: eventForm.isPublished,
@@ -329,8 +433,11 @@ export default function CandidateDashboardPage() {
           title: eventForm.title,
           description: eventForm.description,
           venue: eventForm.venue,
-          coverImageUrl: eventForm.coverImageUrl,
-          registrationUrl: eventForm.registrationUrl,
+          coverImageAssetId: eventForm.coverImageAssetId || undefined,
+          stateId: eventForm.stateId || undefined,
+          lgaId: eventForm.lgaId || undefined,
+          wardId: eventForm.wardId || undefined,
+          pollingUnitId: eventForm.pollingUnitId || undefined,
           startsAt: new Date(eventForm.startsAt).toISOString(),
           endsAt: eventForm.endsAt ? new Date(eventForm.endsAt).toISOString() : undefined,
           isPublished: eventForm.isPublished,
@@ -343,8 +450,12 @@ export default function CandidateDashboardPage() {
         title: "",
         description: "",
         venue: "",
+        coverImageAssetId: "",
         coverImageUrl: "",
-        registrationUrl: "",
+        stateId: "",
+        lgaId: "",
+        wardId: "",
+        pollingUnitId: "",
         startsAt: "",
         endsAt: "",
         isPublished: true,
@@ -441,7 +552,11 @@ export default function CandidateDashboardPage() {
       description: item.description,
       venue: item.venue,
       coverImageUrl: item.coverImageUrl || "",
-      registrationUrl: item.registrationUrl || "",
+      coverImageAssetId: item.coverImageAssetId || "",
+      stateId: item.territory.stateId || "",
+      lgaId: item.territory.lgaId || "",
+      wardId: item.territory.wardId || "",
+      pollingUnitId: item.territory.pollingUnitId || "",
       startsAt: item.startsAt.slice(0, 16),
       endsAt: item.endsAt ? item.endsAt.slice(0, 16) : "",
       isPublished: item.isPublished,
@@ -581,9 +696,15 @@ export default function CandidateDashboardPage() {
           <p className="muted">Keep your public-facing candidate profile polished before publishing it to voters.</p>
           <form className="form" onSubmit={handleProfileSubmit}>
             <label className="field">
-              <span>Portrait URL</span>
-              <input value={profileForm.portraitUrl} onChange={(event) => setProfileForm({ ...profileForm, portraitUrl: event.target.value })} />
+              <span>Profile photo upload</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleProfileImageUpload(event.target.files?.[0] || null)} />
             </label>
+            {profileForm.portraitUrl ? (
+              <div className="candidate-identity">
+                <img src={profileForm.portraitUrl} alt={`${user.name} portrait preview`} className="candidate-portrait" />
+                <p className="muted">Uploaded portrait preview. Use a clear office-ready headshot.</p>
+              </div>
+            ) : null}
             <label className="field">
               <span>Campaign slogan</span>
               <input value={profileForm.campaignSlogan} onChange={(event) => setProfileForm({ ...profileForm, campaignSlogan: event.target.value })} maxLength={160} />
@@ -752,13 +873,62 @@ export default function CandidateDashboardPage() {
               <input value={eventForm.venue} onChange={(event) => setEventForm({ ...eventForm, venue: event.target.value })} minLength={3} required />
             </label>
             <label className="field">
-              <span>Cover image URL</span>
-              <input value={eventForm.coverImageUrl} onChange={(event) => setEventForm({ ...eventForm, coverImageUrl: event.target.value })} />
+              <span>Event cover upload</span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void handleEventCoverUpload(event.target.files?.[0] || null)} />
             </label>
-            <label className="field">
-              <span>Registration URL</span>
-              <input value={eventForm.registrationUrl} onChange={(event) => setEventForm({ ...eventForm, registrationUrl: event.target.value })} />
-            </label>
+            {eventForm.coverImageUrl ? <img src={eventForm.coverImageUrl} alt="Event cover preview" className="campaign-event-cover" /> : null}
+            {canNarrowEventTerritory ? (
+              <>
+                <label className="field">
+                  <span>Target state</span>
+                  <select value={eventForm.stateId} onChange={(event) => setEventForm({ ...eventForm, stateId: event.target.value, lgaId: "", wardId: "", pollingUnitId: "" })}>
+                    <option value="">All eligible states in territory</option>
+                    {states
+                      .filter((state) => !profile.territory.stateId || state.id === profile.territory.stateId)
+                      .map((state) => (
+                        <option key={state.id} value={state.id}>{state.name}</option>
+                      ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Target LGA</span>
+                  <select value={eventForm.lgaId} onChange={(event) => setEventForm({ ...eventForm, lgaId: event.target.value, wardId: "", pollingUnitId: "" })} disabled={!eventForm.stateId}>
+                    <option value="">All LGAs in territory</option>
+                    {lgas
+                      .filter((lga) => !profile.territory.lgaId || lga.id === profile.territory.lgaId)
+                      .map((lga) => (
+                        <option key={lga.id} value={lga.id}>{lga.name}</option>
+                      ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Target ward</span>
+                  <select value={eventForm.wardId} onChange={(event) => setEventForm({ ...eventForm, wardId: event.target.value, pollingUnitId: "" })} disabled={!eventForm.lgaId}>
+                    <option value="">All wards in territory</option>
+                    {wards
+                      .filter((ward) => !profile.territory.wardId || ward.id === profile.territory.wardId)
+                      .map((ward) => (
+                        <option key={ward.id} value={ward.id}>{ward.name}</option>
+                      ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Target polling unit</span>
+                  <select value={eventForm.pollingUnitId} onChange={(event) => setEventForm({ ...eventForm, pollingUnitId: event.target.value })} disabled={!eventForm.wardId}>
+                    <option value="">All polling units in territory</option>
+                    {pollingUnits
+                      .filter((unit) => !profile.territory.pollingUnitId || unit.id === profile.territory.pollingUnitId)
+                      .map((unit) => (
+                        <option key={unit.id} value={unit.id}>{unit.name}</option>
+                      ))}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <p className="muted">
+                This office already maps to a fixed constituency. Published events can reach voters in that assigned territory, and voters confirm attendance in-app with RSVP.
+              </p>
+            )}
             <label className="field">
               <span>Starts at</span>
               <input type="datetime-local" value={eventForm.startsAt} onChange={(event) => setEventForm({ ...eventForm, startsAt: event.target.value })} required />
@@ -773,7 +943,7 @@ export default function CandidateDashboardPage() {
                 checked={eventForm.isPublished}
                 onChange={(event) => setEventForm({ ...eventForm, isPublished: event.target.checked })}
               />
-              <span>Publish for voter discovery</span>
+              <span>Publish for voter discovery in the selected place</span>
             </label>
             <div className="action-row">
               <button className="button" type="submit" disabled={submittingEvent}>
@@ -789,8 +959,12 @@ export default function CandidateDashboardPage() {
                       title: "",
                       description: "",
                       venue: "",
+                      coverImageAssetId: "",
                       coverImageUrl: "",
-                      registrationUrl: "",
+                      stateId: "",
+                      lgaId: "",
+                      wardId: "",
+                      pollingUnitId: "",
                       startsAt: "",
                       endsAt: "",
                       isPublished: true,

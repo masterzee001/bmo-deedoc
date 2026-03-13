@@ -205,6 +205,7 @@ export function serializeCandidateProfileEditorItem(candidate: {
   name: string;
   officeType: CandidateProfileEditorItem["officeType"];
   politicalPartyId: string | null;
+  portraitAssetId?: string | null;
   portraitUrl: string | null;
   campaignSlogan: string | null;
   bio: string | null;
@@ -227,6 +228,7 @@ export function serializeCandidateProfileEditorItem(candidate: {
     name: candidate.name,
     officeType: candidate.officeType,
     politicalPartyId: candidate.politicalPartyId,
+    portraitAssetId: candidate.portraitAssetId ?? null,
     portraitUrl: candidate.portraitUrl,
     campaignSlogan: candidate.campaignSlogan,
     bio: candidate.bio,
@@ -243,6 +245,7 @@ export function serializeCandidatePublicListItem(candidate: {
   userId: string;
   name: string;
   officeType: CandidatePublicListItem["officeType"];
+  portraitAssetId?: string | null;
   portraitUrl: string | null;
   campaignSlogan: string | null;
   bio: string | null;
@@ -275,6 +278,7 @@ export function serializeCandidatePublicListItem(candidate: {
   return {
     userId: candidate.userId,
     name: candidate.name,
+    portraitAssetId: candidate.portraitAssetId ?? null,
     portraitUrl: candidate.portraitUrl,
     officeType: candidate.officeType,
     campaignSlogan: candidate.campaignSlogan,
@@ -308,6 +312,7 @@ export function serializeCandidatePublicProfile(candidate: {
   userId: string;
   name: string;
   officeType: CandidatePublicProfile["officeType"];
+  portraitAssetId?: string | null;
   portraitUrl: string | null;
   campaignSlogan: string | null;
   bio: string | null;
@@ -402,6 +407,7 @@ export function serializeCampaignEventItem(event: {
   title: string;
   description: string;
   venue: string;
+  coverImageAssetId?: string | null;
   coverImageUrl: string | null;
   registrationUrl: string | null;
   startsAt: Date;
@@ -446,6 +452,7 @@ export function serializeCampaignEventItem(event: {
     title: event.title,
     description: event.description,
     venue: event.venue,
+    coverImageAssetId: event.coverImageAssetId ?? null,
     coverImageUrl: event.coverImageUrl ?? null,
     registrationUrl: event.registrationUrl ?? null,
     startsAt: event.startsAt.toISOString(),

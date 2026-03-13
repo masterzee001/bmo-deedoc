@@ -136,6 +136,11 @@ enum CampaignEventRsvpStatus {
   GOING
 }
 
+enum CandidateMediaAssetKind {
+  PROFILE_PHOTO
+  EVENT_COVER
+}
+
 model User {
   id                     String                     @id @default(cuid())
   name                   String
@@ -182,6 +187,7 @@ model User {
   createdCampaignEvents  CampaignEvent[]            @relation("CampaignEventCreator")
   candidateCampaignEvents CampaignEvent[]           @relation("CampaignEventCandidate")
   campaignEventRsvps     CampaignEventRsvp[]
+  candidateMediaAssets   CandidateMediaAsset[]      @relation("CandidateMediaOwner")
 
   @@index([role])
   @@index([isActive])
@@ -229,6 +235,7 @@ model CandidateProfile {
   geoPoliticalZoneId    String?
   politicalPartyId      String?
   portraitUrl           String?
+  portraitAssetId       String?
   campaignSlogan        String?
   bio                   String?
   websiteUrl            String?
@@ -255,10 +262,12 @@ model CandidateProfile {
   ward                  Ward?                @relation(fields: [wardId], references: [id])
   stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
   pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
+  portraitAsset         CandidateMediaAsset? @relation("CandidateProfilePortraitAsset", fields: [portraitAssetId], references: [id], onDelete: SetNull)
 
   @@index([officeType])
   @@index([geoPoliticalZoneId])
   @@index([politicalPartyId])
+  @@index([portraitAssetId])
   @@index([isProfilePublished])
   @@index([stateId])
   @@index([senatorialDistrictId])
@@ -457,6 +466,7 @@ model CampaignEvent {
   description           String
   venue                 String
   coverImageUrl         String?
+  coverImageAssetId     String?
   registrationUrl       String?
   startsAt              DateTime
   endsAt                DateTime?
@@ -481,12 +491,14 @@ model CampaignEvent {
   ward                  Ward?                    @relation(fields: [wardId], references: [id])
   stateConstituency     StateConstituency?       @relation(fields: [stateConstituencyId], references: [id])
   pollingUnit           PollingUnit?             @relation(fields: [pollingUnitId], references: [id])
+  coverImageAsset       CandidateMediaAsset?     @relation("CampaignEventCoverAsset", fields: [coverImageAssetId], references: [id], onDelete: SetNull)
   rsvps                 CampaignEventRsvp[]
 
   @@index([candidateUserId])
   @@index([createdByUserId])
   @@index([isPublished])
   @@index([startsAt])
+  @@index([coverImageAssetId])
   @@index([stateId])
   @@index([lgaId])
   @@index([wardId])
@@ -506,6 +518,24 @@ model CampaignEventRsvp {
   @@unique([eventId, voterUserId])
   @@index([voterUserId])
   @@index([status])
+}
+
+model CandidateMediaAsset {
+  id               String                  @id @default(cuid())
+  ownerUserId      String
+  kind             CandidateMediaAssetKind
+  fileName         String
+  mimeType         String
+  data             Bytes
+  sizeBytes        Int
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  ownerUser        User                    @relation("CandidateMediaOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  portraitProfiles CandidateProfile[]      @relation("CandidateProfilePortraitAsset")
+  coverEvents      CampaignEvent[]         @relation("CampaignEventCoverAsset")
+
+  @@index([ownerUserId])
+  @@index([kind])
 }
 
 model Poll {

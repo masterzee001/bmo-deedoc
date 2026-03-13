@@ -227,6 +227,7 @@ export type CandidateListItem = {
 export type CandidatePublicListItem = {
   userId: string;
   name: string;
+  portraitAssetId: string | null;
   portraitUrl: string | null;
   officeType: CandidateOfficeType;
   campaignSlogan: string | null;
@@ -267,6 +268,7 @@ export type CandidateProfileEditorItem = {
   name: string;
   officeType: CandidateOfficeType;
   politicalPartyId: string | null;
+  portraitAssetId: string | null;
   portraitUrl: string | null;
   campaignSlogan: string | null;
   bio: string | null;
@@ -451,6 +453,7 @@ export type CampaignEventItem = {
   title: string;
   description: string;
   venue: string;
+  coverImageAssetId: string | null;
   coverImageUrl: string | null;
   registrationUrl: string | null;
   startsAt: string;

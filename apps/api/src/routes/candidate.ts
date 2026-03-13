@@ -1,5 +1,5 @@
-import { Router } from "express";
-import type { Response } from "express";
+import express, { Router } from "express";
+import type { Request, Response } from "express";
 import { AssignmentPermissionType, BroadcastAudience, NotificationType, Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { CAMPAIGN_MEDIA_TYPES } from "@pics-nigeria/shared";
@@ -49,7 +49,7 @@ const postSchema = candidatePostBaseSchema.superRefine((data, context) => {
 });
 
 const candidateProfileSchema = z.object({
-  portraitUrl: z.string().url().optional().or(z.literal("")),
+  portraitAssetId: z.string().trim().optional().or(z.literal("")),
   campaignSlogan: z.string().trim().max(160).optional().or(z.literal("")),
   bio: z.string().trim().max(2000).optional().or(z.literal("")),
   websiteUrl: z.string().url().optional().or(z.literal("")),
@@ -97,8 +97,11 @@ const candidateEventSchema = z.object({
   title: z.string().trim().min(3).max(120),
   description: z.string().trim().min(10).max(2000),
   venue: z.string().trim().min(3).max(160),
-  coverImageUrl: z.string().url().optional().or(z.literal("")),
-  registrationUrl: z.string().url().optional().or(z.literal("")),
+  coverImageAssetId: z.string().trim().optional().or(z.literal("")),
+  stateId: z.string().trim().optional(),
+  lgaId: z.string().trim().optional(),
+  wardId: z.string().trim().optional(),
+  pollingUnitId: z.string().trim().optional(),
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime().optional().or(z.literal("")),
   isPublished: z.boolean().optional(),
@@ -116,8 +119,11 @@ const candidateEventUpdateSchema = z.object({
   title: z.string().trim().min(3).max(120).optional(),
   description: z.string().trim().min(10).max(2000).optional(),
   venue: z.string().trim().min(3).max(160).optional(),
-  coverImageUrl: z.string().url().optional().or(z.literal("")),
-  registrationUrl: z.string().url().optional().or(z.literal("")),
+  coverImageAssetId: z.string().trim().optional().or(z.literal("")),
+  stateId: z.string().trim().optional().or(z.literal("")),
+  lgaId: z.string().trim().optional().or(z.literal("")),
+  wardId: z.string().trim().optional().or(z.literal("")),
+  pollingUnitId: z.string().trim().optional().or(z.literal("")),
   startsAt: z.string().datetime().optional(),
   endsAt: z.string().datetime().optional().or(z.literal("")).nullable(),
   isPublished: z.boolean().optional(),
@@ -131,7 +137,7 @@ const candidateEventUpdateSchema = z.object({
   }
 });
 
-function buildCandidateScope(candidateProfile: NonNullable<Express.Request["authUser"]>["candidateProfile"]) {
+function buildCandidateScope(candidateProfile: NonNullable<Request["authUser"]>["candidateProfile"]) {
   return {
     geoPoliticalZoneId: candidateProfile?.geoPoliticalZoneId || undefined,
     stateId: candidateProfile?.stateId || undefined,
@@ -193,6 +199,98 @@ async function canAdminPublishForCandidate(actorId: string, candidateUserId: str
 function toNullableString(value?: string) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function buildAssetUrl(request: Request, assetId: string | null | undefined) {
+  if (!assetId) {
+    return null;
+  }
+
+  const protocol = request.get("x-forwarded-proto") || request.protocol;
+  const host = request.get("x-forwarded-host") || request.get("host");
+
+  if (!host) {
+    return null;
+  }
+
+  return `${protocol}://${host}/candidate/assets/${assetId}`;
+}
+
+function resolveCandidateProfileImage(request: Request, profile: { portraitAssetId?: string | null; portraitUrl?: string | null }) {
+  return buildAssetUrl(request, profile.portraitAssetId) || profile.portraitUrl || null;
+}
+
+function resolveEventCoverImage(request: Request, event: { coverImageAssetId?: string | null; coverImageUrl?: string | null }) {
+  return buildAssetUrl(request, event.coverImageAssetId) || event.coverImageUrl || null;
+}
+
+async function assertAssetOwnership(ownerUserId: string, assetId?: string | null) {
+  if (!assetId) {
+    return true;
+  }
+
+  const asset = await prisma.candidateMediaAsset.findUnique({
+    where: { id: assetId },
+    select: { id: true, ownerUserId: true },
+  });
+
+  return asset?.ownerUserId === ownerUserId;
+}
+
+function validateCandidateTargetScope(
+  candidateProfile: CandidateScopedProfile & {
+    geoPoliticalZoneId?: string | null;
+    senatorialDistrictId?: string | null;
+    federalConstituencyId?: string | null;
+    stateConstituencyId?: string | null;
+  },
+  input: { stateId?: string; lgaId?: string; wardId?: string; pollingUnitId?: string },
+) {
+  if (
+    (candidateProfile.senatorialDistrictId || candidateProfile.federalConstituencyId || candidateProfile.stateConstituencyId) &&
+    (input.stateId || input.lgaId || input.wardId || input.pollingUnitId)
+  ) {
+    return "Candidates assigned to senatorial, federal-constituency, or state-constituency offices cannot narrow event discovery below their assigned office territory yet.";
+  }
+
+  if (candidateProfile.stateId && input.stateId && input.stateId !== candidateProfile.stateId) {
+    return "Target state must remain inside your assigned territory.";
+  }
+
+  if (candidateProfile.lgaId && input.lgaId && input.lgaId !== candidateProfile.lgaId) {
+    return "Target LGA must remain inside your assigned territory.";
+  }
+
+  if (candidateProfile.wardId && input.wardId && input.wardId !== candidateProfile.wardId) {
+    return "Target ward must remain inside your assigned territory.";
+  }
+
+  if (candidateProfile.pollingUnitId && input.pollingUnitId && input.pollingUnitId !== candidateProfile.pollingUnitId) {
+    return "Target polling unit must remain inside your assigned territory.";
+  }
+
+  return null;
+}
+
+function buildCandidateEventTerritory(
+  candidateProfile: CandidateScopedProfile & {
+    geoPoliticalZoneId?: string | null;
+    senatorialDistrictId?: string | null;
+    federalConstituencyId?: string | null;
+    stateConstituencyId?: string | null;
+  },
+  input: { stateId?: string; lgaId?: string; wardId?: string; pollingUnitId?: string },
+) {
+  return {
+    geoPoliticalZoneId: candidateProfile.geoPoliticalZoneId || null,
+    stateId: input.stateId || candidateProfile.stateId || null,
+    senatorialDistrictId: candidateProfile.senatorialDistrictId || null,
+    federalConstituencyId: candidateProfile.federalConstituencyId || null,
+    lgaId: input.lgaId || candidateProfile.lgaId || null,
+    wardId: input.wardId || candidateProfile.wardId || null,
+    stateConstituencyId: candidateProfile.stateConstituencyId || null,
+    pollingUnitId: input.pollingUnitId || candidateProfile.pollingUnitId || null,
+  };
 }
 
 const candidatePublicInclude = {
@@ -260,7 +358,7 @@ function buildCandidateMaterialTerritory(candidateProfile: CandidateScopedProfil
   };
 }
 
-async function getAuthorizedCandidateForPublishing(actor: NonNullable<Express.Request["authUser"]>, candidateUserId: string) {
+async function getAuthorizedCandidateForPublishing(actor: NonNullable<Request["authUser"]>, candidateUserId: string) {
   const candidate = await prisma.user.findUnique({
     where: { id: candidateUserId },
     include: { candidateProfile: true },
@@ -283,6 +381,98 @@ async function getAuthorizedCandidateForPublishing(actor: NonNullable<Express.Re
 
   return { candidate };
 }
+
+const imageUploadMiddleware = express.raw({
+  type: ["image/jpeg", "image/png", "image/webp"],
+  limit: "2mb",
+});
+
+router.post("/assets/profile-photo", requireAuth, requireRole("CANDIDATE"), imageUploadMiddleware, async (request, response) => {
+  if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+    return response.status(400).json({ message: "Image upload is required." });
+  }
+  const fileBytes = Uint8Array.from(request.body);
+
+  const mimeType = request.header("content-type");
+  if (!mimeType || !["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
+    return response.status(400).json({ message: "Only JPEG, PNG, and WebP profile photos are supported." });
+  }
+
+  const fileName = request.header("x-file-name")?.trim() || `profile-${Date.now()}`;
+  const asset = await prisma.candidateMediaAsset.create({
+    data: {
+      ownerUserId: request.authUser!.id,
+      kind: "PROFILE_PHOTO",
+      fileName,
+      mimeType,
+      data: fileBytes,
+      sizeBytes: fileBytes.byteLength,
+    },
+  });
+
+  return response.status(201).json({
+    message: "Profile photo uploaded successfully.",
+    asset: {
+      id: asset.id,
+      fileName: asset.fileName,
+      fileUrl: buildAssetUrl(request, asset.id),
+    },
+  });
+});
+
+router.post("/assets/event-cover", requireAuth, requireRole("CANDIDATE"), imageUploadMiddleware, async (request, response) => {
+  if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+    return response.status(400).json({ message: "Image upload is required." });
+  }
+  const fileBytes = Uint8Array.from(request.body);
+
+  const mimeType = request.header("content-type");
+  if (!mimeType || !["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
+    return response.status(400).json({ message: "Only JPEG, PNG, and WebP cover images are supported." });
+  }
+
+  const fileName = request.header("x-file-name")?.trim() || `event-cover-${Date.now()}`;
+  const asset = await prisma.candidateMediaAsset.create({
+    data: {
+      ownerUserId: request.authUser!.id,
+      kind: "EVENT_COVER",
+      fileName,
+      mimeType,
+      data: fileBytes,
+      sizeBytes: fileBytes.byteLength,
+    },
+  });
+
+  return response.status(201).json({
+    message: "Event cover uploaded successfully.",
+    asset: {
+      id: asset.id,
+      fileName: asset.fileName,
+      fileUrl: buildAssetUrl(request, asset.id),
+    },
+  });
+});
+
+router.get("/assets/:assetId", async (request, response) => {
+  const assetId = readRouteId(response, request.params.assetId, "asset id");
+  if (!assetId) {
+    return;
+  }
+
+  const asset = await prisma.candidateMediaAsset.findUnique({
+    where: { id: assetId },
+    select: { mimeType: true, data: true, updatedAt: true },
+  });
+
+  if (!asset) {
+    return response.status(404).json({ message: "Asset was not found." });
+  }
+
+  response.setHeader("Content-Type", asset.mimeType);
+  response.setHeader("Cache-Control", "public, max-age=3600");
+  response.setHeader("Last-Modified", asset.updatedAt.toUTCString());
+  response.send(Buffer.from(asset.data));
+});
 
 router.get("/public", async (request, response) => {
   const parsed = publicCandidateQuerySchema.safeParse(request.query);
@@ -325,7 +515,8 @@ router.get("/public", async (request, response) => {
           userId: candidate.id,
           name: candidate.name,
           officeType: candidate.candidateProfile!.officeType,
-          portraitUrl: candidate.candidateProfile!.portraitUrl,
+          portraitAssetId: candidate.candidateProfile!.portraitAssetId,
+          portraitUrl: resolveCandidateProfileImage(request, candidate.candidateProfile!),
           campaignSlogan: candidate.candidateProfile!.campaignSlogan,
           bio: candidate.candidateProfile!.bio,
           isProfilePublished: candidate.candidateProfile!.isProfilePublished,
@@ -438,7 +629,8 @@ router.get("/public/parties/:partyId", async (request, response) => {
           userId: profile.user.id,
           name: profile.user.name,
           officeType: profile.officeType,
-          portraitUrl: profile.portraitUrl,
+          portraitAssetId: profile.portraitAssetId,
+          portraitUrl: resolveCandidateProfileImage(request, profile),
           campaignSlogan: profile.campaignSlogan,
           bio: profile.bio,
           isProfilePublished: profile.isProfilePublished,
@@ -504,7 +696,8 @@ router.get("/public/:candidateUserId", async (request, response) => {
       userId: candidate.id,
       name: candidate.name,
       officeType: candidate.candidateProfile.officeType,
-      portraitUrl: candidate.candidateProfile.portraitUrl,
+      portraitAssetId: candidate.candidateProfile.portraitAssetId,
+      portraitUrl: resolveCandidateProfileImage(request, candidate.candidateProfile),
       campaignSlogan: candidate.candidateProfile.campaignSlogan,
       bio: candidate.candidateProfile.bio,
       websiteUrl: candidate.candidateProfile.websiteUrl,
@@ -530,7 +723,10 @@ router.get("/public/:candidateUserId", async (request, response) => {
       stateConstituency: candidate.candidateProfile.stateConstituency,
       pollingUnit: candidate.candidateProfile.pollingUnit,
       materials,
-      upcomingEvents,
+      upcomingEvents: upcomingEvents.map((event) => ({
+        ...event,
+        coverImageUrl: resolveEventCoverImage(request, event),
+      })),
     }),
   });
 });
@@ -551,7 +747,8 @@ router.get("/profile", requireAuth, requireRole("CANDIDATE"), async (request, re
       name: candidate.name,
       officeType: candidate.candidateProfile.officeType,
       politicalPartyId: candidate.candidateProfile.politicalPartyId,
-      portraitUrl: candidate.candidateProfile.portraitUrl,
+      portraitAssetId: candidate.candidateProfile.portraitAssetId,
+      portraitUrl: resolveCandidateProfileImage(request, candidate.candidateProfile),
       campaignSlogan: candidate.candidateProfile.campaignSlogan,
       bio: candidate.candidateProfile.bio,
       websiteUrl: candidate.candidateProfile.websiteUrl,
@@ -577,10 +774,14 @@ router.patch("/profile", requireAuth, requireRole("CANDIDATE"), async (request, 
     return response.status(400).json({ message: "Invalid candidate profile payload.", errors: parsed.error.flatten() });
   }
 
+  if (!(await assertAssetOwnership(request.authUser!.id, parsed.data.portraitAssetId))) {
+    return response.status(403).json({ message: "You can only use your own uploaded profile photo." });
+  }
+
   const updated = await prisma.candidateProfile.update({
     where: { userId: request.authUser!.id },
     data: {
-      portraitUrl: toNullableString(parsed.data.portraitUrl),
+      portraitAssetId: parsed.data.portraitAssetId === undefined ? undefined : toNullableString(parsed.data.portraitAssetId),
       campaignSlogan: toNullableString(parsed.data.campaignSlogan),
       bio: toNullableString(parsed.data.bio),
       websiteUrl: toNullableString(parsed.data.websiteUrl),
@@ -598,7 +799,8 @@ router.patch("/profile", requireAuth, requireRole("CANDIDATE"), async (request, 
       name: request.authUser!.name,
       officeType: updated.officeType,
       politicalPartyId: updated.politicalPartyId,
-      portraitUrl: updated.portraitUrl,
+      portraitAssetId: updated.portraitAssetId,
+      portraitUrl: resolveCandidateProfileImage(request, updated),
       campaignSlogan: updated.campaignSlogan,
       bio: updated.bio,
       websiteUrl: updated.websiteUrl,
@@ -626,7 +828,10 @@ router.get("/events", requireAuth, requireRole("CANDIDATE"), async (request, res
   });
 
   return response.json({
-    events: events.map(serializeCampaignEventItem),
+    events: events.map((event) => serializeCampaignEventItem({
+      ...event,
+      coverImageUrl: resolveEventCoverImage(request, event),
+    })),
   });
 });
 
@@ -641,7 +846,16 @@ router.post("/events", requireAuth, requireRole("CANDIDATE"), async (request, re
     return response.status(403).json({ message: "Candidate profile is required." });
   }
 
-  const eventTerritory = buildCandidateMaterialTerritory(candidateProfile);
+  if (!(await assertAssetOwnership(request.authUser!.id, parsed.data.coverImageAssetId))) {
+    return response.status(403).json({ message: "You can only use your own uploaded event cover." });
+  }
+
+  const targetScopeError = validateCandidateTargetScope(candidateProfile, parsed.data);
+  if (targetScopeError) {
+    return response.status(400).json({ message: targetScopeError });
+  }
+
+  const eventTerritory = buildCandidateEventTerritory(candidateProfile, parsed.data);
   const territoryReferenceError = await validateTerritoryReferences(eventTerritory);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
@@ -655,8 +869,9 @@ router.post("/events", requireAuth, requireRole("CANDIDATE"), async (request, re
         title: parsed.data.title,
         description: parsed.data.description,
         venue: parsed.data.venue,
-        coverImageUrl: toNullableString(parsed.data.coverImageUrl),
-        registrationUrl: toNullableString(parsed.data.registrationUrl),
+        coverImageAssetId: toNullableString(parsed.data.coverImageAssetId),
+        coverImageUrl: null,
+        registrationUrl: null,
         startsAt: new Date(parsed.data.startsAt),
         endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
         isPublished: parsed.data.isPublished ?? false,
@@ -672,7 +887,7 @@ router.post("/events", requireAuth, requireRole("CANDIDATE"), async (request, re
           isActive: true,
           voterProfile: {
             is: {
-              ...buildCandidateScope(candidateProfile),
+              ...Object.fromEntries(Object.entries(eventTerritory).filter(([, value]) => value)),
               contactConsent: true,
             },
           },
@@ -696,7 +911,10 @@ router.post("/events", requireAuth, requireRole("CANDIDATE"), async (request, re
 
   return response.status(201).json({
     message: created.isPublished ? "Campaign event created and published." : "Campaign event saved as draft.",
-    event: serializeCampaignEventItem(created),
+    event: serializeCampaignEventItem({
+      ...created,
+      coverImageUrl: resolveEventCoverImage(request, created),
+    }),
   });
 });
 
@@ -719,6 +937,20 @@ router.patch("/events/:eventId", requireAuth, requireRole("CANDIDATE"), async (r
     return response.status(404).json({ message: "Campaign event was not found." });
   }
 
+  if (!(await assertAssetOwnership(request.authUser!.id, parsed.data.coverImageAssetId))) {
+    return response.status(403).json({ message: "You can only use your own uploaded event cover." });
+  }
+
+  const targetScopeError = validateCandidateTargetScope(request.authUser!.candidateProfile, {
+    stateId: parsed.data.stateId || undefined,
+    lgaId: parsed.data.lgaId || undefined,
+    wardId: parsed.data.wardId || undefined,
+    pollingUnitId: parsed.data.pollingUnitId || undefined,
+  });
+  if (targetScopeError) {
+    return response.status(400).json({ message: targetScopeError });
+  }
+
   const nextStartsAt = parsed.data.startsAt ? new Date(parsed.data.startsAt) : existingEvent.startsAt;
   const nextEndsAtRaw = parsed.data.endsAt === undefined ? existingEvent.endsAt : parsed.data.endsAt === null || parsed.data.endsAt === "" ? null : new Date(parsed.data.endsAt);
   if (nextEndsAtRaw && nextEndsAtRaw < nextStartsAt) {
@@ -731,19 +963,28 @@ router.patch("/events/:eventId", requireAuth, requireRole("CANDIDATE"), async (r
       title: parsed.data.title,
       description: parsed.data.description,
       venue: parsed.data.venue,
-      coverImageUrl: parsed.data.coverImageUrl === undefined ? undefined : toNullableString(parsed.data.coverImageUrl),
-      registrationUrl: parsed.data.registrationUrl === undefined ? undefined : toNullableString(parsed.data.registrationUrl),
+      coverImageAssetId: parsed.data.coverImageAssetId === undefined ? undefined : toNullableString(parsed.data.coverImageAssetId),
+      coverImageUrl: null,
+      registrationUrl: null,
       startsAt: parsed.data.startsAt ? new Date(parsed.data.startsAt) : undefined,
       endsAt: parsed.data.endsAt === undefined ? undefined : nextEndsAtRaw,
       isPublished: parsed.data.isPublished,
-      ...buildCandidateMaterialTerritory(request.authUser!.candidateProfile),
+      ...buildCandidateEventTerritory(request.authUser!.candidateProfile, {
+        stateId: parsed.data.stateId || undefined,
+        lgaId: parsed.data.lgaId || undefined,
+        wardId: parsed.data.wardId || undefined,
+        pollingUnitId: parsed.data.pollingUnitId || undefined,
+      }),
     },
     include: campaignEventInclude,
   });
 
   return response.json({
     message: "Campaign event updated successfully.",
-    event: serializeCampaignEventItem(updated),
+    event: serializeCampaignEventItem({
+      ...updated,
+      coverImageUrl: resolveEventCoverImage(request, updated),
+    }),
   });
 });
 

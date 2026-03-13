@@ -216,11 +216,8 @@ export default function CandidateDetailPage({ params }: Props) {
                   <h3>{event.title}</h3>
                   <p>{event.description}</p>
                   <p className="muted">{new Date(event.startsAt).toLocaleString()} | {event.venue}</p>
-                  {event.registrationUrl ? (
-                    <a href={event.registrationUrl} target="_blank" rel="noreferrer">
-                      Open registration
-                    </a>
-                  ) : null}
+                  <p className="muted">Voters confirm attendance inside their account with RSVP.</p>
+                  <Link href="/login">Voter login to RSVP</Link>
                 </div>
               </article>
             ))}

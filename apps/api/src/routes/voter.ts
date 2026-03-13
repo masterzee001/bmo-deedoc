@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { CampaignEventRsvpStatus, IncidentSeverity, IncidentStatus, IncidentType, NotificationType, RewardRedemptionStatus, RewardType } from "@prisma/client";
 import { z } from "zod";
 import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
@@ -93,8 +93,23 @@ function readRouteId(response: Response, value: string | string[] | undefined, l
   return value;
 }
 
+function buildCandidateAssetUrl(request: Request, assetId: string | null | undefined) {
+  if (!assetId) {
+    return null;
+  }
+
+  const protocol = request.get("x-forwarded-proto") || request.protocol;
+  const host = request.get("x-forwarded-host") || request.get("host");
+
+  if (!host) {
+    return null;
+  }
+
+  return `${protocol}://${host}/candidate/assets/${assetId}`;
+}
+
 function matchesTaskScope(
-  voterProfile: NonNullable<Express.Request["authUser"]>["voterProfile"],
+  voterProfile: NonNullable<Request["authUser"]>["voterProfile"],
   task: {
     geoPoliticalZoneId: string | null;
     stateId: string | null;
@@ -361,7 +376,14 @@ router.get("/events", requireAuth, requireRole("VOTER"), async (request, respons
   });
 
   return response.json({
-    events: events.filter((event) => matchesTaskScope(voterProfile, event)).map(serializeCampaignEventItem),
+    events: events
+      .filter((event) => matchesTaskScope(voterProfile, event))
+      .map((event) =>
+        serializeCampaignEventItem({
+          ...event,
+          coverImageUrl: buildCandidateAssetUrl(request, event.coverImageAssetId) || event.coverImageUrl,
+        }),
+      ),
   });
 });
 
@@ -536,7 +558,12 @@ router.post("/events/:eventId/rsvp", requireAuth, requireRole("VOTER"), async (r
 
   return response.status(201).json({
     message: `Campaign event RSVP saved as ${parsed.data.status.toLowerCase()}.`,
-    event: updated ? serializeCampaignEventItem(updated) : null,
+    event: updated
+      ? serializeCampaignEventItem({
+          ...updated,
+          coverImageUrl: buildCandidateAssetUrl(request, updated.coverImageAssetId) || updated.coverImageUrl,
+        })
+      : null,
   });
 });
 

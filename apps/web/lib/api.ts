@@ -905,6 +905,7 @@ export async function fetchCandidateProfileEditor(token: string): Promise<Candid
 export async function updateCandidateProfile(
   token: string,
   body: {
+    portraitAssetId?: string;
     portraitUrl?: string;
     campaignSlogan?: string;
     bio?: string;
@@ -925,6 +926,24 @@ export async function updateCandidateProfile(
   });
 
   return readJson<{ message: string; profile: CandidateProfileEditorItem }>(response);
+}
+
+export async function uploadCandidateImage(
+  token: string,
+  kind: "profile-photo" | "event-cover",
+  file: File,
+): Promise<{ message: string; asset: { id: string; fileName: string; fileUrl: string | null } }> {
+  const response = await fetch(`${API_BASE_URL}/candidate/assets/${kind}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": file.type,
+      "X-File-Name": file.name,
+    },
+    body: file,
+  });
+
+  return readJson(response);
 }
 
 export async function fetchCandidateVoters(token: string): Promise<CandidateVoterItem[]> {
@@ -1003,8 +1022,11 @@ export async function createCandidateEvent(
     title: string;
     description: string;
     venue: string;
-    coverImageUrl?: string;
-    registrationUrl?: string;
+    coverImageAssetId?: string;
+    stateId?: string;
+    lgaId?: string;
+    wardId?: string;
+    pollingUnitId?: string;
     startsAt: string;
     endsAt?: string;
     isPublished?: boolean;
@@ -1029,8 +1051,11 @@ export async function updateCandidateEvent(
     title?: string;
     description?: string;
     venue?: string;
-    coverImageUrl?: string;
-    registrationUrl?: string;
+    coverImageAssetId?: string;
+    stateId?: string;
+    lgaId?: string;
+    wardId?: string;
+    pollingUnitId?: string;
     startsAt?: string;
     endsAt?: string | null;
     isPublished?: boolean;
