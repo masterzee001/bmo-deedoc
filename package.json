@@ -11,6 +11,7 @@
     "dev:api": "npm run dev --workspace @pics-nigeria/api",
     "dev:web": "npm run dev --workspace @pics-nigeria/web",
     "build": "npm run prisma:generate && npm run build:workspaces",
+    "build:api": "npm run prisma:generate && npm run build --workspace @pics-nigeria/shared && npm run build --workspace @pics-nigeria/api",
     "build:workspaces": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "prisma:generate": "npm run prisma:generate --workspace @pics-nigeria/database",
