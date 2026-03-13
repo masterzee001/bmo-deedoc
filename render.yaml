@@ -6,7 +6,6 @@ services:
     rootDir: .
     plan: starter
     buildCommand: npm install && npm run build:api
-    preDeployCommand: npm run predeploy:render --workspace @pics-nigeria/api
     startCommand: npm run start:render --workspace @pics-nigeria/api
     healthCheckPath: /health
     autoDeploy: true
