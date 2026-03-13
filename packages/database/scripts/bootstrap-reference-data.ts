@@ -1,7 +1,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
-import { NIGERIA_GEO_POLITICAL_ZONES, NIGERIA_STATE_REFERENCE } from "@pics-nigeria/shared";
+import { INEC_POLITICAL_PARTIES, NIGERIA_GEO_POLITICAL_ZONES, NIGERIA_STATE_REFERENCE } from "@pics-nigeria/shared";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -16,12 +16,6 @@ if (databaseUrl?.startsWith("file:")) {
 }
 
 const prisma = new PrismaClient();
-
-const sampleParty = {
-  id: "seed-party-independent-alliance",
-  code: "PIA",
-  name: "Progressive Independent Alliance",
-};
 
 async function main() {
   const zoneIdByName = new Map<string, string>();
@@ -68,13 +62,39 @@ async function main() {
     });
   }
 
-  await prisma.politicalParty.upsert({
-    where: { id: sampleParty.id },
-    update: sampleParty,
-    create: sampleParty,
-  });
+  for (const party of INEC_POLITICAL_PARTIES) {
+    const existing = await prisma.politicalParty.findFirst({
+      where: {
+        OR: [{ id: party.id }, { code: party.code }, { name: party.name }],
+      },
+      select: { id: true },
+    });
 
-  console.log("National geo-political zones and states are ready.");
+    if (existing) {
+      await prisma.politicalParty.update({
+        where: { id: existing.id },
+        data: {
+          code: party.code,
+          name: party.name,
+          isApprovedByInec: true,
+          inecSourceUrl: party.inecSourceUrl,
+        },
+      });
+      continue;
+    }
+
+    await prisma.politicalParty.create({
+      data: {
+        id: party.id,
+        code: party.code,
+        name: party.name,
+        isApprovedByInec: true,
+        inecSourceUrl: party.inecSourceUrl,
+      },
+    });
+  }
+
+  console.log("National geo-political zones, states, and INEC political parties are ready.");
 }
 
 main()

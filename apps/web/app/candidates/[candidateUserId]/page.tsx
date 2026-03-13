@@ -90,6 +90,7 @@ export default function CandidateDetailPage({ params }: Props) {
             <p>{candidate.campaignSlogan || "Campaign slogan not provided."}</p>
             <div className="badge-row">
               <span className="status-badge live">Published profile</span>
+              {candidate.party?.isApprovedByInec ? <span className="status-badge live">INEC listed party</span> : null}
               <span className="muted">{candidate.territoryLabels.state || "National campaign"}</span>
             </div>
           </div>
@@ -100,6 +101,11 @@ export default function CandidateDetailPage({ params }: Props) {
         <section className="panel card">
           <h2>About this campaign</h2>
           <p>{candidate.bio || "No manifesto summary has been published yet."}</p>
+          {candidate.party ? (
+            <p className="muted">
+              Party: <Link href={`/parties/${candidate.party.id}`}>{candidate.party.name}</Link>
+            </p>
+          ) : null}
           <div className="candidate-link-list">
             {candidate.websiteUrl ? <a href={candidate.websiteUrl} target="_blank" rel="noreferrer">Website</a> : null}
             {candidate.facebookUrl ? <a href={candidate.facebookUrl} target="_blank" rel="noreferrer">Facebook</a> : null}

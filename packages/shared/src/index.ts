@@ -237,6 +237,8 @@ export type CandidatePublicListItem = {
     name: string;
     code: string;
     logoUrl: string | null;
+    isApprovedByInec: boolean;
+    inecSourceUrl: string | null;
   } | null;
   territory: TerritorySummary;
   territoryLabels: {
@@ -388,6 +390,16 @@ export type PoliticalPartyItem = {
   id: string;
   name: string;
   code: string;
+  logoUrl: string | null;
+  description: string | null;
+  officialWebsite: string | null;
+  isApprovedByInec: boolean;
+  inecSourceUrl: string | null;
+  candidateCount?: number;
+};
+
+export type PoliticalPartyPublicProfile = PoliticalPartyItem & {
+  candidates: CandidatePublicListItem[];
 };
 
 export type FeedbackListItem = {
@@ -649,3 +661,4 @@ export function emptyTerritorySummary(): TerritorySummary {
 }
 
 export * from "./nigeria-reference-data";
+export * from "./inec-political-parties";

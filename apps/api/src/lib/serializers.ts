@@ -16,6 +16,8 @@ import type {
   FeedbackListItem,
   IncidentListItem,
   NotificationItem,
+  PoliticalPartyItem,
+  PoliticalPartyPublicProfile,
   PostListItem,
   PollingUnitCoverageSummary,
   PollListItem,
@@ -266,6 +268,8 @@ export function serializeCandidatePublicListItem(candidate: {
     name: string;
     code: string;
     logoUrl: string | null;
+    isApprovedByInec?: boolean;
+    inecSourceUrl?: string | null;
   } | null;
 }): CandidatePublicListItem {
   return {
@@ -282,6 +286,8 @@ export function serializeCandidatePublicListItem(candidate: {
           name: candidate.politicalParty.name,
           code: candidate.politicalParty.code,
           logoUrl: candidate.politicalParty.logoUrl,
+          isApprovedByInec: candidate.politicalParty.isApprovedByInec ?? false,
+          inecSourceUrl: candidate.politicalParty.inecSourceUrl ?? null,
         }
       : null,
     territory: serializeTerritory(candidate),
@@ -331,6 +337,8 @@ export function serializeCandidatePublicProfile(candidate: {
     name: string;
     code: string;
     logoUrl: string | null;
+    isApprovedByInec?: boolean;
+    inecSourceUrl?: string | null;
   } | null;
   materials: Parameters<typeof serializeCampaignMaterialItem>[0][];
   upcomingEvents: Parameters<typeof serializeCampaignEventItem>[0][];
@@ -343,6 +351,47 @@ export function serializeCandidatePublicProfile(candidate: {
     xUrl: candidate.xUrl,
     materials: candidate.materials.map(serializeCampaignMaterialItem),
     upcomingEvents: candidate.upcomingEvents.map(serializeCampaignEventItem),
+  };
+}
+
+export function serializePoliticalPartyItem(party: {
+  id: string;
+  name: string;
+  code: string;
+  logoUrl: string | null;
+  description?: string | null;
+  officialWebsite?: string | null;
+  isApprovedByInec?: boolean;
+  inecSourceUrl?: string | null;
+  _count?: { candidateProfiles?: number };
+}): PoliticalPartyItem {
+  return {
+    id: party.id,
+    name: party.name,
+    code: party.code,
+    logoUrl: party.logoUrl ?? null,
+    description: party.description ?? null,
+    officialWebsite: party.officialWebsite ?? null,
+    isApprovedByInec: party.isApprovedByInec ?? false,
+    inecSourceUrl: party.inecSourceUrl ?? null,
+    candidateCount: party._count?.candidateProfiles,
+  };
+}
+
+export function serializePoliticalPartyPublicProfile(party: {
+  id: string;
+  name: string;
+  code: string;
+  logoUrl: string | null;
+  description?: string | null;
+  officialWebsite?: string | null;
+  isApprovedByInec?: boolean;
+  inecSourceUrl?: string | null;
+  candidates: Parameters<typeof serializeCandidatePublicListItem>[0][];
+}): PoliticalPartyPublicProfile {
+  return {
+    ...serializePoliticalPartyItem(party),
+    candidates: party.candidates.map(serializeCandidatePublicListItem),
   };
 }
 

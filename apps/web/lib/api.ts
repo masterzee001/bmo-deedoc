@@ -23,6 +23,7 @@ import type {
   PollingUnitItem,
   PollingUnitCoverageSummary,
   PoliticalPartyItem,
+  PoliticalPartyPublicProfile,
   PollListItem,
   PostListItem,
   RewardBalanceSummary,
@@ -592,7 +593,16 @@ export async function createAdminUser(token: string, body: {
   return readJson(response);
 }
 
-export async function createPoliticalParty(token: string, body: { id: string; code: string; name: string }) {
+export async function createPoliticalParty(token: string, body: {
+  id: string;
+  code: string;
+  name: string;
+  logoUrl?: string;
+  description?: string;
+  officialWebsite?: string;
+  isApprovedByInec?: boolean;
+  inecSourceUrl?: string;
+}) {
   const response = await fetch(`${API_BASE_URL}/admin/political-parties`, {
     method: "POST",
     headers: {
@@ -832,7 +842,15 @@ export async function setUserActivation(token: string, userId: string, isActive:
   return readJson(response);
 }
 
-export async function updatePoliticalParty(token: string, partyId: string, body: { code: string; name: string }) {
+export async function updatePoliticalParty(token: string, partyId: string, body: {
+  code: string;
+  name: string;
+  logoUrl?: string;
+  description?: string;
+  officialWebsite?: string;
+  isApprovedByInec?: boolean;
+  inecSourceUrl?: string;
+}) {
   const response = await fetch(`${API_BASE_URL}/admin/political-parties/${partyId}`, {
     method: "PATCH",
     headers: {
@@ -1146,6 +1164,7 @@ export async function fetchVoterEvents(token: string): Promise<CampaignEventItem
 export async function fetchPublicCandidates(query?: {
   search?: string;
   stateId?: string;
+  partyId?: string;
   officeType?: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
 }): Promise<CandidatePublicListItem[]> {
   const params = new URLSearchParams();
@@ -1154,6 +1173,9 @@ export async function fetchPublicCandidates(query?: {
   }
   if (query?.stateId) {
     params.set("stateId", query.stateId);
+  }
+  if (query?.partyId) {
+    params.set("partyId", query.partyId);
   }
   if (query?.officeType) {
     params.set("officeType", query.officeType);
@@ -1175,6 +1197,30 @@ export async function fetchPublicCandidateProfile(candidateUserId: string): Prom
 
   const payload = await readJson<{ candidate: CandidatePublicProfile }>(response);
   return payload.candidate;
+}
+
+export async function fetchPublicParties(query?: { search?: string }): Promise<PoliticalPartyItem[]> {
+  const params = new URLSearchParams();
+  if (query?.search) {
+    params.set("search", query.search);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/candidate/public/parties${suffix}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ parties: PoliticalPartyItem[] }>(response);
+  return payload.parties;
+}
+
+export async function fetchPublicPartyProfile(partyId: string): Promise<PoliticalPartyPublicProfile> {
+  const response = await fetch(`${API_BASE_URL}/candidate/public/parties/${partyId}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ party: PoliticalPartyPublicProfile }>(response);
+  return payload.party;
 }
 
 export async function fetchVoterEngagementTasks(token: string): Promise<VoterEngagementTaskItem[]> {

@@ -14,6 +14,8 @@ import {
   serializeCandidatePublicProfile,
   serializeFeedbackItem,
   serializeIncidentItem,
+  serializePoliticalPartyItem,
+  serializePoliticalPartyPublicProfile,
   serializePostListItem,
   serializeTerritory,
 } from "../lib/serializers";
@@ -78,7 +80,12 @@ const candidatePostUpdateSchema = z.object({
 const publicCandidateQuerySchema = z.object({
   search: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
+  partyId: z.string().trim().optional(),
   officeType: z.enum(["PRESIDENTIAL", "GOVERNORSHIP", "SENATE", "HOUSE_OF_REP", "STATE_ASSEMBLY", "CHAIRMANSHIP", "COUNCILLOR"]).optional(),
+});
+
+const publicPartyQuerySchema = z.object({
+  search: z.string().trim().optional(),
 });
 
 const candidateBroadcastSchema = z.object({
@@ -192,7 +199,7 @@ const candidatePublicInclude = {
   candidateProfile: {
     include: {
       politicalParty: {
-        select: { id: true, name: true, code: true, logoUrl: true },
+        select: { id: true, name: true, code: true, logoUrl: true, isApprovedByInec: true, inecSourceUrl: true },
       },
       geoPoliticalZone: { select: { name: true } },
       state: { select: { name: true } },
@@ -297,6 +304,10 @@ router.get("/public", async (request, response) => {
         is: {
           isProfilePublished: true,
           stateId: parsed.data.stateId || undefined,
+          politicalPartyId:
+            parsed.data.partyId === "independent"
+              ? null
+              : parsed.data.partyId || undefined,
           officeType: parsed.data.officeType || undefined,
         },
       },
@@ -337,6 +348,120 @@ router.get("/public", async (request, response) => {
           pollingUnit: candidate.candidateProfile!.pollingUnit,
         }),
       ),
+  });
+});
+
+router.get("/public/parties", async (request, response) => {
+  const parsed = publicPartyQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid political party discovery query.", errors: parsed.error.flatten() });
+  }
+
+  const parties = await prisma.politicalParty.findMany({
+    where: {
+      name: parsed.data.search ? { contains: parsed.data.search, mode: "insensitive" } : undefined,
+    },
+    include: {
+      candidateProfiles: {
+        where: {
+          isProfilePublished: true,
+          user: {
+            is: { isActive: true },
+          },
+        },
+        select: { userId: true },
+      },
+    },
+    orderBy: [{ isApprovedByInec: "desc" }, { name: "asc" }],
+  });
+
+  return response.json({
+    parties: parties.map((party) =>
+      serializePoliticalPartyItem({
+        ...party,
+        _count: { candidateProfiles: party.candidateProfiles.length },
+      }),
+    ),
+  });
+});
+
+router.get("/public/parties/:partyId", async (request, response) => {
+  const partyId = readRouteId(response, request.params.partyId, "party id");
+  if (!partyId) {
+    return;
+  }
+
+  const party = await prisma.politicalParty.findUnique({
+    where: { id: partyId },
+    include: {
+      candidateProfiles: {
+        where: {
+          isProfilePublished: true,
+          user: {
+            is: { isActive: true },
+          },
+        },
+        include: {
+          user: true,
+          politicalParty: {
+            select: { id: true, name: true, code: true, logoUrl: true, isApprovedByInec: true, inecSourceUrl: true },
+          },
+          geoPoliticalZone: { select: { name: true } },
+          state: { select: { name: true } },
+          senatorialDistrict: { select: { name: true } },
+          federalConstituency: { select: { name: true } },
+          lga: { select: { name: true } },
+          ward: { select: { name: true } },
+          stateConstituency: { select: { name: true } },
+          pollingUnit: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  if (!party) {
+    return response.status(404).json({ message: "Political party was not found." });
+  }
+
+  return response.json({
+    party: serializePoliticalPartyPublicProfile({
+      id: party.id,
+      code: party.code,
+      name: party.name,
+      logoUrl: party.logoUrl,
+      description: party.description,
+      officialWebsite: party.officialWebsite,
+      isApprovedByInec: party.isApprovedByInec,
+      inecSourceUrl: party.inecSourceUrl,
+      candidates: party.candidateProfiles.map((profile) =>
+        serializeCandidatePublicListItem({
+          userId: profile.user.id,
+          name: profile.user.name,
+          officeType: profile.officeType,
+          portraitUrl: profile.portraitUrl,
+          campaignSlogan: profile.campaignSlogan,
+          bio: profile.bio,
+          isProfilePublished: profile.isProfilePublished,
+          politicalParty: profile.politicalParty,
+          geoPoliticalZoneId: profile.geoPoliticalZoneId,
+          stateId: profile.stateId,
+          senatorialDistrictId: profile.senatorialDistrictId,
+          federalConstituencyId: profile.federalConstituencyId,
+          lgaId: profile.lgaId,
+          wardId: profile.wardId,
+          stateConstituencyId: profile.stateConstituencyId,
+          pollingUnitId: profile.pollingUnitId,
+          geoPoliticalZone: profile.geoPoliticalZone,
+          state: profile.state,
+          senatorialDistrict: profile.senatorialDistrict,
+          federalConstituency: profile.federalConstituency,
+          lga: profile.lga,
+          ward: profile.ward,
+          stateConstituency: profile.stateConstituency,
+          pollingUnit: profile.pollingUnit,
+        }),
+      ),
+    }),
   });
 });
 

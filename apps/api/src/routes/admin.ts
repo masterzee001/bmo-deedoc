@@ -105,11 +105,21 @@ const politicalPartySchema = z.object({
   id: z.string().trim().min(1),
   code: z.string().trim().min(2).max(10),
   name: z.string().trim().min(2),
+  logoUrl: z.string().url().optional().or(z.literal("")),
+  description: z.string().trim().max(500).optional().or(z.literal("")),
+  officialWebsite: z.string().url().optional().or(z.literal("")),
+  isApprovedByInec: z.boolean().optional(),
+  inecSourceUrl: z.string().url().optional().or(z.literal("")),
 });
 
 const politicalPartyUpdateSchema = z.object({
   code: z.string().trim().min(2).max(10),
   name: z.string().trim().min(2),
+  logoUrl: z.string().url().optional().or(z.literal("")),
+  description: z.string().trim().max(500).optional().or(z.literal("")),
+  officialWebsite: z.string().url().optional().or(z.literal("")),
+  isApprovedByInec: z.boolean().optional(),
+  inecSourceUrl: z.string().url().optional().or(z.literal("")),
 });
 
 const agentCreationSchema = z.object({
@@ -1365,7 +1375,16 @@ router.delete("/geo-political-zones/:zoneId", requireAuth, requireRole("SUPER_AD
 router.get("/political-parties", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (_request, response) => {
   const parties = await prisma.politicalParty.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, code: true, name: true },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      logoUrl: true,
+      description: true,
+      officialWebsite: true,
+      isApprovedByInec: true,
+      inecSourceUrl: true,
+    },
   });
 
   return response.json({ parties });
@@ -1399,6 +1418,11 @@ router.post("/political-parties", requireAuth, requireRole("SUPER_ADMIN"), async
       id: parsed.data.id,
       code,
       name,
+      logoUrl: parsed.data.logoUrl || null,
+      description: parsed.data.description || null,
+      officialWebsite: parsed.data.officialWebsite || null,
+      isApprovedByInec: parsed.data.isApprovedByInec ?? false,
+      inecSourceUrl: parsed.data.inecSourceUrl || null,
     },
   });
 
@@ -1448,8 +1472,25 @@ router.patch("/political-parties/:partyId", requireAuth, requireRole("SUPER_ADMI
 
   const updatedParty = await prisma.politicalParty.update({
     where: { id: partyId },
-    data: { code, name },
-    select: { id: true, code: true, name: true },
+    data: {
+      code,
+      name,
+      logoUrl: parsed.data.logoUrl === undefined ? undefined : parsed.data.logoUrl || null,
+      description: parsed.data.description === undefined ? undefined : parsed.data.description || null,
+      officialWebsite: parsed.data.officialWebsite === undefined ? undefined : parsed.data.officialWebsite || null,
+      isApprovedByInec: parsed.data.isApprovedByInec,
+      inecSourceUrl: parsed.data.inecSourceUrl === undefined ? undefined : parsed.data.inecSourceUrl || null,
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      logoUrl: true,
+      description: true,
+      officialWebsite: true,
+      isApprovedByInec: true,
+      inecSourceUrl: true,
+    },
   });
 
   await createAuditLog(prisma, {

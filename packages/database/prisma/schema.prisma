@@ -913,9 +913,15 @@ model PoliticalParty {
   name               String             @unique
   code               String             @unique
   logoUrl            String?
+  description        String?
+  officialWebsite    String?
+  isApprovedByInec   Boolean            @default(false)
+  inecSourceUrl      String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   candidateProfiles  CandidateProfile[]
+
+  @@index([isApprovedByInec])
 }
 
 model State {

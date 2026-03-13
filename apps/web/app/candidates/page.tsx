@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CANDIDATE_OFFICE_TYPES, type CandidateOfficeType, type CandidatePublicListItem, type StateItem } from "@pics-nigeria/shared";
-import { ApiError, fetchPublicCandidates, fetchPublicStates } from "../../lib/api";
+import { CANDIDATE_OFFICE_TYPES, type CandidateOfficeType, type CandidatePublicListItem, type PoliticalPartyItem, type StateItem } from "@pics-nigeria/shared";
+import { ApiError, fetchPublicCandidates, fetchPublicParties, fetchPublicStates } from "../../lib/api";
 
 const officeLabels: Record<string, string> = {
   PRESIDENTIAL: "Presidential",
@@ -17,30 +17,46 @@ const officeLabels: Record<string, string> = {
 
 export default function CandidatesPage() {
   const [states, setStates] = useState<StateItem[]>([]);
+  const [parties, setParties] = useState<PoliticalPartyItem[]>([]);
   const [candidates, setCandidates] = useState<CandidatePublicListItem[]>([]);
   const [search, setSearch] = useState("");
   const [stateId, setStateId] = useState("");
+  const [partyId, setPartyId] = useState("");
   const [officeType, setOfficeType] = useState<CandidateOfficeType | "">("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadDirectory(nextSearch = search, nextStateId = stateId, nextOfficeType = officeType) {
+  async function loadDirectory(nextSearch = search, nextStateId = stateId, nextPartyId = partyId, nextOfficeType = officeType) {
     setError("");
-    const [nextStates, nextCandidates] = await Promise.all([
+    const [nextStates, nextParties, nextCandidates] = await Promise.all([
       fetchPublicStates(),
+      fetchPublicParties(),
       fetchPublicCandidates({
         search: nextSearch || undefined,
         stateId: nextStateId || undefined,
+        partyId: nextPartyId || undefined,
         officeType: nextOfficeType || undefined,
       }),
     ]);
 
     setStates(nextStates);
+    setParties(nextParties);
     setCandidates(nextCandidates);
   }
 
   useEffect(() => {
-    loadDirectory()
+    const params = new URLSearchParams(window.location.search);
+    const nextSearch = params.get("search") || "";
+    const nextStateId = params.get("stateId") || "";
+    const nextPartyId = params.get("partyId") || "";
+    const nextOfficeType = (params.get("officeType") as CandidateOfficeType | "") || "";
+
+    setSearch(nextSearch);
+    setStateId(nextStateId);
+    setPartyId(nextPartyId);
+    setOfficeType(nextOfficeType);
+
+    loadDirectory(nextSearch, nextStateId, nextPartyId, nextOfficeType)
       .catch((caughtError) => {
         setError(caughtError instanceof ApiError ? caughtError.message : "Could not load candidate directory.");
       })
@@ -50,7 +66,7 @@ export default function CandidatesPage() {
   async function handleApplyFilters() {
     setLoading(true);
     try {
-      await loadDirectory(search, stateId, officeType);
+      await loadDirectory(search, stateId, partyId, officeType);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not apply candidate filters.");
     } finally {
@@ -80,6 +96,18 @@ export default function CandidatesPage() {
             </select>
           </label>
           <label className="field">
+            <span>Party</span>
+            <select value={partyId} onChange={(event) => setPartyId(event.target.value)}>
+              <option value="">All parties</option>
+              <option value="independent">Independent</option>
+              {parties.map((party) => (
+                <option key={party.id} value={party.id}>
+                  {party.code} - {party.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>Office</span>
             <select value={officeType} onChange={(event) => setOfficeType(event.target.value as CandidateOfficeType | "")}>
               <option value="">All offices</option>
@@ -94,6 +122,9 @@ export default function CandidatesPage() {
             {loading ? "Loading..." : "Apply filters"}
           </button>
         </div>
+        <p className="muted">
+          Browse by party or jump to the <Link href="/parties">party portfolio</Link>.
+        </p>
         {error ? <p className="error">{error}</p> : null}
       </section>
 
@@ -119,6 +150,7 @@ export default function CandidatesPage() {
                 <p className="eyebrow">{officeLabels[candidate.officeType] || candidate.officeType}</p>
                 <h2>{candidate.name}</h2>
                 <p className="muted">{candidate.party?.name || "Independent / party not listed"}</p>
+                {candidate.party?.isApprovedByInec ? <p className="muted">INEC listed party</p> : null}
                 <p>{candidate.campaignSlogan || candidate.bio || "Campaign profile coming soon."}</p>
                 <p className="muted">{candidate.territoryLabels.state || "National"} {candidate.territoryLabels.lga ? `• ${candidate.territoryLabels.lga}` : ""}</p>
                 <Link href={`/candidates/${candidate.userId}`}>View profile</Link>

@@ -2032,9 +2032,9 @@ export default function AdminDashboardPage() {
                   value={candidateCreateForm.politicalPartyId}
                   onChange={(event) => setCandidateCreateForm({ ...candidateCreateForm, politicalPartyId: event.target.value })}
                 >
-                  <option value="">Independent</option>
+                  <option value="">Independent / no party</option>
                   {parties.map((party) => (
-                    <option key={party.id} value={party.id}>{party.name}</option>
+                    <option key={party.id} value={party.id}>{party.code} - {party.name}</option>
                   ))}
                 </select>
               </label>
