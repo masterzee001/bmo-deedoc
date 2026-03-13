@@ -40,6 +40,9 @@ export default function LoginPage() {
         <h1>PICS Nigeria Voter Access</h1>
         <p>Sign in with your voter account to view your referral code and reward activity.</p>
         <p>
+          New voter? <Link href="/register">Create your account</Link>
+        </p>
+        <p>
           <Link href="/admin/login">Admin login</Link> | <Link href="/candidate/login">Candidate login</Link> |{" "}
           <Link href="/agent/login">Agent login</Link>
         </p>

@@ -292,6 +292,7 @@ model VoterProfile {
   lgaId            String
   wardId           String
   stateConstituencyId String?
+  pollingUnitId    String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -303,6 +304,7 @@ model VoterProfile {
   lga              LGA      @relation(fields: [lgaId], references: [id])
   ward             Ward     @relation(fields: [wardId], references: [id])
   stateConstituency StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit      PollingUnit? @relation(fields: [pollingUnitId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([stateId])
@@ -311,6 +313,7 @@ model VoterProfile {
   @@index([lgaId])
   @@index([wardId])
   @@index([stateConstituencyId])
+  @@index([pollingUnitId])
   @@index([referredByUserId])
 }
 
@@ -930,6 +933,7 @@ model PollingUnit {
   adminProfiles     AdminProfile[]
   candidateProfiles CandidateProfile[]
   agentProfiles     AgentProfile[]
+  voterProfiles     VoterProfile[]
   polls             Poll[]
   posts             Post[]
   feedbackItems     Feedback[]

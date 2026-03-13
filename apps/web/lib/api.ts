@@ -80,6 +80,65 @@ export async function loginUser(email: string, password: string): Promise<{ toke
   return readJson(response);
 }
 
+export async function registerVoterUser(body: {
+  fullName: string;
+  email: string;
+  phone: string;
+  password: string;
+  voterCardNumber: string;
+  stateId: string;
+  lgaId: string;
+  wardId: string;
+  pollingUnitId: string;
+  referredByCode?: string;
+}): Promise<{ message: string; user: AuthUserProfile }> {
+  const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  return readJson(response);
+}
+
+export async function fetchPublicStates(): Promise<StateItem[]> {
+  const response = await fetch(`${API_BASE_URL}/auth/territories/states`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ states: StateItem[] }>(response);
+  return payload.states;
+}
+
+export async function fetchPublicLgas(stateId: string): Promise<LgaItem[]> {
+  const response = await fetch(`${API_BASE_URL}/auth/territories/lgas?stateId=${encodeURIComponent(stateId)}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ lgas: LgaItem[] }>(response);
+  return payload.lgas;
+}
+
+export async function fetchPublicWards(stateId: string, lgaId: string): Promise<WardItem[]> {
+  const query = new URLSearchParams({ stateId, lgaId });
+  const response = await fetch(`${API_BASE_URL}/auth/territories/wards?${query.toString()}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ wards: WardItem[] }>(response);
+  return payload.wards;
+}
+
+export async function fetchPublicPollingUnits(stateId: string, lgaId: string, wardId: string): Promise<PollingUnitItem[]> {
+  const query = new URLSearchParams({ stateId, lgaId, wardId });
+  const response = await fetch(`${API_BASE_URL}/auth/territories/polling-units?${query.toString()}`, {
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ pollingUnits: PollingUnitItem[] }>(response);
+  return payload.pollingUnits;
+}
+
 export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },

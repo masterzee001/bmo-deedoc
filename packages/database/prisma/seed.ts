@@ -9,6 +9,7 @@ import {
   IncidentStatus,
   IncidentType,
   NotificationType,
+  Prisma,
   PrismaClient,
   RewardRedemptionStatus,
   RewardType,
@@ -84,6 +85,7 @@ const sampleAccounts = {
     phone: "08030000000",
     voterCardNumber: "VIN-SEEDED-0001",
     referralCode: "PICSSEED01",
+    pollingUnitId: "seed-pu-ikeja-001",
   },
 };
 
@@ -346,6 +348,32 @@ async function main() {
     },
   });
 
+  const seededVoterProfile: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
+    voterCardNumber: sampleAccounts.voter.voterCardNumber,
+    referralCode: sampleAccounts.voter.referralCode,
+    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+    stateId: territorySeed.state.id,
+    senatorialDistrictId: territorySeed.district.id,
+    federalConstituencyId: territorySeed.federalConstituency.id,
+    lgaId: territorySeed.lga.id,
+    wardId: territorySeed.wards[0].id,
+    stateConstituencyId: territorySeed.stateConstituency.id,
+    pollingUnitId: sampleAccounts.voter.pollingUnitId,
+  };
+
+  const seededVoterProfileUpdate: Prisma.VoterProfileUncheckedUpdateWithoutUserInput = {
+    voterCardNumber: sampleAccounts.voter.voterCardNumber,
+    referralCode: sampleAccounts.voter.referralCode,
+    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+    stateId: territorySeed.state.id,
+    senatorialDistrictId: territorySeed.district.id,
+    federalConstituencyId: territorySeed.federalConstituency.id,
+    lgaId: territorySeed.lga.id,
+    wardId: territorySeed.wards[0].id,
+    stateConstituencyId: territorySeed.stateConstituency.id,
+    pollingUnitId: sampleAccounts.voter.pollingUnitId,
+  };
+
   const voter = await prisma.user.upsert({
     where: { email: normalizeEmail(sampleAccounts.voter.email) },
     update: {
@@ -355,28 +383,8 @@ async function main() {
       role: UserRole.VOTER,
       voterProfile: {
         upsert: {
-          update: {
-            voterCardNumber: sampleAccounts.voter.voterCardNumber,
-            referralCode: sampleAccounts.voter.referralCode,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-          },
-          create: {
-            voterCardNumber: sampleAccounts.voter.voterCardNumber,
-            referralCode: sampleAccounts.voter.referralCode,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-          },
+          update: seededVoterProfileUpdate,
+          create: seededVoterProfile,
         },
       },
     },
@@ -387,17 +395,7 @@ async function main() {
       passwordHash: await hash(sampleAccounts.voter.password),
       role: UserRole.VOTER,
       voterProfile: {
-        create: {
-          voterCardNumber: sampleAccounts.voter.voterCardNumber,
-          referralCode: sampleAccounts.voter.referralCode,
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          stateId: territorySeed.state.id,
-          senatorialDistrictId: territorySeed.district.id,
-          federalConstituencyId: territorySeed.federalConstituency.id,
-          lgaId: territorySeed.lga.id,
-          wardId: territorySeed.wards[0].id,
-          stateConstituencyId: territorySeed.stateConstituency.id,
-        },
+        create: seededVoterProfile,
       },
     },
   });

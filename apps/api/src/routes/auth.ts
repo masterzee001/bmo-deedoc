@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { NotificationType, RewardType, UserRole } from "@prisma/client";
+import { NotificationType, Prisma, RewardType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { normalizeEmail } from "@pics-nigeria/shared";
 import { signAccessToken } from "../auth/jwt";
@@ -16,6 +16,12 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+});
+
+const territoryQuerySchema = z.object({
+  stateId: z.string().trim().min(1).optional(),
+  lgaId: z.string().trim().min(1).optional(),
+  wardId: z.string().trim().min(1).optional(),
 });
 
 const updateProfileSchema = z.object({
@@ -41,6 +47,7 @@ const registerVoterSchema = z.object({
   lgaId: z.string().trim().min(1),
   wardId: z.string().trim().min(1),
   stateConstituencyId: z.string().trim().optional(),
+  pollingUnitId: z.string().trim().min(1),
   referredByCode: z.string().trim().min(4).optional(),
 });
 
@@ -108,6 +115,67 @@ router.patch("/me", requireAuth, async (request, response) => {
     message: "Profile updated successfully.",
     user: authUser,
   });
+});
+
+router.get("/territories/states", async (_request, response) => {
+  const states = await prisma.state.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+
+  return response.json({ states });
+});
+
+router.get("/territories/lgas", async (request, response) => {
+  const parsed = territoryQuerySchema.safeParse(request.query);
+  if (!parsed.success || !parsed.data.stateId) {
+    return response.status(400).json({ message: "stateId is required." });
+  }
+
+  const lgas = await prisma.lGA.findMany({
+    where: { stateId: parsed.data.stateId },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, stateId: true },
+  });
+
+  return response.json({ lgas });
+});
+
+router.get("/territories/wards", async (request, response) => {
+  const parsed = territoryQuerySchema.safeParse(request.query);
+  if (!parsed.success || !parsed.data.stateId || !parsed.data.lgaId) {
+    return response.status(400).json({ message: "stateId and lgaId are required." });
+  }
+
+  const wards = await prisma.ward.findMany({
+    where: {
+      stateId: parsed.data.stateId,
+      lgaId: parsed.data.lgaId,
+    },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, stateId: true, lgaId: true },
+  });
+
+  return response.json({ wards });
+});
+
+router.get("/territories/polling-units", async (request, response) => {
+  const parsed = territoryQuerySchema.safeParse(request.query);
+  if (!parsed.success || !parsed.data.stateId || !parsed.data.lgaId || !parsed.data.wardId) {
+    return response.status(400).json({ message: "stateId, lgaId, and wardId are required." });
+  }
+
+  const pollingUnits = await prisma.pollingUnit.findMany({
+    where: {
+      stateId: parsed.data.stateId,
+      lgaId: parsed.data.lgaId,
+      wardId: parsed.data.wardId,
+    },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
+  });
+
+  return response.json({ pollingUnits });
 });
 
 router.patch("/password", requireAuth, async (request, response) => {
@@ -209,6 +277,18 @@ router.post("/register-voter", async (request, response) => {
 
   const referralCode = await generateUniqueReferralCode();
   const passwordHash = await hashPassword(parsed.data.password);
+  const voterProfileData: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
+    voterCardNumber,
+    referralCode,
+    referredByUserId: referrer?.id || null,
+    stateId: parsed.data.stateId,
+    senatorialDistrictId: parsed.data.senatorialDistrictId || null,
+    federalConstituencyId: parsed.data.federalConstituencyId || null,
+    lgaId: parsed.data.lgaId,
+    wardId: parsed.data.wardId,
+    stateConstituencyId: parsed.data.stateConstituencyId || null,
+    pollingUnitId: parsed.data.pollingUnitId,
+  };
 
   const createdUser = await prisma.$transaction(async (transaction) => {
     const user = await transaction.user.create({
@@ -219,17 +299,7 @@ router.post("/register-voter", async (request, response) => {
         passwordHash,
         role: UserRole.VOTER,
         voterProfile: {
-          create: {
-            voterCardNumber,
-            referralCode,
-            referredByUserId: referrer?.id || null,
-            stateId: parsed.data.stateId,
-            senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-            federalConstituencyId: parsed.data.federalConstituencyId || null,
-            lgaId: parsed.data.lgaId,
-            wardId: parsed.data.wardId,
-            stateConstituencyId: parsed.data.stateConstituencyId || null,
-          },
+          create: voterProfileData,
         },
       },
     });
