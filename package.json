@@ -17,6 +17,7 @@
     "prisma:generate": "npm run prisma:generate --workspace @pics-nigeria/database",
     "prisma:migrate": "npm run prisma:migrate --workspace @pics-nigeria/database",
     "prisma:migrate:deploy": "npm run prisma:migrate:deploy --workspace @pics-nigeria/database",
+    "prisma:ensure-production": "npm run prisma:ensure-production --workspace @pics-nigeria/database",
     "bootstrap:super-admin": "npm run bootstrap:super-admin --workspace @pics-nigeria/database",
     "verify:production": "npm run verify:production --workspace @pics-nigeria/database",
     "seed": "npm run seed --workspace @pics-nigeria/database",

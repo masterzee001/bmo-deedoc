@@ -9,6 +9,7 @@
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma --name init",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:ensure-production": "tsx scripts/ensure-production-schema.ts",
     "prisma:push": "prisma db push --schema prisma/schema.prisma --accept-data-loss",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
     "verify:production": "tsx scripts/verify-production-readiness.ts",

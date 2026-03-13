@@ -7,8 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/apps/api/src/index.js",
-    "predeploy:render": "npm run prisma:generate --workspace @pics-nigeria/database && npm run prisma:migrate:deploy --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database",
-    "start:render": "npm run prisma:migrate:deploy --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database && npm run start",
+    "predeploy:render": "npm run prisma:generate --workspace @pics-nigeria/database && npm run prisma:ensure-production --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database",
+    "start:render": "npm run prisma:ensure-production --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database && npm run start",
     "lint": "tsc --noEmit -p tsconfig.json",
     "test": "npm run build --workspace @pics-nigeria/shared && npm run build && node dist/apps/api/src/run-tests.js"
   },
