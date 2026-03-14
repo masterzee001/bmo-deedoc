@@ -2,6 +2,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import { INEC_POLITICAL_PARTIES, NIGERIA_GEO_POLITICAL_ZONES, NIGERIA_STATE_REFERENCE } from "@pics-nigeria/shared";
+import { ensureNationalConstituencyReference } from "./inec-constituency-reference";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -94,7 +95,9 @@ async function main() {
     });
   }
 
-  console.log("National geo-political zones, states, and INEC political parties are ready.");
+  await ensureNationalConstituencyReference(prisma);
+
+  console.log("National geo-political zones, states, constituencies, and INEC political parties are ready.");
 }
 
 main()

@@ -84,6 +84,7 @@ import {
   updateGeoPoliticalZone,
   updatePoliticalParty,
 } from "../../../lib/api";
+import { AdminNav } from "../../../components/admin-nav";
 
 type DependencyCounts = Record<string, number>;
 type MapLayerFilter = "ALL" | "AGENTS" | "INCIDENTS";
@@ -886,7 +887,7 @@ export default function AdminDashboardPage() {
       fetchFederalConstituencies(token, input.stateId, input.senatorialDistrictId || undefined),
       fetchLgas(token, input.stateId),
       fetchWards(token, input.stateId, input.lgaId || undefined),
-      fetchStateConstituencies(token, input.stateId, input.lgaId || undefined),
+      fetchStateConstituencies(token, input.stateId),
       fetchAdminUsers(token, input.stateId, input.lgaId || undefined),
     ]);
 
@@ -964,7 +965,7 @@ export default function AdminDashboardPage() {
           : undefined,
         senatorialDistrictId: adminCreateForm.adminLevel === "SENATORIAL" ? adminCreateForm.senatorialDistrictId || undefined : undefined,
         federalConstituencyId: adminCreateForm.adminLevel === "FEDERAL_CONSTITUENCY" ? adminCreateForm.federalConstituencyId || undefined : undefined,
-        lgaId: ["LGA", "WARD", "STATE_CONSTITUENCY"].includes(adminCreateForm.adminLevel) ? adminCreateForm.lgaId || undefined : undefined,
+        lgaId: ["LGA", "WARD"].includes(adminCreateForm.adminLevel) ? adminCreateForm.lgaId || undefined : undefined,
         wardId: adminCreateForm.adminLevel === "WARD" ? adminCreateForm.wardId || undefined : undefined,
         stateConstituencyId: adminCreateForm.adminLevel === "STATE_CONSTITUENCY" ? adminCreateForm.stateConstituencyId || undefined : undefined,
       };
@@ -1018,7 +1019,7 @@ export default function AdminDashboardPage() {
         stateId: candidateCreateForm.officeType !== "PRESIDENTIAL" ? candidateCreateForm.stateId || undefined : undefined,
         senatorialDistrictId: candidateCreateForm.officeType === "SENATE" ? candidateCreateForm.senatorialDistrictId || undefined : undefined,
         federalConstituencyId: candidateCreateForm.officeType === "HOUSE_OF_REP" ? candidateCreateForm.federalConstituencyId || undefined : undefined,
-        lgaId: ["CHAIRMANSHIP", "COUNCILLOR", "STATE_ASSEMBLY"].includes(candidateCreateForm.officeType) ? candidateCreateForm.lgaId || undefined : undefined,
+        lgaId: ["CHAIRMANSHIP", "COUNCILLOR"].includes(candidateCreateForm.officeType) ? candidateCreateForm.lgaId || undefined : undefined,
         wardId: candidateCreateForm.officeType === "COUNCILLOR" ? candidateCreateForm.wardId || undefined : undefined,
         stateConstituencyId: candidateCreateForm.officeType === "STATE_ASSEMBLY" ? candidateCreateForm.stateConstituencyId || undefined : undefined,
       };
@@ -1239,60 +1240,24 @@ export default function AdminDashboardPage() {
         </p>
       </section>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <section className="panel card">
-          <h2>My Profile</h2>
-          {adminMessage ? <p className="muted">{adminMessage}</p> : null}
-          <form className="form" onSubmit={handleUpdateProfile}>
-            <label className="field">
-              <span>Name</span>
-              <input value={profileForm.name} onChange={(event) => setProfileForm({ ...profileForm, name: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Email</span>
-              <input type="email" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Phone</span>
-              <input value={profileForm.phone} onChange={(event) => setProfileForm({ ...profileForm, phone: event.target.value })} placeholder="Optional phone number" />
-            </label>
-            <button className="button" type="submit">Save profile</button>
-          </form>
-        </section>
+      <AdminNav />
 
-        <section className="panel card">
-          <h2>Change Password</h2>
-          <form className="form" onSubmit={handleUpdatePassword}>
-            <label className="field">
-              <span>Current Password</span>
-              <input
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>New Password</span>
-              <input
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Confirm New Password</span>
-              <input
-                type="password"
-                value={passwordForm.confirmNewPassword}
-                onChange={(event) => setPasswordForm({ ...passwordForm, confirmNewPassword: event.target.value })}
-                required
-              />
-            </label>
-            <button className="button" type="submit">Update password</button>
-          </form>
-        </section>
+      <section className="grid stats" style={{ marginTop: 8 }}>
+        <article className="panel card">
+          <h2>Management workspace</h2>
+          <p className="muted">Open the dedicated page for scoped admin, candidate, agent, and unified user management.</p>
+          <Link href="/admin/manage">Open management</Link>
+        </article>
+        <article className="panel card">
+          <h2>Reference data</h2>
+          <p className="muted">Zones and parties now live on a dedicated management page.</p>
+          <Link href="/admin/reference">Open reference data</Link>
+        </article>
+        <article className="panel card">
+          <h2>Account settings</h2>
+          <p className="muted">Change account info, password, and protected exports in one dedicated place.</p>
+          <Link href="/admin/account">Open account settings</Link>
+        </article>
       </section>
 
       <section className="grid stats">
@@ -1656,7 +1621,7 @@ export default function AdminDashboardPage() {
         <h2>Voter Engagement Tasks</h2>
         <p className="muted">Create optional voter actions that can be claimed for redeemable points inside your territory scope.</p>
         <div className="grid" style={{ gridTemplateColumns: "minmax(320px, 1fr) minmax(0, 1.3fr)", marginTop: 16 }}>
-          <section className="panel card">
+          <section id="admin-management" className="panel card">
             <form className="form" onSubmit={handleCreateEngagementTask}>
               <label className="field">
                 <span>Title</span>
@@ -1938,7 +1903,7 @@ export default function AdminDashboardPage() {
                   </label>
                 </>
               ) : null}
-              {["STATE_CONSTITUENCY", "LGA", "WARD"].includes(adminCreateForm.adminLevel) ? (
+              {["LGA", "WARD"].includes(adminCreateForm.adminLevel) ? (
                 <label className="field">
                   <span>LGA</span>
                   <select
@@ -1994,7 +1959,7 @@ export default function AdminDashboardPage() {
             </form>
           </section>
 
-          <section className="panel card">
+          <section id="candidate-management" className="panel card">
             <h2>{editingCandidateUserId ? "Edit Candidate" : "Create Candidate"}</h2>
             <p className="muted">This form supports the full office list, with party optional for independent candidates.</p>
             <form className="form" onSubmit={handleCreateCandidate}>
@@ -2122,7 +2087,7 @@ export default function AdminDashboardPage() {
                   </label>
                 </>
               ) : null}
-              {["STATE_ASSEMBLY", "CHAIRMANSHIP", "COUNCILLOR"].includes(candidateCreateForm.officeType) ? (
+              {["CHAIRMANSHIP", "COUNCILLOR"].includes(candidateCreateForm.officeType) ? (
                 <label className="field">
                   <span>LGA</span>
                   <select
@@ -2178,7 +2143,7 @@ export default function AdminDashboardPage() {
             </form>
           </section>
 
-          <section className="panel card">
+          <section id="agent-management" className="panel card">
             <h2>{editingAgentUserId ? "Edit Agent" : "Create Agent"}</h2>
             <p className="muted">Agents are created within a state, LGA, and ward, with optional polling unit and admin assignment.</p>
             <form className="form" onSubmit={handleCreateAgent}>
@@ -2324,7 +2289,7 @@ export default function AdminDashboardPage() {
 
       {user.role === "SUPER_ADMIN" ? (
         <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-          <section className="panel card management-console" style={{ gridColumn: "1 / -1" }}>
+          <section id="unified-management" className="panel card management-console" style={{ gridColumn: "1 / -1" }}>
             <div className="section-head">
               <div>
                 <h2>Unified User Management</h2>
@@ -2376,122 +2341,17 @@ export default function AdminDashboardPage() {
         </section>
       ) : null}
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-        <section className="panel card">
-          <h2>Geo-Political Zones</h2>
-          {adminMessage ? <p className="muted">{adminMessage}</p> : null}
-          <div className="reward-list">
-            {zones.map((zone) => (
-              <article key={zone.id} className="reward-item">
-                {editingZoneId === zone.id ? (
-                  <>
-                    <label className="field">
-                      <span>Zone Name</span>
-                      <input
-                        value={zoneEditForm.name}
-                        onChange={(event) => setZoneEditForm({ name: event.target.value })}
-                        required
-                      />
-                    </label>
-                    <p className="muted">{zone.id}</p>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="button" type="button" onClick={() => handleUpdateZone(zone.id)}>Save</button>
-                      <button className="button secondary" type="button" onClick={() => setEditingZoneId(null)}>Cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <strong>{zone.name}</strong>
-                    <p className="muted">{zone.id}</p>
-                    {user.role === "SUPER_ADMIN" ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button className="button" type="button" onClick={() => startZoneEdit(zone)}>Edit</button>
-                        <button className="button secondary" type="button" onClick={() => handleDeleteZone(zone.id)}>Delete</button>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </article>
-            ))}
-          </div>
-          {user.role === "SUPER_ADMIN" ? (
-            <form className="form" onSubmit={handleCreateZone}>
-              <label className="field">
-                <span>Zone Id</span>
-                <input value={zoneForm.id} onChange={(event) => setZoneForm({ ...zoneForm, id: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Zone Name</span>
-                <input value={zoneForm.name} onChange={(event) => setZoneForm({ ...zoneForm, name: event.target.value })} required />
-              </label>
-              <button className="button" type="submit">Add zone</button>
-            </form>
-          ) : null}
-        </section>
-
-        <section className="panel card">
-          <h2>Political Parties</h2>
-          <div className="reward-list">
-            {parties.map((party) => (
-              <article key={party.id} className="reward-item">
-                {editingPartyId === party.id ? (
-                  <>
-                    <label className="field">
-                      <span>Party Code</span>
-                      <input
-                        value={partyEditForm.code}
-                        onChange={(event) => setPartyEditForm({ ...partyEditForm, code: event.target.value })}
-                        required
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Party Name</span>
-                      <input
-                        value={partyEditForm.name}
-                        onChange={(event) => setPartyEditForm({ ...partyEditForm, name: event.target.value })}
-                        required
-                      />
-                    </label>
-                    <p className="muted">{party.id}</p>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="button" type="button" onClick={() => handleUpdateParty(party.id)}>Save</button>
-                      <button className="button secondary" type="button" onClick={() => setEditingPartyId(null)}>Cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <strong>{party.name}</strong>
-                    <p>{party.code}</p>
-                    <p className="muted">{party.id}</p>
-                    {user.role === "SUPER_ADMIN" ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button className="button" type="button" onClick={() => startPartyEdit(party)}>Edit</button>
-                        <button className="button secondary" type="button" onClick={() => handleDeleteParty(party.id)}>Delete</button>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </article>
-            ))}
-          </div>
-          {user.role === "SUPER_ADMIN" ? (
-            <form className="form" onSubmit={handleCreateParty}>
-              <label className="field">
-                <span>Party Id</span>
-                <input value={partyForm.id} onChange={(event) => setPartyForm({ ...partyForm, id: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Party Code</span>
-                <input value={partyForm.code} onChange={(event) => setPartyForm({ ...partyForm, code: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Party Name</span>
-                <input value={partyForm.name} onChange={(event) => setPartyForm({ ...partyForm, name: event.target.value })} required />
-              </label>
-              <button className="button" type="submit">Add party</button>
-            </form>
-          ) : null}
-        </section>
+      <section className="grid stats" style={{ marginTop: 24 }}>
+        <article className="panel card">
+          <h2>Reference management moved</h2>
+          <p className="muted">Zone and party management has its own page so the dashboard stays focused on operations.</p>
+          <Link href="/admin/reference">Manage zones and parties</Link>
+        </article>
+        <article className="panel card">
+          <h2>Account management moved</h2>
+          <p className="muted">Profile edits, password changes, and protected exports now live on the account page.</p>
+          <Link href="/admin/account">Open account settings</Link>
+        </article>
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>
