@@ -416,9 +416,27 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
       continue;
     }
 
+    const baseId = toId("state-assembly", row.code);
+    let nextId = baseId;
+    let suffix = 2;
+
+    for (;;) {
+      const existingById = await prisma.stateConstituency.findUnique({
+        where: { id: nextId },
+        select: { id: true },
+      });
+
+      if (!existingById) {
+        break;
+      }
+
+      nextId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
     await prisma.stateConstituency.create({
       data: {
-        id: toId("state-assembly", row.code),
+        id: nextId,
         name: row.name,
         stateId: state.id,
         lgaId: primaryLga.id,
