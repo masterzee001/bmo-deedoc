@@ -258,6 +258,7 @@ function pickPrimaryLga(
 
 export async function ensureNationalConstituencyReference(prisma: PrismaClient) {
   const workbook = readWorkbook();
+  const senateByStateId = new Map<string, Array<{ id: string; lgaNames: string[] }>>();
 
   for (const row of workbook.senate) {
     const state = await ensureState(prisma, row.stateName);
@@ -286,30 +287,24 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
         where: { id: existing.id },
         data: { name: row.name, stateId: state.id },
       });
+      senateByStateId.set(state.id, [
+        ...(senateByStateId.get(state.id) || []),
+        { id: existing.id, lgaNames },
+      ]);
       continue;
     }
 
-    await prisma.senatorialDistrict.create({
+    const created = await prisma.senatorialDistrict.create({
       data: {
         id: toId("sen", row.code),
         name: row.name,
         stateId: state.id,
       },
     });
-  }
-
-  const senateByStateId = new Map<string, Array<{ id: string; lgaNames: string[] }>>();
-  for (const row of workbook.senate) {
-    const state = await ensureState(prisma, row.stateName);
-    if (!state) {
-      continue;
-    }
-
-    const entry = {
-      id: toId("sen", row.code),
-      lgaNames: splitCompositionIntoLgaNames(row.composition),
-    };
-    senateByStateId.set(state.id, [...(senateByStateId.get(state.id) || []), entry]);
+    senateByStateId.set(state.id, [
+      ...(senateByStateId.get(state.id) || []),
+      { id: created.id, lgaNames },
+    ]);
   }
 
   for (const row of workbook.federal) {
