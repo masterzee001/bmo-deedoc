@@ -681,27 +681,58 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
-router.post("/users", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+function applyActorAdminScope<T extends {
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+  pollingUnitId?: string;
+}>(actor: Express.Request["authUser"], payload: T): T {
+  if (!actor || actor.role !== UserRole.ADMIN || !actor.adminProfile) {
+    return payload;
+  }
+
+  const scope = actor.adminProfile;
+
+  return {
+    ...payload,
+    geoPoliticalZoneId: scope.geoPoliticalZoneId || payload.geoPoliticalZoneId,
+    stateId: scope.stateId || payload.stateId,
+    senatorialDistrictId: scope.senatorialDistrictId || payload.senatorialDistrictId,
+    federalConstituencyId: scope.federalConstituencyId || payload.federalConstituencyId,
+    lgaId: scope.lgaId || payload.lgaId,
+    wardId: scope.wardId || payload.wardId,
+    stateConstituencyId: scope.stateConstituencyId || payload.stateConstituencyId,
+    pollingUnitId: scope.pollingUnitId || payload.pollingUnitId,
+  };
+}
+
+router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = adminCreationSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid admin creation payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryError = validateAdminTerritoryPayload(parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryError = validateAdminTerritoryPayload(scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
   }
 
-  if (!request.authUser || !canManageAdmin(request.authUser, parsed.data)) {
+  if (!request.authUser || !canManageAdmin(request.authUser, scopedPayload)) {
     return response.status(403).json({ message: "You cannot create an admin at this level or territory." });
   }
 
-  const email = normalizeEmail(parsed.data.email);
+  const email = normalizeEmail(scopedPayload.email);
   const existingUser = await prisma.user.findUnique({
     where: { email },
     select: { id: true },
@@ -719,15 +750,15 @@ router.post("/users", requireAuth, requireRole("SUPER_ADMIN"), async (request, r
       role: UserRole.ADMIN,
       adminProfile: {
         create: {
-          adminLevel: parsed.data.adminLevel,
-          geoPoliticalZoneId: parsed.data.geoPoliticalZoneId || null,
-          stateId: parsed.data.stateId || null,
-          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-          federalConstituencyId: parsed.data.federalConstituencyId || null,
-          lgaId: parsed.data.lgaId || null,
-          wardId: parsed.data.wardId || null,
-          stateConstituencyId: parsed.data.stateConstituencyId || null,
-          pollingUnitId: parsed.data.pollingUnitId || null,
+          adminLevel: scopedPayload.adminLevel,
+          geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
+          stateId: scopedPayload.stateId || null,
+          senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+          federalConstituencyId: scopedPayload.federalConstituencyId || null,
+          lgaId: scopedPayload.lgaId || null,
+          wardId: scopedPayload.wardId || null,
+          stateConstituencyId: scopedPayload.stateConstituencyId || null,
+          pollingUnitId: scopedPayload.pollingUnitId || null,
         },
       },
     },
@@ -739,11 +770,11 @@ router.post("/users", requireAuth, requireRole("SUPER_ADMIN"), async (request, r
     targetType: "User",
     targetId: createdUser.id,
       metadata: {
-        adminLevel: parsed.data.adminLevel,
-        geoPoliticalZoneId: parsed.data.geoPoliticalZoneId || null,
-        stateId: parsed.data.stateId || null,
-      lgaId: parsed.data.lgaId || null,
-      wardId: parsed.data.wardId || null,
+        adminLevel: scopedPayload.adminLevel,
+        geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
+        stateId: scopedPayload.stateId || null,
+      lgaId: scopedPayload.lgaId || null,
+      wardId: scopedPayload.wardId || null,
     },
   });
 
@@ -753,25 +784,27 @@ router.post("/users", requireAuth, requireRole("SUPER_ADMIN"), async (request, r
   });
 });
 
-router.post("/candidates", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+router.post("/candidates", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = candidateCreationSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid candidate creation payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryError = validateCandidateOfficeTerritory(parsed.data.officeType, parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryError = validateCandidateOfficeTerritory(scopedPayload.officeType, scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
   }
 
-  if (parsed.data.politicalPartyId) {
+  if (scopedPayload.politicalPartyId) {
     const party = await prisma.politicalParty.findUnique({
-      where: { id: parsed.data.politicalPartyId },
+      where: { id: scopedPayload.politicalPartyId },
       select: { id: true },
     });
 
@@ -780,7 +813,13 @@ router.post("/candidates", requireAuth, requireRole("SUPER_ADMIN"), async (reque
     }
   }
 
-  const email = normalizeEmail(parsed.data.email);
+  const scope = await enrichCandidateScope(scopedPayload);
+
+  if (!request.authUser || !canViewCandidate(request.authUser, scope)) {
+    return response.status(403).json({ message: "You cannot create a candidate outside your admin territory." });
+  }
+
+  const email = normalizeEmail(scopedPayload.email);
   const existingUser = await prisma.user.findUnique({
     where: { email },
     select: { id: true },
@@ -790,17 +829,16 @@ router.post("/candidates", requireAuth, requireRole("SUPER_ADMIN"), async (reque
     return response.status(409).json({ message: "Email is already registered." });
   }
 
-  const scope = await enrichCandidateScope(parsed.data);
   const createdUser = await prisma.user.create({
     data: {
-      name: parsed.data.name.trim(),
+      name: scopedPayload.name.trim(),
       email,
-      passwordHash: await hashPassword(parsed.data.password),
+      passwordHash: await hashPassword(scopedPayload.password),
       role: UserRole.CANDIDATE,
       candidateProfile: {
         create: {
-          officeType: parsed.data.officeType,
-          politicalPartyId: parsed.data.politicalPartyId || null,
+          officeType: scopedPayload.officeType,
+          politicalPartyId: scopedPayload.politicalPartyId || null,
           ...scope,
         },
       },
@@ -813,8 +851,8 @@ router.post("/candidates", requireAuth, requireRole("SUPER_ADMIN"), async (reque
     targetType: "User",
     targetId: createdUser.id,
       metadata: {
-        officeType: parsed.data.officeType,
-        politicalPartyId: parsed.data.politicalPartyId || null,
+        officeType: scopedPayload.officeType,
+        politicalPartyId: scopedPayload.politicalPartyId || null,
         geoPoliticalZoneId: scope.geoPoliticalZoneId,
         stateId: scope.stateId,
       lgaId: scope.lgaId,
@@ -1581,31 +1619,33 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     return response.status(400).json({ message: "Invalid agent creation payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
   }
 
   const state = await prisma.state.findUnique({
-    where: { id: parsed.data.stateId },
+    where: { id: scopedPayload.stateId },
     select: { geoPoliticalZoneId: true },
   });
 
   const agentTerritory = {
     geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
-    stateId: parsed.data.stateId,
-    senatorialDistrictId: parsed.data.senatorialDistrictId || undefined,
-    federalConstituencyId: parsed.data.federalConstituencyId || undefined,
-    lgaId: parsed.data.lgaId,
-    wardId: parsed.data.wardId,
-    stateConstituencyId: parsed.data.stateConstituencyId || undefined,
-    pollingUnitId: parsed.data.pollingUnitId || undefined,
+    stateId: scopedPayload.stateId,
+    senatorialDistrictId: scopedPayload.senatorialDistrictId || undefined,
+    federalConstituencyId: scopedPayload.federalConstituencyId || undefined,
+    lgaId: scopedPayload.lgaId,
+    wardId: scopedPayload.wardId,
+    stateConstituencyId: scopedPayload.stateConstituencyId || undefined,
+    pollingUnitId: scopedPayload.pollingUnitId || undefined,
   };
 
   if (
     request.authUser?.role === UserRole.ADMIN &&
     request.authUser.adminProfile?.adminLevel === AdminLevel.LGA &&
-    (request.authUser.adminProfile.stateId !== parsed.data.stateId || request.authUser.adminProfile.lgaId !== parsed.data.lgaId)
+    (request.authUser.adminProfile.stateId !== scopedPayload.stateId || request.authUser.adminProfile.lgaId !== scopedPayload.lgaId)
   ) {
     return response.status(403).json({ message: "LGA admins can only create ward agents inside their assigned LGA." });
   }
@@ -1614,9 +1654,9 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     return response.status(403).json({ message: "You cannot create an agent in this territory." });
   }
 
-  if (parsed.data.assignedAdminUserId) {
+  if (scopedPayload.assignedAdminUserId) {
     const assignedAdmin = await prisma.user.findUnique({
-      where: { id: parsed.data.assignedAdminUserId },
+      where: { id: scopedPayload.assignedAdminUserId },
       include: { adminProfile: true },
     });
 
@@ -1630,7 +1670,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     }
   }
 
-  const email = normalizeEmail(parsed.data.email);
+  const email = normalizeEmail(scopedPayload.email);
   const existingUser = await prisma.user.findUnique({
     where: { email },
     select: { id: true },
@@ -1642,22 +1682,22 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
 
   const createdUser = await prisma.user.create({
     data: {
-      name: parsed.data.name.trim(),
+      name: scopedPayload.name.trim(),
       email,
-      phone: parsed.data.phone?.trim() || null,
-      passwordHash: await hashPassword(parsed.data.password),
+      phone: scopedPayload.phone?.trim() || null,
+      passwordHash: await hashPassword(scopedPayload.password),
       role: UserRole.AGENT,
       agentProfile: {
         create: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
-          stateId: parsed.data.stateId,
-          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-          federalConstituencyId: parsed.data.federalConstituencyId || null,
-          lgaId: parsed.data.lgaId,
-          wardId: parsed.data.wardId,
-          stateConstituencyId: parsed.data.stateConstituencyId || null,
-          pollingUnitId: parsed.data.pollingUnitId || null,
-          assignedAdminUserId: parsed.data.assignedAdminUserId || null,
+          stateId: scopedPayload.stateId,
+          senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+          federalConstituencyId: scopedPayload.federalConstituencyId || null,
+          lgaId: scopedPayload.lgaId,
+          wardId: scopedPayload.wardId,
+          stateConstituencyId: scopedPayload.stateConstituencyId || null,
+          pollingUnitId: scopedPayload.pollingUnitId || null,
+          assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
         },
       },
     },
@@ -1669,13 +1709,13 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     targetType: "User",
     targetId: createdUser.id,
     metadata: {
-      stateId: parsed.data.stateId,
-      senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-      federalConstituencyId: parsed.data.federalConstituencyId || null,
-      lgaId: parsed.data.lgaId,
-      wardId: parsed.data.wardId,
-      stateConstituencyId: parsed.data.stateConstituencyId || null,
-      pollingUnitId: parsed.data.pollingUnitId || null,
+      stateId: scopedPayload.stateId,
+      senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+      federalConstituencyId: scopedPayload.federalConstituencyId || null,
+      lgaId: scopedPayload.lgaId,
+      wardId: scopedPayload.wardId,
+      stateConstituencyId: scopedPayload.stateConstituencyId || null,
+      pollingUnitId: scopedPayload.pollingUnitId || null,
     },
   });
 
@@ -1793,7 +1833,7 @@ router.get("/voters/export", requireAuth, requireRole("SUPER_ADMIN"), async (req
   return response.status(200).send(rows.join("\n"));
 });
 
-router.patch("/users/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+router.patch("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const userId = readRouteId(response, request.params.userId, "user id");
   if (!userId) {
     return;
@@ -1804,18 +1844,16 @@ router.patch("/users/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (r
     return response.status(400).json({ message: "Invalid admin update payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryError = validateAdminTerritoryPayload(parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryError = validateAdminTerritoryPayload(scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
-  }
-
-  if (!request.authUser || !canManageAdmin(request.authUser, parsed.data)) {
-    return response.status(403).json({ message: "You cannot update an admin at this level or territory." });
   }
 
   const targetUser = await prisma.user.findUnique({
@@ -1827,21 +1865,26 @@ router.patch("/users/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (r
     return response.status(404).json({ message: "Admin user not found." });
   }
 
+  const targetAuth = await getAuthUserProfile(targetUser.id);
+  if (!request.authUser || !targetAuth || !canManageUser(request.authUser, targetAuth) || !canManageAdmin(request.authUser, scopedPayload)) {
+    return response.status(403).json({ message: "You cannot update an admin at this level or territory." });
+  }
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
-      name: parsed.data.name.trim(),
+      name: scopedPayload.name.trim(),
       adminProfile: {
         update: {
-          adminLevel: parsed.data.adminLevel,
-          geoPoliticalZoneId: parsed.data.geoPoliticalZoneId || null,
-          stateId: parsed.data.stateId || null,
-          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-          federalConstituencyId: parsed.data.federalConstituencyId || null,
-          lgaId: parsed.data.lgaId || null,
-          wardId: parsed.data.wardId || null,
-          stateConstituencyId: parsed.data.stateConstituencyId || null,
-          pollingUnitId: parsed.data.pollingUnitId || null,
+          adminLevel: scopedPayload.adminLevel,
+          geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
+          stateId: scopedPayload.stateId || null,
+          senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+          federalConstituencyId: scopedPayload.federalConstituencyId || null,
+          lgaId: scopedPayload.lgaId || null,
+          wardId: scopedPayload.wardId || null,
+          stateConstituencyId: scopedPayload.stateConstituencyId || null,
+          pollingUnitId: scopedPayload.pollingUnitId || null,
         },
       },
     },
@@ -1857,7 +1900,7 @@ router.patch("/users/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (r
   return response.json({ message: "Admin updated successfully.", user: await getAuthUserProfile(updatedUser.id) });
 });
 
-router.patch("/candidates/:userId", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+router.patch("/candidates/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const userId = readRouteId(response, request.params.userId, "user id");
   if (!userId) {
     return;
@@ -1868,19 +1911,21 @@ router.patch("/candidates/:userId", requireAuth, requireRole("SUPER_ADMIN"), asy
     return response.status(400).json({ message: "Invalid candidate update payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryError = validateCandidateOfficeTerritory(parsed.data.officeType, parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryError = validateCandidateOfficeTerritory(scopedPayload.officeType, scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
   }
 
-  if (parsed.data.politicalPartyId) {
+  if (scopedPayload.politicalPartyId) {
     const party = await prisma.politicalParty.findUnique({
-      where: { id: parsed.data.politicalPartyId },
+      where: { id: scopedPayload.politicalPartyId },
       select: { id: true },
     });
 
@@ -1898,15 +1943,19 @@ router.patch("/candidates/:userId", requireAuth, requireRole("SUPER_ADMIN"), asy
     return response.status(404).json({ message: "Candidate user not found." });
   }
 
-  const scope = await enrichCandidateScope(parsed.data);
+  const scope = await enrichCandidateScope(scopedPayload);
+  if (!request.authUser || !canViewCandidate(request.authUser, { ...targetUser.candidateProfile, userId }) || !canViewCandidate(request.authUser, scope)) {
+    return response.status(403).json({ message: "You cannot update a candidate outside your admin territory." });
+  }
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
-      name: parsed.data.name.trim(),
+      name: scopedPayload.name.trim(),
       candidateProfile: {
         update: {
-          officeType: parsed.data.officeType,
-          politicalPartyId: parsed.data.politicalPartyId || null,
+          officeType: scopedPayload.officeType,
+          politicalPartyId: scopedPayload.politicalPartyId || null,
           ...scope,
         },
       },
@@ -1934,34 +1983,36 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     return response.status(400).json({ message: "Invalid agent update payload.", errors: parsed.error.flatten() });
   }
 
-  const territoryReferenceError = await validateTerritoryReferences(parsed.data);
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
   }
 
   const state = await prisma.state.findUnique({
-    where: { id: parsed.data.stateId },
+    where: { id: scopedPayload.stateId },
     select: { geoPoliticalZoneId: true },
   });
 
   const agentTerritory = {
     geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
-    stateId: parsed.data.stateId,
-    senatorialDistrictId: parsed.data.senatorialDistrictId || undefined,
-    federalConstituencyId: parsed.data.federalConstituencyId || undefined,
-    lgaId: parsed.data.lgaId,
-    wardId: parsed.data.wardId,
-    stateConstituencyId: parsed.data.stateConstituencyId || undefined,
-    pollingUnitId: parsed.data.pollingUnitId || undefined,
+    stateId: scopedPayload.stateId,
+    senatorialDistrictId: scopedPayload.senatorialDistrictId || undefined,
+    federalConstituencyId: scopedPayload.federalConstituencyId || undefined,
+    lgaId: scopedPayload.lgaId,
+    wardId: scopedPayload.wardId,
+    stateConstituencyId: scopedPayload.stateConstituencyId || undefined,
+    pollingUnitId: scopedPayload.pollingUnitId || undefined,
   };
 
   if (!request.authUser || !canCreateAgentInScope(request.authUser, agentTerritory)) {
     return response.status(403).json({ message: "You cannot update an agent in this territory." });
   }
 
-  if (parsed.data.assignedAdminUserId) {
+  if (scopedPayload.assignedAdminUserId) {
     const assignedAdmin = await prisma.user.findUnique({
-      where: { id: parsed.data.assignedAdminUserId },
+      where: { id: scopedPayload.assignedAdminUserId },
       include: { adminProfile: true },
     });
 
@@ -1984,22 +2035,27 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     return response.status(404).json({ message: "Agent user not found." });
   }
 
+  const targetAuth = await getAuthUserProfile(targetUser.id);
+  if (!request.authUser || !targetAuth || !canManageUser(request.authUser, targetAuth) || !canCreateAgentInScope(request.authUser, agentTerritory)) {
+    return response.status(403).json({ message: "You cannot update an agent in this territory." });
+  }
+
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
-      name: parsed.data.name.trim(),
-      phone: parsed.data.phone?.trim() || null,
+      name: scopedPayload.name.trim(),
+      phone: scopedPayload.phone?.trim() || null,
       agentProfile: {
         update: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
-          stateId: parsed.data.stateId,
-          senatorialDistrictId: parsed.data.senatorialDistrictId || null,
-          federalConstituencyId: parsed.data.federalConstituencyId || null,
-          lgaId: parsed.data.lgaId,
-          wardId: parsed.data.wardId,
-          stateConstituencyId: parsed.data.stateConstituencyId || null,
-          pollingUnitId: parsed.data.pollingUnitId || null,
-          assignedAdminUserId: parsed.data.assignedAdminUserId || null,
+          stateId: scopedPayload.stateId,
+          senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+          federalConstituencyId: scopedPayload.federalConstituencyId || null,
+          lgaId: scopedPayload.lgaId,
+          wardId: scopedPayload.wardId,
+          stateConstituencyId: scopedPayload.stateConstituencyId || null,
+          pollingUnitId: scopedPayload.pollingUnitId || null,
+          assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
         },
       },
     },

@@ -100,6 +100,17 @@ type LiveMapMarker = {
   tone: "safe" | "alert";
 };
 
+const adminLevelRank: Record<(typeof ADMIN_LEVELS)[number], number> = {
+  NATIONAL: 7,
+  GEO_POLITICAL_ZONE: 6,
+  STATE: 5,
+  SENATORIAL: 4,
+  FEDERAL_CONSTITUENCY: 3,
+  STATE_CONSTITUENCY: 2,
+  LGA: 1,
+  WARD: 0,
+};
+
 function formatDependencyCounts(value: unknown): string {
   if (!value || typeof value !== "object") {
     return "";
@@ -404,6 +415,20 @@ export default function AdminDashboardPage() {
         }
 
         setUser(currentUser);
+        const manageableAdminLevels =
+          currentUser.role === "SUPER_ADMIN"
+            ? adminLevelOptions
+            : currentUser.adminProfile
+              ? adminLevelOptions.filter((level) => adminLevelRank[currentUser.adminProfile!.adminLevel] > adminLevelRank[level])
+              : [];
+        if (manageableAdminLevels.length > 0) {
+          setAdminCreateForm((current) => ({
+            ...current,
+            adminLevel: manageableAdminLevels.includes(current.adminLevel as (typeof ADMIN_LEVELS)[number])
+              ? current.adminLevel
+              : manageableAdminLevels[0],
+          }));
+        }
         setProfileForm({
           name: currentUser.name,
           email: currentUser.email,
@@ -467,6 +492,13 @@ export default function AdminDashboardPage() {
 
   const liveMapMarkers = buildLiveMapMarkers(mapSummary, mapLayer, mapSeverityFilter);
   const selectedMapMarker = liveMapMarkers.find((item) => item.id === selectedMapMarkerId) || liveMapMarkers[0] || null;
+  const manageableAdminLevels =
+    user.role === "SUPER_ADMIN"
+      ? adminLevelOptions
+      : user.adminProfile
+        ? adminLevelOptions.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level])
+        : [];
+  const canManageAdmins = manageableAdminLevels.length > 0;
   const highlightedIncidents = mapSummary.incidents
     .filter((incident) => mapSeverityFilter === "ALL" || incident.severity === mapSeverityFilter)
     .slice(0, 4);
@@ -1762,11 +1794,12 @@ export default function AdminDashboardPage() {
         )}
       </section>
 
-      {user.role === "SUPER_ADMIN" ? (
+      {(user.role === "ADMIN" || user.role === "SUPER_ADMIN") ? (
         <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+          {canManageAdmins ? (
           <section className="panel card">
             <h2>{editingAdminUserId ? "Edit Admin" : "Create Admin"}</h2>
-            <p className="muted">This form currently supports national, geo-political-zone, and state admins.</p>
+            <p className="muted">Create lower-level admins inside your current territory scope.</p>
             <form className="form" onSubmit={handleCreateAdmin}>
               <label className="field">
                 <span>Name</span>
@@ -1792,7 +1825,7 @@ export default function AdminDashboardPage() {
                     await refreshTerritoryOptions({});
                   }}
                 >
-                  {adminLevelOptions.map((level) => (
+                  {manageableAdminLevels.map((level) => (
                     <option key={level} value={level}>{level}</option>
                   ))}
                 </select>
@@ -1958,6 +1991,7 @@ export default function AdminDashboardPage() {
               </div>
             </form>
           </section>
+          ) : null}
 
           <section id="candidate-management" className="panel card">
             <h2>{editingCandidateUserId ? "Edit Candidate" : "Create Candidate"}</h2>
@@ -2287,7 +2321,7 @@ export default function AdminDashboardPage() {
         </section>
       ) : null}
 
-      {user.role === "SUPER_ADMIN" ? (
+      {(user.role === "ADMIN" || user.role === "SUPER_ADMIN") ? (
         <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
           <section id="unified-management" className="panel card management-console" style={{ gridColumn: "1 / -1" }}>
             <div className="section-head">
