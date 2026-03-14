@@ -208,9 +208,27 @@ async function ensureLga(prisma: PrismaClient, stateId: string, lgaName: string)
     return existing;
   }
 
+  const baseId = `bootstrap-lga-${stateId}-${lgaName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
+  let nextId = baseId;
+  let suffix = 2;
+
+  for (;;) {
+    const existingById = await prisma.lGA.findUnique({
+      where: { id: nextId },
+      select: { id: true },
+    });
+
+    if (!existingById) {
+      break;
+    }
+
+    nextId = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+
   return prisma.lGA.create({
     data: {
-      id: `bootstrap-lga-${stateId}-${lgaName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,
+      id: nextId,
       stateId,
       name: lgaName,
     },
