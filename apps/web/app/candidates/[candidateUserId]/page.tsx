@@ -35,6 +35,25 @@ function renderMaterialPreview(material: CandidatePublicProfile["materials"][num
   return <div className="campaign-material-preview fallback">{material.mediaType}</div>;
 }
 
+function splitProfileNarrative(candidate: CandidatePublicProfile) {
+  const blocks = (candidate.bio || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (blocks.length === 0) {
+    return {
+      campaignMessage: candidate.campaignSlogan || "No campaign summary has been published yet.",
+      highlights: [] as string[],
+    };
+  }
+
+  return {
+    campaignMessage: blocks[0],
+    highlights: blocks.slice(1, 4),
+  };
+}
+
 export default function CandidateDetailPage({ params }: Props) {
   const [candidate, setCandidate] = useState<CandidatePublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,6 +93,17 @@ export default function CandidateDetailPage({ params }: Props) {
     );
   }
 
+  const narrative = splitProfileNarrative(candidate);
+  const territoryLine = [
+    candidate.territoryLabels.state || "National",
+    candidate.territoryLabels.senatorialDistrict,
+    candidate.territoryLabels.federalConstituency,
+    candidate.territoryLabels.stateConstituency,
+    candidate.territoryLabels.lga,
+    candidate.territoryLabels.ward,
+    candidate.territoryLabels.pollingUnit,
+  ].filter(Boolean).join(" | ");
+
   return (
     <main className="shell">
       <section className="panel hero candidate-profile-hero">
@@ -93,14 +123,36 @@ export default function CandidateDetailPage({ params }: Props) {
               {candidate.party?.isApprovedByInec ? <span className="status-badge live">INEC listed party</span> : null}
               <span className="muted">{candidate.territoryLabels.state || "National campaign"}</span>
             </div>
+            <div className="action-row" style={{ marginTop: 16 }}>
+              <Link href={`/candidates?officeType=${encodeURIComponent(candidate.officeType)}`}>More {officeLabels[candidate.officeType] || candidate.officeType} candidates</Link>
+              {candidate.party ? <Link href={`/parties/${candidate.party.id}`}>Party profile</Link> : null}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="candidate-dashboard-grid">
+      <section className="grid stats" style={{ marginTop: 24 }}>
+        <article className="panel card">
+          <h2>Published materials</h2>
+          <div className="value">{candidate.materials.length}</div>
+        </article>
+        <article className="panel card">
+          <h2>Upcoming events</h2>
+          <div className="value">{candidate.upcomingEvents.length}</div>
+        </article>
+        <article className="panel card">
+          <h2>Office</h2>
+          <div className="value" style={{ fontSize: "1.2rem" }}>{officeLabels[candidate.officeType] || candidate.officeType}</div>
+        </article>
+      </section>
+
+      <section className="candidate-dashboard-grid" style={{ marginTop: 24 }}>
         <section className="panel card">
-          <h2>About this campaign</h2>
-          <p>{candidate.bio || "No manifesto summary has been published yet."}</p>
+          <h2>Campaign message</h2>
+          <p>{narrative.campaignMessage}</p>
+          {candidate.campaignSlogan && candidate.campaignSlogan !== narrative.campaignMessage ? (
+            <p className="muted">Campaign slogan: {candidate.campaignSlogan}</p>
+          ) : null}
           {candidate.party ? (
             <p className="muted">
               Party: <Link href={`/parties/${candidate.party.id}`}>{candidate.party.name}</Link>
@@ -115,7 +167,8 @@ export default function CandidateDetailPage({ params }: Props) {
         </section>
 
         <section className="panel card">
-          <h2>Territory</h2>
+          <h2>Territory and office scope</h2>
+          <p>{territoryLine}</p>
           <div className="reward-list">
             <article className="reward-item">
               <strong>State</strong>
@@ -155,7 +208,27 @@ export default function CandidateDetailPage({ params }: Props) {
         </section>
       </section>
 
-      <section className="panel card">
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <div>
+            <h2>Manifesto highlights</h2>
+            <p className="muted">Profile statements and issue areas already published by this campaign.</p>
+          </div>
+        </div>
+        {narrative.highlights.length === 0 ? (
+          <p className="muted">No structured highlights have been published yet.</p>
+        ) : (
+          <div className="reward-list">
+            {narrative.highlights.map((item) => (
+              <article key={item} className="reward-item">
+                <p>{item}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel card" style={{ marginTop: 24 }}>
         <div className="section-head">
           <div>
             <h2>Campaign materials</h2>

@@ -20,8 +20,13 @@ import type {
   PoliticalPartyPublicProfile,
   PostListItem,
   PollingUnitCoverageSummary,
+  PollingUnitCoverageInsight,
+  WardCoverageInsight,
+  CoverageInsights,
   PollListItem,
   RewardBalanceSummary,
+  RewardLedgerItem,
+  RewardHistoryItem,
   RewardRedemptionItem,
   TerritorySummary,
   VoterEngagementTaskType,
@@ -514,6 +519,7 @@ export function serializeIncidentItem(incident: {
   wardId: string | null;
   pollingUnitId: string | null;
   assignedAdminUserId: string | null;
+  governance?: IncidentListItem["governance"];
   createdAt: Date;
   updatedAt: Date;
 }): IncidentListItem {
@@ -533,6 +539,7 @@ export function serializeIncidentItem(incident: {
     wardId: incident.wardId,
     pollingUnitId: incident.pollingUnitId,
     assignedAdminUserId: incident.assignedAdminUserId,
+    governance: incident.governance,
     createdAt: incident.createdAt.toISOString(),
     updatedAt: incident.updatedAt.toISOString(),
   };
@@ -542,6 +549,22 @@ export function serializePollingUnitCoverageSummary(
   summary: PollingUnitCoverageSummary,
 ): PollingUnitCoverageSummary {
   return summary;
+}
+
+export function serializeWardCoverageInsight(summary: WardCoverageInsight): WardCoverageInsight {
+  return summary;
+}
+
+export function serializePollingUnitCoverageInsight(summary: PollingUnitCoverageInsight): PollingUnitCoverageInsight {
+  return summary;
+}
+
+export function serializeCoverageInsights(summary: CoverageInsights): CoverageInsights {
+  return {
+    summary: summary.summary,
+    wards: summary.wards.map(serializeWardCoverageInsight),
+    pollingUnits: summary.pollingUnits.map(serializePollingUnitCoverageInsight),
+  };
 }
 
 export function serializeAdminMapSummary(summary: AdminMapSummary): AdminMapSummary {
@@ -615,6 +638,68 @@ export function serializeAuditLogItem(log: {
     targetId: log.targetId,
     metadataJson: log.metadataJson,
     createdAt: log.createdAt.toISOString(),
+  };
+}
+
+export function serializeRewardLedgerItem(entry: {
+  id: string;
+  voterUserId: string;
+  type: RewardLedgerItem["type"];
+  points: number;
+  amount: number | null;
+  description: string;
+  relatedUserId: string | null;
+  createdAt: Date;
+}): RewardLedgerItem {
+  return {
+    id: entry.id,
+    voterUserId: entry.voterUserId,
+    type: entry.type,
+    points: entry.points,
+    amount: entry.amount,
+    description: entry.description,
+    relatedUserId: entry.relatedUserId,
+    createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+export function serializeRewardHistoryItem(
+  item:
+    | ({ kind: "EARNED"; status: "POSTED"; title: string; reviewedAt?: null } & Parameters<typeof serializeRewardLedgerItem>[0])
+    | ({ kind: "REDEMPTION"; title: string } & {
+        id: string;
+        pointsRequested: number;
+        amountRequested: number | null;
+        status: RewardRedemptionItem["status"];
+        note: string | null;
+        createdAt: Date;
+        reviewedAt: Date | null;
+      }),
+): RewardHistoryItem {
+  if (item.kind === "EARNED") {
+    return {
+      id: item.id,
+      kind: "EARNED",
+      status: "POSTED",
+      title: item.title,
+      description: item.description,
+      points: item.points,
+      amount: item.amount,
+      createdAt: item.createdAt.toISOString(),
+      reviewedAt: null,
+    };
+  }
+
+  return {
+    id: item.id,
+    kind: "REDEMPTION",
+    status: item.status,
+    title: item.title,
+    description: item.note || `${item.pointsRequested} points redemption request`,
+    points: item.pointsRequested,
+    amount: item.amountRequested,
+    createdAt: item.createdAt.toISOString(),
+    reviewedAt: item.reviewedAt ? item.reviewedAt.toISOString() : null,
   };
 }
 

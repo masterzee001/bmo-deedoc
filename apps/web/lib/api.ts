@@ -7,6 +7,7 @@ import type {
   AuthUserProfile,
   AuditLogItem,
   BroadcastMessageItem,
+  BroadcastAudiencePreview,
   CampaignEventItem,
   CandidateProfileEditorItem,
   CandidatePublicListItem,
@@ -17,16 +18,20 @@ import type {
   FeedbackListItem,
   GeoPoliticalZoneItem,
   IncidentListItem,
+  IncidentGovernanceSummary,
   LgaItem,
   ManagedUserItem,
   NotificationItem,
   PollingUnitItem,
   PollingUnitCoverageSummary,
+  CoverageInsights,
   PoliticalPartyItem,
   PoliticalPartyPublicProfile,
   PollListItem,
   PostListItem,
   RewardBalanceSummary,
+  RewardHistoryItem,
+  RewardLedgerItem,
   RewardRedemptionItem,
   RewardsSummary,
   SenatorialDistrictItem,
@@ -200,6 +205,17 @@ export async function fetchVoterRewards(token: string): Promise<RewardsSummary> 
   return readJson(response);
 }
 
+export async function fetchVoterRewardLedger(
+  token: string,
+): Promise<{ rewardLedger: RewardLedgerItem[]; rewardHistory: RewardHistoryItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/voter/reward-ledger`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ rewardLedger: RewardLedgerItem[]; rewardHistory: RewardHistoryItem[] }>(response);
+}
+
 export async function fetchAdminSummary(token: string): Promise<AdminDashboardSummary> {
   const response = await fetch(`${API_BASE_URL}/admin/summary`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -240,6 +256,27 @@ export async function fetchAdminIncidents(token: string): Promise<IncidentListIt
   return payload.incidents;
 }
 
+export async function fetchAdminIncidentReview(
+  token: string,
+  query?: { status?: string; flaggedOnly?: boolean },
+): Promise<{ incidents: IncidentListItem[]; governance: IncidentGovernanceSummary }> {
+  const params = new URLSearchParams();
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+  if (query?.flaggedOnly !== undefined) {
+    params.set("flaggedOnly", String(query.flaggedOnly));
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/admin/incidents${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ incidents: IncidentListItem[]; governance: IncidentGovernanceSummary }>(response);
+}
+
 export async function fetchAdminAgentActivitySummaries(token: string): Promise<AgentActivitySummary[]> {
   const response = await fetch(`${API_BASE_URL}/admin/agent-activity-summaries`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -258,6 +295,16 @@ export async function fetchAdminPollingUnitCoverage(token: string): Promise<Poll
 
   const payload = await readJson<{ coverage: PollingUnitCoverageSummary }>(response);
   return payload.coverage;
+}
+
+export async function fetchAdminCoverageInsights(token: string): Promise<CoverageInsights> {
+  const response = await fetch(`${API_BASE_URL}/admin/coverage-insights`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ insights: CoverageInsights }>(response);
+  return payload.insights;
 }
 
 export async function fetchAdminMapSummary(token: string): Promise<AdminMapSummary> {
@@ -296,6 +343,17 @@ export async function fetchAdminRedemptions(token: string): Promise<RewardRedemp
 
   const payload = await readJson<{ redemptions: RewardRedemptionItem[] }>(response);
   return payload.redemptions;
+}
+
+export async function fetchAdminRewardLedger(
+  token: string,
+): Promise<{ rewardLedger: RewardLedgerItem[]; rewardHistory: RewardHistoryItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/admin/reward-ledger`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ rewardLedger: RewardLedgerItem[]; rewardHistory: RewardHistoryItem[] }>(response);
 }
 
 export async function fetchAdminTasks(token: string): Promise<FieldTaskItem[]> {
@@ -737,6 +795,9 @@ export async function createAdminBroadcast(token: string, body: {
   message: string;
   audience: "ALL" | "ADMINS" | "AGENTS" | "VOTERS" | "CANDIDATES";
   taskStatus?: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+  politicalPartyId?: string;
+  adminLevel?: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  officeType?: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
   geoPoliticalZoneId?: string;
   stateId?: string;
   senatorialDistrictId?: string;
@@ -756,6 +817,35 @@ export async function createAdminBroadcast(token: string, body: {
   });
 
   return readJson<{ message: string; broadcast: BroadcastMessageItem }>(response);
+}
+
+export async function previewAdminBroadcast(token: string, body: {
+  title: string;
+  message: string;
+  audience: "ALL" | "ADMINS" | "AGENTS" | "VOTERS" | "CANDIDATES";
+  taskStatus?: "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE";
+  politicalPartyId?: string;
+  adminLevel?: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  officeType?: "PRESIDENTIAL" | "GOVERNORSHIP" | "SENATE" | "HOUSE_OF_REP" | "STATE_ASSEMBLY" | "CHAIRMANSHIP" | "COUNCILLOR";
+  geoPoliticalZoneId?: string;
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+  pollingUnitId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/broadcasts/preview`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ preview: BroadcastAudiencePreview }>(response);
 }
 
 export async function createAdminEngagementTask(token: string, body: {
@@ -923,8 +1013,23 @@ export async function deletePoliticalParty(token: string, partyId: string) {
   return readJson(response);
 }
 
-export async function fetchAuditLogs(token: string): Promise<AuditLogItem[]> {
-  const response = await fetch(`${API_BASE_URL}/admin/audit-logs`, {
+export async function fetchAuditLogs(
+  token: string,
+  query?: { actorUserId?: string; action?: string; targetType?: string },
+): Promise<AuditLogItem[]> {
+  const params = new URLSearchParams();
+  if (query?.actorUserId) {
+    params.set("actorUserId", query.actorUserId);
+  }
+  if (query?.action) {
+    params.set("action", query.action);
+  }
+  if (query?.targetType) {
+    params.set("targetType", query.targetType);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/admin/audit-logs${suffix}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });

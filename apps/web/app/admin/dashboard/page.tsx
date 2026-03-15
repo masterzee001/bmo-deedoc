@@ -162,9 +162,24 @@ export default function AdminDashboardPage() {
               <Link href="/admin/manage/users">Open user list</Link>
             </article>
             <article className="reward-item">
+              <strong>Review incidents</strong>
+              <p>See flagged reports, escalation state, and open governance issues inside your scope.</p>
+              <Link href="/admin/incidents">Open incident review</Link>
+            </article>
+            <article className="reward-item">
+              <strong>Coverage intelligence</strong>
+              <p>Identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
+              <Link href="/admin/operations/coverage">Open coverage view</Link>
+            </article>
+            <article className="reward-item">
               <strong>Select territory</strong>
               <p>Drill into state, LGA, and ward views before running management tasks.</p>
               <Link href="/admin/manage/territory">Select territory</Link>
+            </article>
+            <article className="reward-item">
+              <strong>Send communications</strong>
+              <p>Preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
+              <Link href="/admin/communications">Open communications</Link>
             </article>
             <article className="reward-item">
               <strong>Account and exports</strong>

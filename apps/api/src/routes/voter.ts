@@ -14,6 +14,8 @@ import {
   serializePollListItem,
   serializePostListItem,
   serializeRewardBalance,
+  serializeRewardHistoryItem,
+  serializeRewardLedgerItem,
   serializeRewardRedemption,
   serializeVoterEngagementTaskItem,
 } from "../lib/serializers";
@@ -216,7 +218,7 @@ async function resolveEngagementProgress(voterUserId: string, task: {
 router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, response) => {
   const voterUserId = request.authUser?.id;
 
-  const [recentRewards, groupedRewards] = await Promise.all([
+  const [recentRewards, groupedRewards, recentRedemptions] = await Promise.all([
     prisma.rewardLedger.findMany({
       where: { voterUserId },
       orderBy: { createdAt: "desc" },
@@ -227,12 +229,34 @@ router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, respon
       where: { voterUserId },
       _sum: { points: true },
     }),
+    prisma.rewardRedemption.findMany({
+      where: { voterUserId },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
   ]);
 
   const totals = new Map(groupedRewards.map((entry) => [entry.type, entry._sum.points || 0]));
   const totalPoints = Array.from(totals.values()).reduce((sum, value) => sum + value, 0);
 
   const balance = await getRewardBalance(prisma, voterUserId!);
+  const history = [
+    ...recentRewards.map((reward) =>
+      serializeRewardHistoryItem({
+        ...reward,
+        kind: "EARNED",
+        status: "POSTED",
+        title: reward.type.replace(/_/g, " "),
+      }),
+    ),
+    ...recentRedemptions.map((redemption) =>
+      serializeRewardHistoryItem({
+        ...redemption,
+        kind: "REDEMPTION",
+        title: "Reward redemption",
+      }),
+    ),
+  ].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
   return response.json({
     totalPoints,
@@ -248,6 +272,47 @@ router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, respon
       description: reward.description,
       createdAt: reward.createdAt.toISOString(),
     })),
+    rewardLedger: recentRewards.map(serializeRewardLedgerItem),
+    rewardHistory: history,
+  });
+});
+
+router.get("/reward-ledger", requireAuth, requireRole("VOTER"), async (request, response) => {
+  const voterUserId = request.authUser!.id;
+  const [ledgerEntries, redemptions] = await Promise.all([
+    prisma.rewardLedger.findMany({
+      where: { voterUserId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    prisma.rewardRedemption.findMany({
+      where: { voterUserId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+  ]);
+
+  const rewardHistory = [
+    ...ledgerEntries.map((entry) =>
+      serializeRewardHistoryItem({
+        ...entry,
+        kind: "EARNED",
+        status: "POSTED",
+        title: entry.type.replace(/_/g, " "),
+      }),
+    ),
+    ...redemptions.map((redemption) =>
+      serializeRewardHistoryItem({
+        ...redemption,
+        kind: "REDEMPTION",
+        title: "Reward redemption",
+      }),
+    ),
+  ].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return response.json({
+    rewardLedger: ledgerEntries.map(serializeRewardLedgerItem),
+    rewardHistory,
   });
 });
 

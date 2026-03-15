@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, CampaignEventItem, NotificationItem, PostListItem, RewardBalanceSummary, RewardRedemptionItem, RewardsSummary, VoterEngagementTaskItem } from "@pics-nigeria/shared";
+import type {
+  AuthUserProfile,
+  CampaignEventItem,
+  NotificationItem,
+  PostListItem,
+  RewardBalanceSummary,
+  RewardHistoryItem,
+  RewardRedemptionItem,
+  RewardsSummary,
+  VoterEngagementTaskItem,
+} from "@pics-nigeria/shared";
 import {
   ApiError,
   claimVoterEngagementTask,
@@ -12,6 +22,7 @@ import {
   fetchVoterEvents,
   fetchVoterEngagementTasks,
   fetchVoterPosts,
+  fetchVoterRewardLedger,
   fetchVoterRedemptions,
   fetchVoterRewards,
   rsvpToCampaignEvent,
@@ -22,6 +33,7 @@ export default function DashboardPage() {
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [balance, setBalance] = useState<RewardBalanceSummary | null>(null);
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
+  const [rewardHistory, setRewardHistory] = useState<RewardHistoryItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<PostListItem[]>([]);
   const [events, setEvents] = useState<CampaignEventItem[]>([]);
@@ -32,9 +44,19 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
 
   async function loadDashboard(token: string) {
-    const [currentUser, rewardSummary, redemptionData, notificationItems, visiblePosts, visibleEvents, nextEngagementTasks] = await Promise.all([
+    const [
+      currentUser,
+      rewardSummary,
+      rewardLedgerData,
+      redemptionData,
+      notificationItems,
+      visiblePosts,
+      visibleEvents,
+      nextEngagementTasks,
+    ] = await Promise.all([
       fetchCurrentUser(token),
       fetchVoterRewards(token),
+      fetchVoterRewardLedger(token),
       fetchVoterRedemptions(token),
       fetchNotifications(token),
       fetchVoterPosts(token),
@@ -50,6 +72,7 @@ export default function DashboardPage() {
     setRewards(rewardSummary);
     setBalance(redemptionData.balance);
     setRedemptions(redemptionData.redemptions);
+    setRewardHistory(rewardLedgerData.rewardHistory);
     setNotifications(notificationItems);
     setPosts(visiblePosts);
     setEvents(visibleEvents);
@@ -260,17 +283,27 @@ export default function DashboardPage() {
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Recent Reward Activity</h2>
-        {rewards.recentRewards.length === 0 ? (
-          <p className="muted">No reward activity yet.</p>
+        <div className="section-head">
+          <div>
+            <h2>Reward history</h2>
+            <p className="muted">Track posted points and each redemption review stage in one place.</p>
+          </div>
+          <span className="status-pill">{rewardHistory.length} entries</span>
+        </div>
+        {rewardHistory.length === 0 ? (
+          <p className="muted">No reward history is available yet.</p>
         ) : (
           <div className="reward-list">
-            {rewards.recentRewards.map((reward) => (
-              <article key={reward.id} className="reward-item">
-                <strong>{reward.type}</strong>
-                <p>{reward.description}</p>
+            {rewardHistory.slice(0, 8).map((entry) => (
+              <article key={`${entry.kind}-${entry.id}`} className="reward-item">
+                <strong>{entry.title}</strong>
+                <p>{entry.description}</p>
                 <p className="muted">
-                  {reward.points} points | {new Date(reward.createdAt).toLocaleString()}
+                  {entry.kind === "EARNED" ? "Earned" : "Redemption"} | {entry.status} | {entry.points} points
+                </p>
+                <p className="muted">
+                  {new Date(entry.createdAt).toLocaleString()}
+                  {entry.reviewedAt ? ` | Reviewed ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
                 </p>
               </article>
             ))}

@@ -10,6 +10,7 @@ import {
   FieldTaskStatus,
   IncidentSeverity,
   IncidentStatus,
+  IncidentType,
   NotificationType,
   Prisma,
   RewardRedemptionStatus,
@@ -21,6 +22,7 @@ import { normalizeEmail } from "@pics-nigeria/shared";
 import { getAuthUserProfile } from "../auth/profile";
 import { hashPassword } from "../auth/password";
 import { createAuditLog } from "../lib/audit";
+import { buildIncidentGovernance, summarizeIncidentGovernance } from "../lib/incident-governance";
 import { createNotification } from "../lib/notifications";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
@@ -35,9 +37,12 @@ import {
   serializeFeedbackItem,
   serializeIncidentItem,
   serializePollingUnitCoverageSummary,
+  serializeCoverageInsights,
   serializeAuditLogItem,
   serializeFieldTaskItem,
   serializeNotificationItem,
+  serializeRewardHistoryItem,
+  serializeRewardLedgerItem,
   serializeRewardRedemption,
   serializeTerritory,
   serializeVoterEngagementTaskItem,
@@ -246,6 +251,7 @@ const agentActivityQuerySchema = z.object({
 
 const incidentQuerySchema = z.object({
   status: z.nativeEnum(IncidentStatus).optional(),
+  flaggedOnly: z.enum(["true", "false"]).optional(),
   dateFrom: z.string().datetime().optional(),
   dateTo: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -267,6 +273,7 @@ const redemptionReviewSchema = z.object({
 const auditLogQuerySchema = z.object({
   actorUserId: z.string().trim().optional(),
   action: z.string().trim().optional(),
+  targetType: z.string().trim().optional(),
   dateFrom: z.string().datetime().optional(),
   dateTo: z.string().datetime().optional(),
 });
@@ -355,6 +362,9 @@ const broadcastCreationSchema = z.object({
   message: z.string().trim().min(5).max(1500),
   audience: z.nativeEnum(BroadcastAudience),
   taskStatus: z.nativeEnum(FieldTaskStatus).optional(),
+  politicalPartyId: z.string().trim().optional(),
+  adminLevel: z.nativeEnum(AdminLevel).optional(),
+  officeType: z.nativeEnum(CandidateOfficeType).optional(),
   geoPoliticalZoneId: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
   senatorialDistrictId: z.string().trim().optional(),
@@ -602,6 +612,144 @@ function getVoterScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
+async function buildGovernedIncidentItems(
+  incidents: Array<{
+    id: string;
+    reportedByUserId: string;
+    type: IncidentType;
+    title: string;
+    description: string;
+    severity: IncidentSeverity;
+    status: IncidentStatus;
+    latitude: number | null;
+    longitude: number | null;
+    stateId: string;
+    senatorialDistrictId: string | null;
+    lgaId: string;
+    wardId: string | null;
+    pollingUnitId: string | null;
+    assignedAdminUserId: string | null;
+    escalatedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    reportedByUser: {
+      role: UserRole;
+      agentProfile: {
+        stateId: string;
+        lgaId: string;
+        wardId: string;
+        pollingUnitId: string | null;
+      } | null;
+      voterProfile: {
+        stateId: string;
+        lgaId: string;
+        wardId: string;
+        pollingUnitId: string | null;
+      } | null;
+      adminProfile: {
+        stateId: string | null;
+        lgaId: string | null;
+        wardId: string | null;
+        pollingUnitId: string | null;
+      } | null;
+      candidateProfile: {
+        stateId: string | null;
+        lgaId: string | null;
+        wardId: string | null;
+        pollingUnitId: string | null;
+      } | null;
+    };
+  }>,
+) {
+  if (incidents.length === 0) {
+    return [];
+  }
+
+  const duplicateKeys = new Set(
+    incidents.map((incident) =>
+      [
+        incident.type,
+        incident.pollingUnitId || "no-pu",
+        incident.wardId || "no-ward",
+        new Date(incident.createdAt).toISOString().slice(0, 13),
+      ].join(":"),
+    ),
+  );
+
+  const duplicateCounts = await prisma.incident.groupBy({
+    by: ["type", "pollingUnitId", "wardId"],
+    where: {
+      OR: Array.from(duplicateKeys).map((key) => {
+        const [type, pollingUnitId, wardId, hour] = key.split(":");
+        return {
+          type: type as IncidentType,
+          pollingUnitId: pollingUnitId === "no-pu" ? null : pollingUnitId,
+          wardId: wardId === "no-ward" ? null : wardId,
+          createdAt: {
+            gte: new Date(`${hour}:00:00.000Z`),
+            lt: new Date(`${hour}:59:59.999Z`),
+          },
+        };
+      }),
+    },
+    _count: { _all: true },
+  });
+
+  const duplicateCountMap = new Map(
+    duplicateCounts.map((entry) => [
+      [entry.type, entry.pollingUnitId || "no-pu", entry.wardId || "no-ward"].join(":"),
+      entry._count._all,
+    ]),
+  );
+
+  const reporterIds = Array.from(new Set(incidents.map((incident) => incident.reportedByUserId)));
+  const reporterCounts = await prisma.incident.groupBy({
+    by: ["reportedByUserId"],
+    where: {
+      reportedByUserId: { in: reporterIds },
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+    _count: { _all: true },
+  });
+
+  const reporterCountMap = new Map(reporterCounts.map((entry) => [entry.reportedByUserId, entry._count._all]));
+
+  return incidents.map((incident) => {
+    const reporterScope = incident.reportedByUser.agentProfile ||
+      incident.reportedByUser.voterProfile ||
+      incident.reportedByUser.adminProfile ||
+      incident.reportedByUser.candidateProfile || {
+        stateId: null,
+        lgaId: null,
+        wardId: null,
+        pollingUnitId: null,
+      };
+
+    const governance = buildIncidentGovernance(
+      {
+        ...incident,
+        reportedByUser: {
+          role: incident.reportedByUser.role,
+          stateId: reporterScope.stateId,
+          lgaId: reporterScope.lgaId,
+          wardId: reporterScope.wardId,
+          pollingUnitId: reporterScope.pollingUnitId,
+        },
+      },
+      {
+        duplicateCount:
+          duplicateCountMap.get([incident.type, incident.pollingUnitId || "no-pu", incident.wardId || "no-ward"].join(":")) || 1,
+        reporterIncidentCountInWindow: reporterCountMap.get(incident.reportedByUserId) || 1,
+      },
+    );
+
+    return serializeIncidentItem({
+      ...incident,
+      governance,
+    });
+  });
+}
+
 function getFieldTaskScopeFilter(actor: Express.Request["authUser"]) {
   if (!actor || isSuperAdmin(actor)) {
     return {};
@@ -725,6 +873,7 @@ async function createScopedFieldTask(
       action: "FIELD_TASK_CREATED",
       targetType: "FieldTask",
       targetId: createdTask.id,
+      territory,
       metadata: { assignedToUserId: assignedAgent.id, incidentId: payload.incidentId || null },
     });
 
@@ -761,45 +910,64 @@ function buildEngagementTaskScope(data: z.infer<typeof engagementTaskCreationSch
 }
 
 function buildBroadcastRecipientWhere(
-  audience: BroadcastAudience,
+  data: z.infer<typeof broadcastCreationSchema>,
   scope: ReturnType<typeof buildBroadcastScope>,
-  taskStatus?: FieldTaskStatus,
+  actor?: Express.Request["authUser"],
 ) {
-  const adminClause = {
-    role: UserRole.ADMIN,
-    adminProfile: { is: scope },
-  };
-  const agentClause = {
-    role: UserRole.AGENT,
-    agentProfile: { is: scope },
-    ...(taskStatus ? { assignedTasks: { some: { status: taskStatus } } } : {}),
-  };
-  const voterClause = {
-    role: UserRole.VOTER,
-    voterProfile: {
+  const actorPartyId = actor?.role === UserRole.ADMIN ? actor.adminProfile?.politicalPartyId || undefined : undefined;
+  const partyFilter = data.politicalPartyId || actorPartyId || undefined;
+    const adminClause = {
+      role: UserRole.ADMIN,
+      adminProfile: {
+        is: {
+          ...scope,
+          politicalPartyId: partyFilter,
+          adminLevel: data.adminLevel || undefined,
+        },
+      },
+    };
+    const agentClause = {
+      role: UserRole.AGENT,
+      agentProfile: {
+        is: {
+          ...scope,
+          politicalPartyId: partyFilter,
+        },
+      },
+      ...(data.taskStatus ? { assignedTasks: { some: { status: data.taskStatus } } } : {}),
+    };
+    const voterClause = {
+      role: UserRole.VOTER,
+      voterProfile: {
       is: {
         ...scope,
         contactConsent: true,
       },
     },
-  };
-  const candidateClause = {
-    role: UserRole.CANDIDATE,
-    candidateProfile: { is: scope },
-  };
-
-  if (audience === BroadcastAudience.ADMINS) {
-    return adminClause;
-  }
-  if (audience === BroadcastAudience.AGENTS) {
-    return agentClause;
-  }
-  if (audience === BroadcastAudience.VOTERS) {
-    return voterClause;
-  }
-  if (audience === BroadcastAudience.CANDIDATES) {
-    return candidateClause;
-  }
+    };
+    const candidateClause = {
+      role: UserRole.CANDIDATE,
+      candidateProfile: {
+        is: {
+          ...scope,
+          politicalPartyId: partyFilter,
+          officeType: data.officeType || undefined,
+        },
+      },
+    };
+  
+    if (data.audience === BroadcastAudience.ADMINS) {
+      return adminClause;
+    }
+    if (data.audience === BroadcastAudience.AGENTS) {
+      return agentClause;
+    }
+    if (data.audience === BroadcastAudience.VOTERS) {
+      return voterClause;
+    }
+    if (data.audience === BroadcastAudience.CANDIDATES) {
+      return candidateClause;
+    }
 
   return {
     OR: [adminClause, agentClause, voterClause, candidateClause],
@@ -810,6 +978,37 @@ function getTodayStart() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today;
+}
+
+function validateBroadcastTargeting(data: z.infer<typeof broadcastCreationSchema>) {
+  if (data.taskStatus && !["AGENTS", "ALL"].includes(data.audience)) {
+    return "Task-status targeting is only available for agent-inclusive broadcasts.";
+  }
+
+  if (data.adminLevel && !["ADMINS", "ALL"].includes(data.audience)) {
+    return "Admin-level targeting is only available for admin-inclusive broadcasts.";
+  }
+
+  if (data.officeType && !["CANDIDATES", "ALL"].includes(data.audience)) {
+    return "Office targeting is only available for candidate-inclusive broadcasts.";
+  }
+
+  return null;
+}
+
+function validateBroadcastPartyScope(
+  actor: Express.Request["authUser"],
+  politicalPartyId?: string,
+) {
+  const actorPartyId = actor?.role === UserRole.ADMIN ? actor.adminProfile?.politicalPartyId || null : null;
+
+  if (!actorPartyId || !politicalPartyId) {
+    return null;
+  }
+
+  return actorPartyId === politicalPartyId
+    ? null
+    : "You cannot target a political party outside your assigned party scope.";
 }
 
 function escapeCsvValue(value: string | null | undefined): string {
@@ -839,6 +1038,131 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
     wardId: actor.adminProfile.wardId || undefined,
     id: actor.adminProfile.pollingUnitId || undefined,
   };
+}
+
+async function canViewAuditLog(
+  actor: NonNullable<Express.Request["authUser"]>,
+  log: {
+    actorUserId: string;
+    targetType: string;
+    targetId: string;
+  },
+) {
+  if (isSuperAdmin(actor)) {
+    return true;
+  }
+
+  if (!isAdminUser(actor)) {
+    return false;
+  }
+
+  if (log.actorUserId === actor.id) {
+    return true;
+  }
+
+  if (log.targetType === "User") {
+    const targetAuth = await getAuthUserProfile(log.targetId);
+    return Boolean(targetAuth && canManageUser(actor, targetAuth));
+  }
+
+  if (log.targetType === "Incident") {
+    const incident = await prisma.incident.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        lgaId: true,
+        wardId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(incident && isWithinAdminScope(actor, incident));
+  }
+
+  if (log.targetType === "FieldTask") {
+    const task = await prisma.fieldTask.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(task && canCreateAgentInScope(actor, task));
+  }
+
+  if (log.targetType === "RewardRedemption") {
+    const redemption = await prisma.rewardRedemption.findUnique({
+      where: { id: log.targetId },
+      select: { voterUserId: true },
+    });
+
+    if (!redemption) {
+      return false;
+    }
+
+    const voterProfile = await prisma.voterProfile.findUnique({
+      where: { userId: redemption.voterUserId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(voterProfile && isWithinAdminScope(actor, voterProfile));
+  }
+
+  if (log.targetType === "BroadcastMessage") {
+    const broadcast = await prisma.broadcastMessage.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(broadcast && isWithinAdminScope(actor, broadcast));
+  }
+
+  if (log.targetType === "Poll") {
+    const poll = await prisma.poll.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(poll && isWithinAdminScope(actor, poll));
+  }
+
+  return false;
 }
 
 function applyActorAdminScope<T extends {
@@ -957,13 +1281,19 @@ router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     action: "ADMIN_CREATED",
     targetType: "User",
     targetId: createdUser.id,
-      metadata: {
-        adminLevel: scopedPayload.adminLevel,
-        politicalPartyId: scopedPayload.politicalPartyId,
-        geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
-        stateId: scopedPayload.stateId || null,
+    politicalPartyId: scopedPayload.politicalPartyId || null,
+    territory: {
+      geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
+      stateId: scopedPayload.stateId || null,
+      senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+      federalConstituencyId: scopedPayload.federalConstituencyId || null,
       lgaId: scopedPayload.lgaId || null,
       wardId: scopedPayload.wardId || null,
+      stateConstituencyId: scopedPayload.stateConstituencyId || null,
+      pollingUnitId: scopedPayload.pollingUnitId || null,
+    },
+    metadata: {
+      adminLevel: scopedPayload.adminLevel,
     },
   });
 
@@ -1045,13 +1375,19 @@ router.post("/candidates", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
     action: "CANDIDATE_CREATED",
     targetType: "User",
     targetId: createdUser.id,
-      metadata: {
-        officeType: scopedPayload.officeType,
-        politicalPartyId: scopedPayload.politicalPartyId || null,
-        geoPoliticalZoneId: scope.geoPoliticalZoneId,
-        stateId: scope.stateId,
+    politicalPartyId: scopedPayload.politicalPartyId || null,
+    territory: {
+      geoPoliticalZoneId: scope.geoPoliticalZoneId,
+      stateId: scope.stateId,
+      senatorialDistrictId: scope.senatorialDistrictId,
+      federalConstituencyId: scope.federalConstituencyId,
       lgaId: scope.lgaId,
       wardId: scope.wardId,
+      stateConstituencyId: scope.stateConstituencyId,
+      pollingUnitId: scope.pollingUnitId,
+    },
+    metadata: {
+      officeType: scopedPayload.officeType,
     },
   });
 
@@ -2027,8 +2363,9 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     action: "AGENT_CREATED",
     targetType: "User",
     targetId: createdUser.id,
-    metadata: {
-      politicalPartyId: scopedPayload.politicalPartyId,
+    politicalPartyId: scopedPayload.politicalPartyId,
+    territory: {
+      geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
       stateId: scopedPayload.stateId,
       senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
       federalConstituencyId: scopedPayload.federalConstituencyId || null,
@@ -2036,6 +2373,9 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
       wardId: scopedPayload.wardId,
       stateConstituencyId: scopedPayload.stateConstituencyId || null,
       pollingUnitId: scopedPayload.pollingUnitId || null,
+    },
+    metadata: {
+      assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
     },
   });
 
@@ -2232,6 +2572,20 @@ router.patch("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"),
     action: "ADMIN_UPDATED",
     targetType: "User",
     targetId: updatedUser.id,
+    politicalPartyId: scopedPayload.politicalPartyId || null,
+    territory: {
+      geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
+      stateId: scopedPayload.stateId || null,
+      senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+      federalConstituencyId: scopedPayload.federalConstituencyId || null,
+      lgaId: scopedPayload.lgaId || null,
+      wardId: scopedPayload.wardId || null,
+      stateConstituencyId: scopedPayload.stateConstituencyId || null,
+      pollingUnitId: scopedPayload.pollingUnitId || null,
+    },
+    metadata: {
+      adminLevel: scopedPayload.adminLevel,
+    },
   });
 
   return response.json({ message: "Admin updated successfully.", user: await getAuthUserProfile(updatedUser.id) });
@@ -2321,6 +2675,20 @@ router.patch("/candidates/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADM
     action: "CANDIDATE_UPDATED",
     targetType: "User",
     targetId: updatedUser.id,
+    politicalPartyId: scopedPayload.politicalPartyId || null,
+    territory: {
+      geoPoliticalZoneId: scope.geoPoliticalZoneId,
+      stateId: scope.stateId,
+      senatorialDistrictId: scope.senatorialDistrictId,
+      federalConstituencyId: scope.federalConstituencyId,
+      lgaId: scope.lgaId,
+      wardId: scope.wardId,
+      stateConstituencyId: scope.stateConstituencyId,
+      pollingUnitId: scope.pollingUnitId,
+    },
+    metadata: {
+      officeType: scopedPayload.officeType,
+    },
   });
 
   return response.json({ message: "Candidate updated successfully.", user: await getAuthUserProfile(updatedUser.id) });
@@ -2448,6 +2816,20 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     action: "AGENT_UPDATED",
     targetType: "User",
     targetId: updatedUser.id,
+    politicalPartyId: scopedPayload.politicalPartyId || null,
+    territory: {
+      geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
+      stateId: scopedPayload.stateId,
+      senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
+      federalConstituencyId: scopedPayload.federalConstituencyId || null,
+      lgaId: scopedPayload.lgaId,
+      wardId: scopedPayload.wardId,
+      stateConstituencyId: scopedPayload.stateConstituencyId || null,
+      pollingUnitId: scopedPayload.pollingUnitId || null,
+    },
+    metadata: {
+      assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
+    },
   });
 
   return response.json({ message: "Agent updated successfully.", user: await getAuthUserProfile(updatedUser.id) });
@@ -2497,6 +2879,12 @@ router.patch("/users/:userId/deactivation", requireAuth, requireRole("ADMIN", "S
     action: parsed.data.isActive ? "USER_REACTIVATED" : "USER_DEACTIVATED",
     targetType: "User",
     targetId: updatedUser.id,
+    politicalPartyId: targetUser.adminProfile?.politicalPartyId || targetUser.candidateProfile?.politicalPartyId || targetUser.agentProfile?.politicalPartyId || null,
+    territory: targetUser.adminProfile || targetUser.candidateProfile || targetUser.agentProfile || targetUser.voterProfile || undefined,
+    metadata: {
+      isActive: parsed.data.isActive,
+      role: targetUser.role,
+    },
   });
 
   return response.json({
@@ -2628,6 +3016,8 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     action: "USER_DELETED",
     targetType: "User",
     targetId: userId,
+    politicalPartyId: targetUser.adminProfile?.politicalPartyId || targetUser.candidateProfile?.politicalPartyId || targetUser.agentProfile?.politicalPartyId || null,
+    territory: targetUser.adminProfile || targetUser.candidateProfile || targetUser.agentProfile || targetUser.voterProfile || undefined,
     metadata: { role: targetUser.role },
   });
 
@@ -2870,15 +3260,61 @@ router.get("/incidents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
       status: parsed.data.status,
       createdAt: getDateRange(parsed.data),
     },
+    include: {
+      reportedByUser: {
+        select: {
+          role: true,
+          agentProfile: {
+            select: {
+              stateId: true,
+              lgaId: true,
+              wardId: true,
+              pollingUnitId: true,
+            },
+          },
+          voterProfile: {
+            select: {
+              stateId: true,
+              lgaId: true,
+              wardId: true,
+              pollingUnitId: true,
+            },
+          },
+          adminProfile: {
+            select: {
+              stateId: true,
+              lgaId: true,
+              wardId: true,
+              pollingUnitId: true,
+            },
+          },
+          candidateProfile: {
+            select: {
+              stateId: true,
+              lgaId: true,
+              wardId: true,
+              pollingUnitId: true,
+            },
+          },
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
     skip: (page - 1) * pageSize,
     take: pageSize,
   });
 
+  const governedIncidents = await buildGovernedIncidentItems(incidents);
+  const visibleIncidents =
+    parsed.data.flaggedOnly === "true"
+      ? governedIncidents.filter((incident) => (incident.governance?.flags.length || 0) > 0)
+      : governedIncidents;
+
   return response.json({
     page,
     pageSize,
-    incidents: incidents.map(serializeIncidentItem),
+    incidents: visibleIncidents,
+    governance: summarizeIncidentGovernance(governedIncidents),
   });
 });
 
@@ -3040,6 +3476,7 @@ router.patch("/incidents/:incidentId/escalate", requireAuth, requireRole("ADMIN"
       action: "INCIDENT_ESCALATED",
       targetType: "Incident",
       targetId: updatedIncident.id,
+      territory: updatedIncident,
       metadata: { escalationNote: parsed.data.escalationNote },
     });
   });
@@ -3272,6 +3709,7 @@ router.patch("/tasks/:taskId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"),
       action: "FIELD_TASK_UPDATED",
       targetType: "FieldTask",
       targetId: nextTask.id,
+      territory: nextTask,
       metadata: {
         status: nextTask.status,
         priority: nextTask.priority,
@@ -3302,6 +3740,66 @@ router.get("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asyn
   });
 });
 
+router.post("/broadcasts/preview", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = broadcastCreationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid broadcast payload.", errors: parsed.error.flatten() });
+  }
+
+  const targetScope = buildBroadcastScope(parsed.data);
+  const territoryReferenceError = await validateTerritoryReferences(targetScope);
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  if (request.authUser && !isWithinAdminScope(request.authUser, targetScope)) {
+    return response.status(403).json({ message: "You cannot preview broadcasts outside your territory scope." });
+  }
+
+  const targetingError = validateBroadcastTargeting(parsed.data);
+  if (targetingError) {
+    return response.status(400).json({ message: targetingError });
+  }
+
+  const partyScopeError = validateBroadcastPartyScope(request.authUser, parsed.data.politicalPartyId);
+  if (partyScopeError) {
+    return response.status(403).json({ message: partyScopeError });
+  }
+
+  const effectivePoliticalPartyId =
+    parsed.data.politicalPartyId ||
+    (request.authUser?.role === UserRole.ADMIN ? request.authUser.adminProfile?.politicalPartyId || null : null);
+
+  const recipients = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      ...buildBroadcastRecipientWhere(parsed.data, targetScope, request.authUser),
+    },
+    select: { role: true },
+    take: 500,
+  });
+
+  return response.json({
+    preview: {
+      recipientCount: recipients.length,
+      breakdown: {
+        admins: recipients.filter((item) => item.role === UserRole.ADMIN).length,
+        agents: recipients.filter((item) => item.role === UserRole.AGENT).length,
+        voters: recipients.filter((item) => item.role === UserRole.VOTER).length,
+        candidates: recipients.filter((item) => item.role === UserRole.CANDIDATE).length,
+      },
+      filters: {
+        audience: parsed.data.audience,
+        taskStatus: parsed.data.taskStatus || null,
+        politicalPartyId: effectivePoliticalPartyId,
+        adminLevel: parsed.data.adminLevel || null,
+        officeType: parsed.data.officeType || null,
+      },
+      territory: serializeTerritory(targetScope),
+    },
+  });
+});
+
 router.post("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = broadcastCreationSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -3318,20 +3816,33 @@ router.post("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
     return response.status(403).json({ message: "You cannot broadcast outside your territory scope." });
   }
 
-  if (parsed.data.taskStatus && !["AGENTS", "ALL"].includes(parsed.data.audience)) {
-    return response.status(400).json({ message: "Task-status targeting is only available for agent-inclusive broadcasts." });
+  const targetingError = validateBroadcastTargeting(parsed.data);
+  if (targetingError) {
+    return response.status(400).json({ message: targetingError });
   }
 
+  const partyScopeError = validateBroadcastPartyScope(request.authUser, parsed.data.politicalPartyId);
+  if (partyScopeError) {
+    return response.status(403).json({ message: partyScopeError });
+  }
+
+  const effectivePoliticalPartyId =
+    parsed.data.politicalPartyId ||
+    (request.authUser?.role === UserRole.ADMIN ? request.authUser.adminProfile?.politicalPartyId || null : null);
+
   const recipients = await prisma.user.findMany({
-    where: {
-      isActive: true,
-      ...buildBroadcastRecipientWhere(parsed.data.audience, targetScope, parsed.data.taskStatus),
-    },
-    select: { id: true },
-    take: 500,
+      where: {
+        isActive: true,
+        ...buildBroadcastRecipientWhere(parsed.data, targetScope, request.authUser),
+      },
+      select: { id: true },
+      take: 500,
   });
 
   const recipientIds = recipients.map((recipient) => recipient.id);
+  if (recipientIds.length === 0) {
+    return response.status(400).json({ message: "No visible recipients matched the selected communication target." });
+  }
 
   const broadcastId = await prisma.$transaction(async (transaction) => {
     const broadcast = await transaction.broadcastMessage.create({
@@ -3367,12 +3878,15 @@ router.post("/broadcasts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
       action: "BROADCAST_CREATED",
       targetType: "BroadcastMessage",
       targetId: broadcast.id,
-      metadata: {
-        audience: parsed.data.audience,
-        recipientCount: recipientIds.length,
-        taskStatus: parsed.data.taskStatus || null,
-      },
-    });
+        metadata: {
+          audience: parsed.data.audience,
+          recipientCount: recipientIds.length,
+          taskStatus: parsed.data.taskStatus || null,
+          politicalPartyId: effectivePoliticalPartyId,
+          adminLevel: parsed.data.adminLevel || null,
+          officeType: parsed.data.officeType || null,
+        },
+      });
 
     return broadcast.id;
   });
@@ -3564,6 +4078,58 @@ router.get("/redemptions", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
   });
 });
 
+router.get("/reward-ledger", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const voterProfiles = await prisma.voterProfile.findMany({
+    where: toScopeFilter(getVoterScopeFilter(request.authUser)),
+    select: { userId: true },
+  });
+
+  const voterUserIds = voterProfiles.map((item) => item.userId);
+  if (voterUserIds.length === 0) {
+    return response.json({ rewardLedger: [], rewardHistory: [] });
+  }
+
+  const [ledgerEntries, redemptions] = await Promise.all([
+    prisma.rewardLedger.findMany({
+      where: {
+        voterUserId: { in: voterUserIds },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    prisma.rewardRedemption.findMany({
+      where: {
+        voterUserId: { in: voterUserIds },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+  ]);
+
+  const rewardHistory = [
+    ...ledgerEntries.map((entry) =>
+      serializeRewardHistoryItem({
+        ...entry,
+        kind: "EARNED",
+        status: "POSTED",
+        title: entry.type.replace(/_/g, " "),
+      }),
+    ),
+    ...redemptions.map((redemption) =>
+      serializeRewardHistoryItem({
+        ...redemption,
+        kind: "REDEMPTION",
+        title: "Reward redemption",
+      }),
+    ),
+  ].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return response.json({
+    rewardLedger: ledgerEntries.map(serializeRewardLedgerItem),
+    rewardHistory,
+  });
+});
+
 router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = redemptionReviewSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -3617,7 +4183,11 @@ router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADM
       action: "REWARD_REDEMPTION_APPROVED",
       targetType: "RewardRedemption",
       targetId: redemption.id,
-      metadata: { note: parsed.data.note || null },
+      metadata: {
+        note: parsed.data.note || null,
+        voterUserId: redemption.voterUserId,
+        pointsRequested: redemption.pointsRequested,
+      },
     });
 
     return next;
@@ -3679,7 +4249,11 @@ router.patch("/redemptions/:redemptionId/reject", requireAuth, requireRole("ADMI
       action: "REWARD_REDEMPTION_REJECTED",
       targetType: "RewardRedemption",
       targetId: redemption.id,
-      metadata: { note: parsed.data.note || null },
+      metadata: {
+        note: parsed.data.note || null,
+        voterUserId: redemption.voterUserId,
+        pointsRequested: redemption.pointsRequested,
+      },
     });
 
     return next;
@@ -3733,6 +4307,10 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
       action: "REWARD_REDEMPTION_PAID",
       targetType: "RewardRedemption",
       targetId: redemption.id,
+      metadata: {
+        voterUserId: redemption.voterUserId,
+        pointsRequested: redemption.pointsRequested,
+      },
     });
 
     return next;
@@ -3788,6 +4366,158 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
       pollingUnitsWithRecentActivity: recentSet.size,
       pollingUnitsWithIncidents: incidentSet.size,
       pollingUnitsWithoutActivity: Math.max(totalPollingUnitsInScope - recentSet.size, 0),
+    }),
+  });
+});
+
+router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const pollingUnitScope = getPollingUnitScopeFilter(request.authUser);
+  const [pollingUnits, agents, recentActivities, incidents] = await Promise.all([
+    prisma.pollingUnit.findMany({
+      where: pollingUnitScope,
+      select: {
+        id: true,
+        name: true,
+        wardId: true,
+        ward: { select: { name: true } },
+        lgaId: true,
+        lga: { select: { name: true } },
+      },
+      orderBy: [{ lga: { name: "asc" } }, { ward: { name: "asc" } }, { name: "asc" }],
+    }),
+    prisma.agentProfile.findMany({
+      where: {
+        ...toScopeFilter(getAgentScopeFilter(request.authUser)),
+        pollingUnitId: { not: null },
+      },
+      select: { pollingUnitId: true },
+    }),
+    prisma.agentActivity.findMany({
+      where: {
+        ...toScopeFilter(getAgentActivityScopeFilter(request.authUser)),
+        pollingUnitId: { not: null },
+        createdAt: { gte: recentActivitySince },
+      },
+      select: { pollingUnitId: true },
+    }),
+    prisma.incident.findMany({
+      where: {
+        ...getFeedbackScopeFilter(request.authUser),
+        pollingUnitId: { not: null },
+        status: { in: [IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS] },
+      },
+      select: { pollingUnitId: true },
+    }),
+  ]);
+
+  const assignedCountByPollingUnit = new Map<string, number>();
+  for (const item of agents) {
+    if (!item.pollingUnitId) {
+      continue;
+    }
+    assignedCountByPollingUnit.set(item.pollingUnitId, (assignedCountByPollingUnit.get(item.pollingUnitId) || 0) + 1);
+  }
+
+  const recentActivityByPollingUnit = new Map<string, number>();
+  for (const item of recentActivities) {
+    if (!item.pollingUnitId) {
+      continue;
+    }
+    recentActivityByPollingUnit.set(item.pollingUnitId, (recentActivityByPollingUnit.get(item.pollingUnitId) || 0) + 1);
+  }
+
+  const openIncidentsByPollingUnit = new Map<string, number>();
+  for (const item of incidents) {
+    if (!item.pollingUnitId) {
+      continue;
+    }
+    openIncidentsByPollingUnit.set(item.pollingUnitId, (openIncidentsByPollingUnit.get(item.pollingUnitId) || 0) + 1);
+  }
+
+  const pollingUnitInsights = pollingUnits.map((unit) => {
+    const assignedAgentCount = assignedCountByPollingUnit.get(unit.id) || 0;
+    const recentActivityCount = recentActivityByPollingUnit.get(unit.id) || 0;
+    const openIncidentCount = openIncidentsByPollingUnit.get(unit.id) || 0;
+    const hasAssignedAgent = assignedAgentCount > 0;
+    const hasRecentActivity = recentActivityCount > 0;
+
+    return {
+      pollingUnitId: unit.id,
+      pollingUnitName: unit.name,
+      wardId: unit.wardId,
+      wardName: unit.ward.name,
+      lgaId: unit.lgaId,
+      lgaName: unit.lga.name,
+      assignedAgentCount,
+      recentActivityCount,
+      openIncidentCount,
+      hasAssignedAgent,
+      hasRecentActivity,
+      requiresAttention: !hasAssignedAgent || !hasRecentActivity || openIncidentCount > 0,
+    };
+  });
+
+  const wardMap = new Map<string, {
+    wardId: string;
+    wardName: string;
+    lgaId: string;
+    lgaName: string;
+    pollingUnitCount: number;
+    pollingUnitsWithoutAgents: number;
+    pollingUnitsWithoutRecentActivity: number;
+    openIncidentCount: number;
+  }>();
+
+  for (const item of pollingUnitInsights) {
+    const current = wardMap.get(item.wardId) || {
+      wardId: item.wardId,
+      wardName: item.wardName,
+      lgaId: item.lgaId,
+      lgaName: item.lgaName,
+      pollingUnitCount: 0,
+      pollingUnitsWithoutAgents: 0,
+      pollingUnitsWithoutRecentActivity: 0,
+      openIncidentCount: 0,
+    };
+
+    current.pollingUnitCount += 1;
+    if (!item.hasAssignedAgent) {
+      current.pollingUnitsWithoutAgents += 1;
+    }
+    if (!item.hasRecentActivity) {
+      current.pollingUnitsWithoutRecentActivity += 1;
+    }
+    current.openIncidentCount += item.openIncidentCount;
+    wardMap.set(item.wardId, current);
+  }
+
+  const weakCoveragePollingUnits = pollingUnitInsights.filter((item) => item.requiresAttention).length;
+  const pollingUnitsWithoutAssignedAgents = pollingUnitInsights.filter((item) => !item.hasAssignedAgent).length;
+  const wards = Array.from(wardMap.values()).sort((left, right) => {
+    const leftRisk = left.pollingUnitsWithoutRecentActivity + left.pollingUnitsWithoutAgents + left.openIncidentCount;
+    const rightRisk = right.pollingUnitsWithoutRecentActivity + right.pollingUnitsWithoutAgents + right.openIncidentCount;
+    return rightRisk - leftRisk;
+  });
+
+  return response.json({
+    insights: serializeCoverageInsights({
+      summary: {
+        totalPollingUnitsInScope: pollingUnits.length,
+        pollingUnitsWithAssignedAgents: pollingUnitInsights.filter((item) => item.hasAssignedAgent).length,
+        pollingUnitsWithRecentActivity: pollingUnitInsights.filter((item) => item.hasRecentActivity).length,
+        pollingUnitsWithIncidents: pollingUnitInsights.filter((item) => item.openIncidentCount > 0).length,
+        pollingUnitsWithoutActivity: pollingUnitInsights.filter((item) => !item.hasRecentActivity).length,
+        wardsInScope: wards.length,
+        weakCoveragePollingUnits,
+        pollingUnitsWithoutAssignedAgents,
+      },
+      wards,
+      pollingUnits: pollingUnitInsights.sort((left, right) => {
+        const leftRisk = Number(left.requiresAttention) * 10 + left.openIncidentCount;
+        const rightRisk = Number(right.requiresAttention) * 10 + right.openIncidentCount;
+        return rightRisk - leftRisk;
+      }),
     }),
   });
 });
@@ -3928,7 +4658,7 @@ router.get("/analytics", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
   });
 });
 
-router.get("/audit-logs", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+router.get("/audit-logs", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = auditLogQuerySchema.safeParse(request.query);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid audit log query.", errors: parsed.error.flatten() });
@@ -3938,14 +4668,24 @@ router.get("/audit-logs", requireAuth, requireRole("SUPER_ADMIN"), async (reques
     where: {
       actorUserId: parsed.data.actorUserId,
       action: parsed.data.action,
+      targetType: parsed.data.targetType,
       createdAt: getDateRange(parsed.data),
     },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
 
+  const visibleLogs = [];
+  for (const log of logs) {
+    if (!request.authUser || !(await canViewAuditLog(request.authUser, log))) {
+      continue;
+    }
+
+    visibleLogs.push(log);
+  }
+
   return response.json({
-    auditLogs: logs.map(serializeAuditLogItem),
+    auditLogs: visibleLogs.map(serializeAuditLogItem),
   });
 });
 

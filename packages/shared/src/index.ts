@@ -533,8 +533,31 @@ export type IncidentListItem = {
   wardId: string | null;
   pollingUnitId: string | null;
   assignedAdminUserId: string | null;
+  governance?: {
+    reporterRole: UserRole;
+    escalationStatus: "NOT_ESCALATED" | "ESCALATED";
+    reviewPriority: "ROUTINE" | "PRIORITY" | "CRITICAL";
+    flags: Array<{
+      code:
+        | "DUPLICATE_REPORT_WINDOW"
+        | "REPORTER_TERRITORY_MISMATCH"
+        | "MISSING_LOCATION_DATA"
+        | "REPEATED_REPORTER_VOLUME"
+        | "UNASSIGNED_OPEN_INCIDENT";
+      severity: "INFO" | "WARNING" | "HIGH";
+      message: string;
+    }>;
+  };
   createdAt: string;
   updatedAt: string;
+};
+
+export type IncidentGovernanceSummary = {
+  totalIncidents: number;
+  escalatedIncidents: number;
+  flaggedIncidents: number;
+  criticalReviewIncidents: number;
+  byFlagCode: Record<string, number>;
 };
 
 export type PollingUnitCoverageSummary = {
@@ -543,6 +566,42 @@ export type PollingUnitCoverageSummary = {
   pollingUnitsWithRecentActivity: number;
   pollingUnitsWithIncidents: number;
   pollingUnitsWithoutActivity: number;
+};
+
+export type WardCoverageInsight = {
+  wardId: string;
+  wardName: string;
+  lgaId: string;
+  lgaName: string;
+  pollingUnitCount: number;
+  pollingUnitsWithoutAgents: number;
+  pollingUnitsWithoutRecentActivity: number;
+  openIncidentCount: number;
+};
+
+export type PollingUnitCoverageInsight = {
+  pollingUnitId: string;
+  pollingUnitName: string;
+  wardId: string;
+  wardName: string;
+  lgaId: string;
+  lgaName: string;
+  assignedAgentCount: number;
+  recentActivityCount: number;
+  openIncidentCount: number;
+  hasAssignedAgent: boolean;
+  hasRecentActivity: boolean;
+  requiresAttention: boolean;
+};
+
+export type CoverageInsights = {
+  summary: PollingUnitCoverageSummary & {
+    wardsInScope: number;
+    weakCoveragePollingUnits: number;
+    pollingUnitsWithoutAssignedAgents: number;
+  };
+  wards: WardCoverageInsight[];
+  pollingUnits: PollingUnitCoverageInsight[];
 };
 
 export type AdminMapSummary = {
@@ -573,6 +632,29 @@ export type RewardRedemptionItem = {
   reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type RewardLedgerItem = {
+  id: string;
+  voterUserId: string;
+  type: RewardType;
+  points: number;
+  amount: number | null;
+  description: string;
+  relatedUserId: string | null;
+  createdAt: string;
+};
+
+export type RewardHistoryItem = {
+  id: string;
+  kind: "EARNED" | "REDEMPTION";
+  status: "POSTED" | "PENDING" | "APPROVED" | "REJECTED" | "PAID";
+  title: string;
+  description: string;
+  points: number;
+  amount: number | null;
+  createdAt: string;
+  reviewedAt: string | null;
 };
 
 export type RewardBalanceSummary = {
@@ -631,6 +713,24 @@ export type BroadcastMessageItem = {
   recipientCount: number;
   createdAt: string;
   updatedAt: string;
+  territory: TerritorySummary;
+};
+
+export type BroadcastAudiencePreview = {
+  recipientCount: number;
+  breakdown: {
+    admins: number;
+    agents: number;
+    voters: number;
+    candidates: number;
+  };
+  filters: {
+    audience: BroadcastAudience;
+    taskStatus: FieldTaskStatus | null;
+    politicalPartyId: string | null;
+    adminLevel: AdminLevel | null;
+    officeType: CandidateOfficeType | null;
+  };
   territory: TerritorySummary;
 };
 
