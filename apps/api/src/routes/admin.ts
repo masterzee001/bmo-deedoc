@@ -11,6 +11,7 @@ import {
   IncidentSeverity,
   IncidentStatus,
   NotificationType,
+  Prisma,
   RewardRedemptionStatus,
   RewardType,
   UserRole,
@@ -44,11 +45,13 @@ import {
 import { toScopeFilter, validateCandidateOfficeTerritory, validateTerritoryReferences } from "../lib/territory";
 import {
   canCreateAgentInScope,
+  canManageCandidateOffice,
   canManageUser,
   canManageAdmin,
   canViewCandidate,
   isAdminUser,
   isSuperAdmin,
+  isWithinActorParty,
   isWithinAdminScope,
 } from "../scope";
 import { getRewardBalance } from "../lib/rewards";
@@ -60,6 +63,7 @@ const adminCreationSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   adminLevel: z.nativeEnum(AdminLevel),
+  politicalPartyId: z.string().trim().optional(),
   geoPoliticalZoneId: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
   senatorialDistrictId: z.string().trim().optional(),
@@ -127,6 +131,7 @@ const agentCreationSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   phone: z.string().trim().min(7).optional(),
+  politicalPartyId: z.string().trim().optional(),
   stateId: z.string().trim().min(1),
   senatorialDistrictId: z.string().trim().optional(),
   federalConstituencyId: z.string().trim().optional(),
@@ -140,6 +145,7 @@ const agentCreationSchema = z.object({
 const adminUpdateSchema = z.object({
   name: z.string().trim().min(2),
   adminLevel: z.nativeEnum(AdminLevel),
+  politicalPartyId: z.string().trim().optional(),
   geoPoliticalZoneId: z.string().trim().optional(),
   stateId: z.string().trim().optional(),
   senatorialDistrictId: z.string().trim().optional(),
@@ -167,6 +173,7 @@ const candidateUpdateSchema = z.object({
 const agentUpdateSchema = z.object({
   name: z.string().trim().min(2),
   phone: z.string().trim().min(7).optional(),
+  politicalPartyId: z.string().trim().optional(),
   stateId: z.string().trim().min(1),
   senatorialDistrictId: z.string().trim().optional(),
   federalConstituencyId: z.string().trim().optional(),
@@ -682,6 +689,7 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
 }
 
 function applyActorAdminScope<T extends {
+  politicalPartyId?: string;
   geoPoliticalZoneId?: string;
   stateId?: string;
   senatorialDistrictId?: string;
@@ -699,6 +707,7 @@ function applyActorAdminScope<T extends {
 
   return {
     ...payload,
+    politicalPartyId: scope.politicalPartyId || payload.politicalPartyId,
     geoPoliticalZoneId: scope.geoPoliticalZoneId || payload.geoPoliticalZoneId,
     stateId: scope.stateId || payload.stateId,
     senatorialDistrictId: scope.senatorialDistrictId || payload.senatorialDistrictId,
@@ -710,6 +719,23 @@ function applyActorAdminScope<T extends {
   };
 }
 
+async function ensurePoliticalPartyExists(politicalPartyId: string): Promise<boolean> {
+  const party = await prisma.politicalParty.findUnique({
+    where: { id: politicalPartyId },
+    select: { id: true },
+  });
+
+  return Boolean(party);
+}
+
+function requireActorPartyForManagement(actor: Express.Request["authUser"]): string | null {
+  if (!actor || actor.role !== UserRole.ADMIN) {
+    return null;
+  }
+
+  return actor.adminProfile?.politicalPartyId || null;
+}
+
 router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const parsed = adminCreationSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -717,6 +743,14 @@ router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
   }
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  if (!scopedPayload.politicalPartyId) {
+    return response.status(400).json({ message: "Admin accounts must be linked to a political party." });
+  }
+
+  if (!(await ensurePoliticalPartyExists(scopedPayload.politicalPartyId))) {
+    return response.status(400).json({ message: "Selected political party does not exist." });
+  }
 
   const territoryError = validateAdminTerritoryPayload(scopedPayload);
   if (territoryError) {
@@ -751,6 +785,7 @@ router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
       adminProfile: {
         create: {
           adminLevel: scopedPayload.adminLevel,
+          politicalPartyId: scopedPayload.politicalPartyId,
           geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
           stateId: scopedPayload.stateId || null,
           senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
@@ -759,7 +794,7 @@ router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
           wardId: scopedPayload.wardId || null,
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
-        },
+        } as Prisma.AdminProfileUncheckedCreateWithoutUserInput,
       },
     },
   });
@@ -771,6 +806,7 @@ router.post("/users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     targetId: createdUser.id,
       metadata: {
         adminLevel: scopedPayload.adminLevel,
+        politicalPartyId: scopedPayload.politicalPartyId,
         geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
         stateId: scopedPayload.stateId || null,
       lgaId: scopedPayload.lgaId || null,
@@ -792,6 +828,10 @@ router.post("/candidates", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
 
+  if (!request.authUser || !canManageCandidateOffice(request.authUser, scopedPayload.officeType)) {
+    return response.status(403).json({ message: "You cannot create a candidate for that office level." });
+  }
+
   const territoryError = validateCandidateOfficeTerritory(scopedPayload.officeType, scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
@@ -802,20 +842,22 @@ router.post("/candidates", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
     return response.status(400).json({ message: territoryReferenceError });
   }
 
-  if (scopedPayload.politicalPartyId) {
-    const party = await prisma.politicalParty.findUnique({
-      where: { id: scopedPayload.politicalPartyId },
-      select: { id: true },
-    });
+  const actorPartyId = requireActorPartyForManagement(request.authUser);
+  if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
 
-    if (!party) {
-      return response.status(400).json({ message: "Selected political party does not exist." });
-    }
+  if (request.authUser?.role === UserRole.ADMIN && scopedPayload.politicalPartyId !== actorPartyId) {
+    return response.status(403).json({ message: "You can only create candidates for your assigned political party." });
+  }
+
+  if (scopedPayload.politicalPartyId && !(await ensurePoliticalPartyExists(scopedPayload.politicalPartyId))) {
+    return response.status(400).json({ message: "Selected political party does not exist." });
   }
 
   const scope = await enrichCandidateScope(scopedPayload);
 
-  if (!request.authUser || !canViewCandidate(request.authUser, scope)) {
+  if (!request.authUser || !canViewCandidate(request.authUser, { ...scope, politicalPartyId: scopedPayload.politicalPartyId || null })) {
     return response.status(403).json({ message: "You cannot create a candidate outside your admin territory." });
   }
 
@@ -894,6 +936,14 @@ router.post("/candidates/assign", requireAuth, requireRole("SUPER_ADMIN"), async
   const adminAuth = await getAuthUserProfile(adminUser.id);
   if (!adminAuth || !canViewCandidate(adminAuth, { ...candidateUser.candidateProfile, userId: candidateUser.id })) {
     return response.status(400).json({ message: "Admin territory is not compatible with the candidate territory." });
+  }
+
+  if (
+    adminUser.adminProfile.politicalPartyId &&
+    candidateUser.candidateProfile.politicalPartyId &&
+    adminUser.adminProfile.politicalPartyId !== candidateUser.candidateProfile.politicalPartyId
+  ) {
+    return response.status(400).json({ message: "Admin and candidate must belong to the same political party." });
   }
 
   const existingAssignment = await prisma.adminCandidateAssignment.findUnique({
@@ -1170,11 +1220,17 @@ router.get("/admin-users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
     return response.status(403).json({ message: lgaScopeError });
   }
 
+  const actorPartyId = requireActorPartyForManagement(request.authUser);
+  if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
+
   const admins = await prisma.user.findMany({
     where: {
       role: UserRole.ADMIN,
       adminProfile: {
         is: {
+          politicalPartyId: request.authUser?.role === UserRole.ADMIN ? actorPartyId || undefined : undefined,
           stateId: parsed.data.stateId || undefined,
           lgaId: parsed.data.lgaId || undefined,
         },
@@ -1192,6 +1248,7 @@ router.get("/admin-users", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
       email: admin.email,
       isActive: admin.isActive,
       adminLevel: admin.adminProfile!.adminLevel,
+      politicalPartyId: admin.adminProfile!.politicalPartyId || null,
       territory: serializeTerritory(admin.adminProfile!),
     }));
 
@@ -1205,6 +1262,10 @@ router.get("/users/manage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), as
   }
 
   const actor = request.authUser;
+  const actorPartyId = requireActorPartyForManagement(actor);
+  if (actor?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
   const users = await prisma.user.findMany({
     where: {
       role: parsed.data.role || undefined,
@@ -1242,6 +1303,7 @@ router.get("/users/manage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), as
       territory: serializeTerritory(user.adminProfile || user.candidateProfile || user.agentProfile || user.voterProfile || {}),
       adminLevel: user.adminProfile?.adminLevel || null,
       officeType: user.candidateProfile?.officeType || null,
+      politicalPartyId: user.adminProfile?.politicalPartyId || user.candidateProfile?.politicalPartyId || user.agentProfile?.politicalPartyId || null,
       voterCardNumber: user.voterProfile?.voterCardNumber || null,
       assignedAdminUserId: user.agentProfile?.assignedAdminUserId || null,
     });
@@ -1557,14 +1619,26 @@ router.delete("/political-parties/:partyId", requireAuth, requireRole("SUPER_ADM
     return response.status(404).json({ message: "Political party not found." });
   }
 
-  const candidateProfileCount = await prisma.candidateProfile.count({
-    where: { politicalPartyId: partyId },
-  });
+  const [candidateProfileCount, adminProfileCount, agentProfileCount] = await prisma.$transaction([
+    prisma.candidateProfile.count({
+      where: { politicalPartyId: partyId },
+    }),
+    prisma.adminProfile.count({
+      where: { politicalPartyId: partyId },
+    }),
+    prisma.agentProfile.count({
+      where: { politicalPartyId: partyId },
+    }),
+  ]);
 
-  if (candidateProfileCount > 0) {
+  if (candidateProfileCount > 0 || adminProfileCount > 0 || agentProfileCount > 0) {
     return response.status(409).json({
       message: "Political party cannot be deleted because it is in use.",
-      dependencyCounts: { candidateProfiles: candidateProfileCount },
+      dependencyCounts: {
+        candidateProfiles: candidateProfileCount,
+        adminProfiles: adminProfileCount,
+        agentProfiles: agentProfileCount,
+      },
     });
   }
 
@@ -1583,8 +1657,17 @@ router.delete("/political-parties/:partyId", requireAuth, requireRole("SUPER_ADM
 
 router.get("/candidates", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const actor = request.authUser;
+  const actorPartyId = requireActorPartyForManagement(actor);
+  if (actor?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
   const candidates = await prisma.user.findMany({
-    where: { role: UserRole.CANDIDATE },
+    where: {
+      role: UserRole.CANDIDATE,
+      candidateProfile: actor?.role === UserRole.ADMIN
+        ? { is: { politicalPartyId: actorPartyId || undefined } }
+        : undefined,
+    },
     include: {
       candidateProfile: true,
       assignedAdminLinks: actor
@@ -1620,6 +1703,23 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
   }
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+
+  if (!scopedPayload.politicalPartyId) {
+    return response.status(400).json({ message: "Agent accounts must be linked to a political party." });
+  }
+
+  const actorPartyId = requireActorPartyForManagement(request.authUser);
+  if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
+
+  if (request.authUser?.role === UserRole.ADMIN && scopedPayload.politicalPartyId !== actorPartyId) {
+    return response.status(403).json({ message: "You can only create agents for your assigned political party." });
+  }
+
+  if (!(await ensurePoliticalPartyExists(scopedPayload.politicalPartyId))) {
+    return response.status(400).json({ message: "Selected political party does not exist." });
+  }
 
   const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
@@ -1668,6 +1768,10 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     if (!assignedAdminAuth || !canCreateAgentInScope(assignedAdminAuth, agentTerritory)) {
       return response.status(400).json({ message: "Assigned admin cannot manage this agent territory." });
     }
+
+    if (!isWithinActorParty(assignedAdminAuth, scopedPayload.politicalPartyId)) {
+      return response.status(400).json({ message: "Assigned admin must belong to the same political party as the agent." });
+    }
   }
 
   const email = normalizeEmail(scopedPayload.email);
@@ -1690,6 +1794,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
       agentProfile: {
         create: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
+          politicalPartyId: scopedPayload.politicalPartyId,
           stateId: scopedPayload.stateId,
           senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
           federalConstituencyId: scopedPayload.federalConstituencyId || null,
@@ -1698,7 +1803,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
           assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
-        },
+        } as Prisma.AgentProfileUncheckedCreateWithoutUserInput,
       },
     },
   });
@@ -1709,6 +1814,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     targetType: "User",
     targetId: createdUser.id,
     metadata: {
+      politicalPartyId: scopedPayload.politicalPartyId,
       stateId: scopedPayload.stateId,
       senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
       federalConstituencyId: scopedPayload.federalConstituencyId || null,
@@ -1727,11 +1833,18 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
 
 router.get("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const actor = request.authUser;
+  const actorPartyId = requireActorPartyForManagement(actor);
+  if (actor?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
   const agents = await prisma.user.findMany({
     where: {
       role: UserRole.AGENT,
       agentProfile: {
-        is: getAgentScopeFilter(actor),
+        is: {
+          ...getAgentScopeFilter(actor),
+          politicalPartyId: actor?.role === UserRole.ADMIN ? actorPartyId || undefined : undefined,
+        },
       },
     },
     include: { agentProfile: true },
@@ -1747,6 +1860,7 @@ router.get("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
       isActive: agent.isActive,
       phone: agent.phone || null,
       assignedAdminUserId: agent.agentProfile!.assignedAdminUserId || null,
+      politicalPartyId: agent.agentProfile!.politicalPartyId || null,
       territory: serializeTerritory(agent.agentProfile!),
     }));
 
@@ -1846,6 +1960,14 @@ router.patch("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"),
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
 
+  if (!scopedPayload.politicalPartyId) {
+    return response.status(400).json({ message: "Admin accounts must be linked to a political party." });
+  }
+
+  if (!(await ensurePoliticalPartyExists(scopedPayload.politicalPartyId))) {
+    return response.status(400).json({ message: "Selected political party does not exist." });
+  }
+
   const territoryError = validateAdminTerritoryPayload(scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
@@ -1877,6 +1999,7 @@ router.patch("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"),
       adminProfile: {
         update: {
           adminLevel: scopedPayload.adminLevel,
+          politicalPartyId: scopedPayload.politicalPartyId,
           geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId || null,
           stateId: scopedPayload.stateId || null,
           senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
@@ -1885,7 +2008,7 @@ router.patch("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"),
           wardId: scopedPayload.wardId || null,
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
-        },
+        } as Prisma.AdminProfileUncheckedUpdateWithoutUserInput,
       },
     },
   });
@@ -1913,6 +2036,10 @@ router.patch("/candidates/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADM
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
 
+  if (!request.authUser || !canManageCandidateOffice(request.authUser, scopedPayload.officeType)) {
+    return response.status(403).json({ message: "You cannot update a candidate to that office level." });
+  }
+
   const territoryError = validateCandidateOfficeTerritory(scopedPayload.officeType, scopedPayload);
   if (territoryError) {
     return response.status(400).json({ message: territoryError });
@@ -1921,6 +2048,15 @@ router.patch("/candidates/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADM
   const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  const actorPartyId = requireActorPartyForManagement(request.authUser);
+  if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
+
+  if (request.authUser?.role === UserRole.ADMIN && scopedPayload.politicalPartyId !== actorPartyId) {
+    return response.status(403).json({ message: "You can only manage candidates for your assigned political party." });
   }
 
   if (scopedPayload.politicalPartyId) {
@@ -1944,7 +2080,11 @@ router.patch("/candidates/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADM
   }
 
   const scope = await enrichCandidateScope(scopedPayload);
-  if (!request.authUser || !canViewCandidate(request.authUser, { ...targetUser.candidateProfile, userId }) || !canViewCandidate(request.authUser, scope)) {
+  if (
+    !request.authUser ||
+    !canViewCandidate(request.authUser, { ...targetUser.candidateProfile, userId }) ||
+    !canViewCandidate(request.authUser, { ...scope, politicalPartyId: scopedPayload.politicalPartyId || null })
+  ) {
     return response.status(403).json({ message: "You cannot update a candidate outside your admin territory." });
   }
 
@@ -1985,6 +2125,23 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
 
   const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
 
+  if (!scopedPayload.politicalPartyId) {
+    return response.status(400).json({ message: "Agent accounts must be linked to a political party." });
+  }
+
+  const actorPartyId = requireActorPartyForManagement(request.authUser);
+  if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
+    return response.status(403).json({ message: "Your admin account is not linked to a political party." });
+  }
+
+  if (request.authUser?.role === UserRole.ADMIN && scopedPayload.politicalPartyId !== actorPartyId) {
+    return response.status(403).json({ message: "You can only manage agents for your assigned political party." });
+  }
+
+  if (!(await ensurePoliticalPartyExists(scopedPayload.politicalPartyId))) {
+    return response.status(400).json({ message: "Selected political party does not exist." });
+  }
+
   const territoryReferenceError = await validateTerritoryReferences(scopedPayload);
   if (territoryReferenceError) {
     return response.status(400).json({ message: territoryReferenceError });
@@ -2024,6 +2181,10 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     if (!assignedAdminAuth || !canCreateAgentInScope(assignedAdminAuth, agentTerritory)) {
       return response.status(400).json({ message: "Assigned admin cannot manage this agent territory." });
     }
+
+    if (!isWithinActorParty(assignedAdminAuth, scopedPayload.politicalPartyId)) {
+      return response.status(400).json({ message: "Assigned admin must belong to the same political party as the agent." });
+    }
   }
 
   const targetUser = await prisma.user.findUnique({
@@ -2036,7 +2197,13 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
   }
 
   const targetAuth = await getAuthUserProfile(targetUser.id);
-  if (!request.authUser || !targetAuth || !canManageUser(request.authUser, targetAuth) || !canCreateAgentInScope(request.authUser, agentTerritory)) {
+  if (
+    !request.authUser ||
+    !targetAuth ||
+    !isWithinActorParty(request.authUser, targetUser.agentProfile.politicalPartyId) ||
+    !canManageUser(request.authUser, targetAuth) ||
+    !canCreateAgentInScope(request.authUser, agentTerritory)
+  ) {
     return response.status(403).json({ message: "You cannot update an agent in this territory." });
   }
 
@@ -2048,6 +2215,7 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
       agentProfile: {
         update: {
           geoPoliticalZoneId: state?.geoPoliticalZoneId || null,
+          politicalPartyId: scopedPayload.politicalPartyId,
           stateId: scopedPayload.stateId,
           senatorialDistrictId: scopedPayload.senatorialDistrictId || null,
           federalConstituencyId: scopedPayload.federalConstituencyId || null,
@@ -2056,7 +2224,7 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
           assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
-        },
+        } as Prisma.AgentProfileUncheckedUpdateWithoutUserInput,
       },
     },
   });

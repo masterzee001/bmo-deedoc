@@ -197,6 +197,7 @@ model AdminProfile {
   id                    String               @id @default(cuid())
   userId                String               @unique
   adminLevel            AdminLevel
+  politicalPartyId      String?
   geoPoliticalZoneId    String?
   stateId               String?
   senatorialDistrictId  String?
@@ -208,6 +209,7 @@ model AdminProfile {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  politicalParty        PoliticalParty?      @relation(fields: [politicalPartyId], references: [id])
   geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
   state                 State?               @relation(fields: [stateId], references: [id])
   senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
@@ -218,6 +220,7 @@ model AdminProfile {
   pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
 
   @@index([adminLevel])
+  @@index([politicalPartyId])
   @@index([geoPoliticalZoneId])
   @@index([stateId])
   @@index([senatorialDistrictId])
@@ -282,6 +285,7 @@ model AgentProfile {
   id                  String       @id @default(cuid())
   userId              String       @unique
   assignedAdminUserId String?
+  politicalPartyId    String?
   geoPoliticalZoneId  String?
   stateId             String
   senatorialDistrictId String?
@@ -294,6 +298,7 @@ model AgentProfile {
   updatedAt           DateTime     @updatedAt
   user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   assignedAdminUser   User?        @relation("AssignedAdmin", fields: [assignedAdminUserId], references: [id])
+  politicalParty      PoliticalParty? @relation(fields: [politicalPartyId], references: [id])
   geoPoliticalZone    GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
   state               State        @relation(fields: [stateId], references: [id])
   senatorialDistrict  SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
@@ -305,6 +310,7 @@ model AgentProfile {
 
   @@index([geoPoliticalZoneId])
   @@index([assignedAdminUserId])
+  @@index([politicalPartyId])
   @@index([stateId])
   @@index([senatorialDistrictId])
   @@index([federalConstituencyId])
@@ -950,6 +956,8 @@ model PoliticalParty {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   candidateProfiles  CandidateProfile[]
+  adminProfiles      AdminProfile[]
+  agentProfiles      AgentProfile[]
 
   @@index([isApprovedByInec])
 }

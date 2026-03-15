@@ -182,6 +182,7 @@ export type AuthUserProfile = {
   isActive: boolean;
   adminProfile: ({
     adminLevel: AdminLevel;
+    politicalPartyId: string | null;
   } & TerritorySummary) | null;
   candidateProfile: ({
     officeType: CandidateOfficeType;
@@ -194,6 +195,7 @@ export type AuthUserProfile = {
   } & TerritorySummary) | null;
   agentProfile: ({
     assignedAdminUserId: string | null;
+    politicalPartyId: string | null;
   } & TerritorySummary) | null;
 };
 
@@ -338,6 +340,7 @@ export type AdminUserItem = {
   email: string;
   isActive: boolean;
   adminLevel: AdminLevel;
+  politicalPartyId: string | null;
   territory: TerritorySummary;
 };
 
@@ -348,6 +351,7 @@ export type AgentUserItem = {
   isActive: boolean;
   phone: string | null;
   assignedAdminUserId: string | null;
+  politicalPartyId: string | null;
   territory: TerritorySummary;
 };
 
@@ -384,6 +388,7 @@ export type ManagedUserItem = {
   territory: TerritorySummary;
   adminLevel: AdminLevel | null;
   officeType: CandidateOfficeType | null;
+  politicalPartyId: string | null;
   voterCardNumber: string | null;
   assignedAdminUserId: string | null;
 };

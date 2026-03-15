@@ -111,6 +111,16 @@ const adminLevelRank: Record<(typeof ADMIN_LEVELS)[number], number> = {
   WARD: 0,
 };
 
+const candidateOfficeRank: Record<(typeof CANDIDATE_OFFICE_TYPES)[number], number> = {
+  PRESIDENTIAL: 7,
+  GOVERNORSHIP: 5,
+  SENATE: 4,
+  HOUSE_OF_REP: 3,
+  STATE_ASSEMBLY: 2,
+  CHAIRMANSHIP: 1,
+  COUNCILLOR: 0,
+};
+
 function formatDependencyCounts(value: unknown): string {
   if (!value || typeof value !== "object") {
     return "";
@@ -312,6 +322,7 @@ export default function AdminDashboardPage() {
     email: "",
     password: "",
     adminLevel: "STATE" as (typeof ADMIN_LEVELS)[number],
+    politicalPartyId: "",
     geoPoliticalZoneId: "",
     stateId: "",
     senatorialDistrictId: "",
@@ -339,6 +350,7 @@ export default function AdminDashboardPage() {
     email: "",
     password: "",
     phone: "",
+    politicalPartyId: "",
     stateId: "",
     senatorialDistrictId: "",
     federalConstituencyId: "",
@@ -427,7 +439,29 @@ export default function AdminDashboardPage() {
             adminLevel: manageableAdminLevels.includes(current.adminLevel as (typeof ADMIN_LEVELS)[number])
               ? current.adminLevel
               : manageableAdminLevels[0],
+            politicalPartyId:
+              currentUser.role === "ADMIN"
+                ? currentUser.adminProfile?.politicalPartyId || ""
+                : current.politicalPartyId,
           }));
+        }
+        const manageableOfficeOptions =
+          currentUser.role === "SUPER_ADMIN"
+            ? candidateOfficeOptions
+            : currentUser.adminProfile
+              ? candidateOfficeOptions.filter((officeType) => adminLevelRank[currentUser.adminProfile!.adminLevel] >= candidateOfficeRank[officeType])
+              : [];
+        if (manageableOfficeOptions.length > 0) {
+          setCandidateCreateForm((current) => ({
+            ...current,
+            officeType: manageableOfficeOptions.includes(current.officeType as (typeof CANDIDATE_OFFICE_TYPES)[number])
+              ? current.officeType
+              : manageableOfficeOptions[0],
+          }));
+        }
+        if (currentUser.role === "ADMIN" && currentUser.adminProfile?.politicalPartyId) {
+          setCandidateCreateForm((current) => ({ ...current, politicalPartyId: currentUser.adminProfile!.politicalPartyId || "" }));
+          setAgentCreateForm((current) => ({ ...current, politicalPartyId: currentUser.adminProfile!.politicalPartyId || "" }));
         }
         setProfileForm({
           name: currentUser.name,
@@ -499,6 +533,13 @@ export default function AdminDashboardPage() {
         ? adminLevelOptions.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level])
         : [];
   const canManageAdmins = manageableAdminLevels.length > 0;
+  const manageableCandidateOfficeOptions =
+    user.role === "SUPER_ADMIN"
+      ? candidateOfficeOptions
+      : user.adminProfile
+        ? candidateOfficeOptions.filter((officeType) => adminLevelRank[user.adminProfile!.adminLevel] >= candidateOfficeRank[officeType])
+        : [];
+  const actorPoliticalPartyId = user.role === "ADMIN" ? user.adminProfile?.politicalPartyId || "" : "";
   const highlightedIncidents = mapSummary.incidents
     .filter((incident) => mapSeverityFilter === "ALL" || incident.severity === mapSeverityFilter)
     .slice(0, 4);
@@ -991,6 +1032,7 @@ export default function AdminDashboardPage() {
       const payload = {
         name: adminCreateForm.name,
         adminLevel: adminCreateForm.adminLevel as "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD",
+        politicalPartyId: adminCreateForm.politicalPartyId || undefined,
         geoPoliticalZoneId: adminCreateForm.adminLevel !== "NATIONAL" ? adminCreateForm.geoPoliticalZoneId || undefined : undefined,
         stateId: ["STATE", "SENATORIAL", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "LGA", "WARD"].includes(adminCreateForm.adminLevel)
           ? adminCreateForm.stateId || undefined
@@ -1018,6 +1060,7 @@ export default function AdminDashboardPage() {
         email: "",
         password: "",
         adminLevel: "STATE",
+        politicalPartyId: user?.role === "ADMIN" ? user.adminProfile?.politicalPartyId || "" : "",
         geoPoliticalZoneId: "",
         stateId: "",
         senatorialDistrictId: "",
@@ -1071,8 +1114,8 @@ export default function AdminDashboardPage() {
         name: "",
         email: "",
         password: "",
-        officeType: "GOVERNORSHIP",
-        politicalPartyId: "",
+        officeType: manageableCandidateOfficeOptions[0] || "GOVERNORSHIP",
+        politicalPartyId: user?.role === "ADMIN" ? user.adminProfile?.politicalPartyId || "" : "",
         geoPoliticalZoneId: "",
         stateId: "",
         senatorialDistrictId: "",
@@ -1101,6 +1144,7 @@ export default function AdminDashboardPage() {
       const payload = {
         name: agentCreateForm.name,
         phone: agentCreateForm.phone || undefined,
+        politicalPartyId: agentCreateForm.politicalPartyId || undefined,
         stateId: agentCreateForm.stateId,
         senatorialDistrictId: agentCreateForm.senatorialDistrictId || undefined,
         federalConstituencyId: agentCreateForm.federalConstituencyId || undefined,
@@ -1127,6 +1171,7 @@ export default function AdminDashboardPage() {
         email: "",
         password: "",
         phone: "",
+        politicalPartyId: user?.role === "ADMIN" ? user.adminProfile?.politicalPartyId || "" : "",
         stateId: "",
         senatorialDistrictId: "",
         federalConstituencyId: "",
@@ -1150,6 +1195,7 @@ export default function AdminDashboardPage() {
       email: adminUser.email,
       password: "",
       adminLevel: adminUser.adminLevel,
+      politicalPartyId: adminUser.politicalPartyId || "",
       geoPoliticalZoneId: adminUser.territory.geoPoliticalZoneId || "",
       stateId: adminUser.territory.stateId || "",
       senatorialDistrictId: adminUser.territory.senatorialDistrictId || "",
@@ -1199,6 +1245,7 @@ export default function AdminDashboardPage() {
       email: agent.email,
       password: "",
       phone: agent.phone || "",
+      politicalPartyId: agent.politicalPartyId || "",
       stateId: agent.territory.stateId || "",
       senatorialDistrictId: agent.territory.senatorialDistrictId || "",
       federalConstituencyId: agent.territory.federalConstituencyId || "",
@@ -1830,6 +1877,20 @@ export default function AdminDashboardPage() {
                   ))}
                 </select>
               </label>
+              <label className="field">
+                <span>Political Party</span>
+                <select
+                  value={adminCreateForm.politicalPartyId}
+                  onChange={(event) => setAdminCreateForm({ ...adminCreateForm, politicalPartyId: event.target.value })}
+                  required
+                  disabled={user.role === "ADMIN" && Boolean(actorPoliticalPartyId)}
+                >
+                  <option value="">Select party</option>
+                  {parties.map((party) => (
+                    <option key={party.id} value={party.id}>{party.code} - {party.name}</option>
+                  ))}
+                </select>
+              </label>
               {adminCreateForm.adminLevel !== "NATIONAL" ? (
                 <label className="field">
                   <span>Geo-Political Zone</span>
@@ -2015,12 +2076,12 @@ export default function AdminDashboardPage() {
                   value={candidateCreateForm.officeType}
                   onChange={async (event) => {
                     const officeType = event.target.value as (typeof CANDIDATE_OFFICE_TYPES)[number];
-                    const nextForm = resetCandidateTerritoryFields({ officeType });
+                    const nextForm = resetCandidateTerritoryFields({ officeType, politicalPartyId: candidateCreateForm.politicalPartyId });
                     setCandidateCreateForm(nextForm);
                     await refreshTerritoryOptions({});
                   }}
                 >
-                  {candidateOfficeOptions.map((officeType) => (
+                  {manageableCandidateOfficeOptions.map((officeType) => (
                     <option key={officeType} value={officeType}>{officeType}</option>
                   ))}
                 </select>
@@ -2030,8 +2091,10 @@ export default function AdminDashboardPage() {
                 <select
                   value={candidateCreateForm.politicalPartyId}
                   onChange={(event) => setCandidateCreateForm({ ...candidateCreateForm, politicalPartyId: event.target.value })}
+                  disabled={user.role === "ADMIN" && Boolean(actorPoliticalPartyId)}
+                  required={user.role === "ADMIN"}
                 >
-                  <option value="">Independent / no party</option>
+                  {user.role === "SUPER_ADMIN" ? <option value="">Independent / no party</option> : null}
                   {parties.map((party) => (
                     <option key={party.id} value={party.id}>{party.code} - {party.name}</option>
                   ))}
@@ -2196,6 +2259,20 @@ export default function AdminDashboardPage() {
               <label className="field">
                 <span>Phone</span>
                 <input value={agentCreateForm.phone} onChange={(event) => setAgentCreateForm({ ...agentCreateForm, phone: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Political Party</span>
+                <select
+                  value={agentCreateForm.politicalPartyId}
+                  onChange={(event) => setAgentCreateForm({ ...agentCreateForm, politicalPartyId: event.target.value })}
+                  required
+                  disabled={user.role === "ADMIN" && Boolean(actorPoliticalPartyId)}
+                >
+                  <option value="">Select party</option>
+                  {parties.map((party) => (
+                    <option key={party.id} value={party.id}>{party.code} - {party.name}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>State</span>

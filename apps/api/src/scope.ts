@@ -1,7 +1,18 @@
-import type { AdminLevel, AuthUserProfile, TerritoryScope } from "@pics-nigeria/shared";
+import type { AdminLevel, AuthUserProfile, CandidateOfficeType, TerritoryScope } from "@pics-nigeria/shared";
 
 type ScopedCandidate = TerritoryScope & {
   userId?: string;
+  politicalPartyId?: string | null;
+};
+
+const officeRank: Record<CandidateOfficeType, number> = {
+  PRESIDENTIAL: 7,
+  GOVERNORSHIP: 5,
+  SENATE: 4,
+  HOUSE_OF_REP: 3,
+  STATE_ASSEMBLY: 2,
+  CHAIRMANSHIP: 1,
+  COUNCILLOR: 0,
 };
 
 const levelRank: Record<AdminLevel, number> = {
@@ -29,6 +40,35 @@ export function isCandidateUser(user: AuthUserProfile): boolean {
 
 export function isAdminOrSuperAdmin(user: AuthUserProfile): boolean {
   return isSuperAdmin(user) || isAdminUser(user);
+}
+
+export function getActorPoliticalPartyId(user: AuthUserProfile): string | null {
+  if (isSuperAdmin(user)) {
+    return null;
+  }
+
+  if (user.role === "ADMIN") {
+    return user.adminProfile?.politicalPartyId || null;
+  }
+
+  if (user.role === "CANDIDATE") {
+    return user.candidateProfile?.politicalPartyId || null;
+  }
+
+  if (user.role === "AGENT") {
+    return user.agentProfile?.politicalPartyId || null;
+  }
+
+  return null;
+}
+
+export function isWithinActorParty(user: AuthUserProfile, politicalPartyId: string | null | undefined): boolean {
+  if (isSuperAdmin(user)) {
+    return true;
+  }
+
+  const actorPartyId = getActorPoliticalPartyId(user);
+  return Boolean(actorPartyId) && actorPartyId === (politicalPartyId || null);
 }
 
 function matchesAdminScope(actor: AuthUserProfile, target: TerritoryScope): boolean {
@@ -123,8 +163,9 @@ export function canManageUser(actor: AuthUserProfile, target: AuthUserProfile): 
   }
 
   if (target.role === "ADMIN" && target.adminProfile) {
-    return canManageAdmin(actor, {
+    return isWithinActorParty(actor, target.adminProfile.politicalPartyId) && canManageAdmin(actor, {
       adminLevel: target.adminProfile.adminLevel,
+      politicalPartyId: target.adminProfile.politicalPartyId,
       geoPoliticalZoneId: target.adminProfile.geoPoliticalZoneId,
       stateId: target.adminProfile.stateId,
       senatorialDistrictId: target.adminProfile.senatorialDistrictId,
@@ -148,14 +189,14 @@ export function canManageUser(actor: AuthUserProfile, target: AuthUserProfile): 
   }
 
   if (target.agentProfile) {
-    return matchesAdminScope(actor, target.agentProfile);
+    return isWithinActorParty(actor, target.agentProfile.politicalPartyId) && matchesAdminScope(actor, target.agentProfile);
   }
 
   return false;
 }
 
-export function canManageAdmin(actor: AuthUserProfile, target: TerritoryScope & { adminLevel: AdminLevel }): boolean {
-  return canManageLevel(actor, target.adminLevel) && matchesAdminScope(actor, target);
+export function canManageAdmin(actor: AuthUserProfile, target: TerritoryScope & { adminLevel: AdminLevel; politicalPartyId?: string | null }): boolean {
+  return isWithinActorParty(actor, target.politicalPartyId) && canManageLevel(actor, target.adminLevel) && matchesAdminScope(actor, target);
 }
 
 export function canManageTerritory(actor: AuthUserProfile, territory: TerritoryScope & { level: AdminLevel }): boolean {
@@ -172,7 +213,7 @@ export function canViewCandidate(actor: AuthUserProfile, candidate: ScopedCandid
   }
 
   if (isAdminUser(actor)) {
-    return matchesAdminScope(actor, candidate);
+    return isWithinActorParty(actor, candidate.politicalPartyId) && matchesAdminScope(actor, candidate);
   }
 
   return false;
@@ -208,4 +249,16 @@ export function canCreateAgentInScope(actor: AuthUserProfile, territory: Territo
   }
 
   return matchesAdminScope(actor, territory);
+}
+
+export function canManageCandidateOffice(actor: AuthUserProfile, officeType: CandidateOfficeType): boolean {
+  if (isSuperAdmin(actor)) {
+    return true;
+  }
+
+  if (!actor.adminProfile) {
+    return false;
+  }
+
+  return levelRank[actor.adminProfile.adminLevel] >= officeRank[officeType];
 }

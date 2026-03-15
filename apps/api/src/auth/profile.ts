@@ -49,6 +49,7 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
     adminProfile: user.adminProfile
       ? {
           adminLevel: user.adminProfile.adminLevel,
+          politicalPartyId: user.adminProfile.politicalPartyId,
           ...toTerritorySummary(user.adminProfile),
         }
       : null,
@@ -70,6 +71,7 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
     agentProfile: user.agentProfile
       ? {
           assignedAdminUserId: user.agentProfile.assignedAdminUserId,
+          politicalPartyId: user.agentProfile.politicalPartyId,
           ...toTerritorySummary(user.agentProfile),
         }
       : null,

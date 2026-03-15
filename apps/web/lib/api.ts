@@ -573,6 +573,7 @@ export async function createAdminUser(token: string, body: {
   email: string;
   password: string;
   adminLevel: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  politicalPartyId?: string;
   geoPoliticalZoneId?: string;
   stateId?: string;
   senatorialDistrictId?: string;
@@ -646,6 +647,7 @@ export async function createAgent(token: string, body: {
   email: string;
   password: string;
   phone?: string;
+  politicalPartyId?: string;
   stateId: string;
   senatorialDistrictId?: string;
   federalConstituencyId?: string;
@@ -761,6 +763,7 @@ export async function updateAdminTask(token: string, taskId: string, body: {
 export async function updateAdminUser(token: string, userId: string, body: {
   name: string;
   adminLevel: "NATIONAL" | "GEO_POLITICAL_ZONE" | "STATE" | "SENATORIAL" | "FEDERAL_CONSTITUENCY" | "STATE_CONSTITUENCY" | "LGA" | "WARD";
+  politicalPartyId?: string;
   geoPoliticalZoneId?: string;
   stateId?: string;
   senatorialDistrictId?: string;
@@ -808,6 +811,7 @@ export async function updateCandidate(token: string, userId: string, body: {
 export async function updateAgent(token: string, userId: string, body: {
   name: string;
   phone?: string;
+  politicalPartyId?: string;
   stateId: string;
   senatorialDistrictId?: string;
   federalConstituencyId?: string;

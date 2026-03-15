@@ -157,6 +157,15 @@ export function validateCandidateOfficeTerritory(
   officeType: CandidateOfficeType,
   input: TerritoryScope,
 ): string | null {
+  const hasLowerThanState = Boolean(
+    input.senatorialDistrictId ||
+    input.federalConstituencyId ||
+    input.lgaId ||
+    input.wardId ||
+    input.stateConstituencyId ||
+    input.pollingUnitId,
+  );
+
   if (officeType === "PRESIDENTIAL") {
     return input.geoPoliticalZoneId ||
       input.stateId ||
@@ -178,24 +187,48 @@ export function validateCandidateOfficeTerritory(
     return "GOVERNORSHIP candidate requires stateId.";
   }
 
+  if (officeType === "GOVERNORSHIP" && hasLowerThanState) {
+    return "GOVERNORSHIP candidate must not include lower territory ids.";
+  }
+
   if (officeType === "SENATE" && (!input.stateId || !input.senatorialDistrictId)) {
     return "SENATE candidate requires stateId and senatorialDistrictId.";
+  }
+
+  if (officeType === "SENATE" && (input.federalConstituencyId || input.lgaId || input.wardId || input.stateConstituencyId || input.pollingUnitId)) {
+    return "SENATE candidate must not include lower territory ids.";
   }
 
   if (officeType === "HOUSE_OF_REP" && (!input.stateId || !input.federalConstituencyId)) {
     return "HOUSE_OF_REP candidate requires stateId and federalConstituencyId.";
   }
 
+  if (officeType === "HOUSE_OF_REP" && (input.lgaId || input.wardId || input.stateConstituencyId || input.pollingUnitId)) {
+    return "HOUSE_OF_REP candidate must not include lower territory ids.";
+  }
+
   if (officeType === "STATE_ASSEMBLY" && (!input.stateId || !input.stateConstituencyId)) {
     return "STATE_ASSEMBLY candidate requires stateId and stateConstituencyId.";
+  }
+
+  if (officeType === "STATE_ASSEMBLY" && (input.lgaId || input.wardId || input.pollingUnitId)) {
+    return "STATE_ASSEMBLY candidate must not include lower territory ids.";
   }
 
   if (officeType === "CHAIRMANSHIP" && (!input.stateId || !input.lgaId)) {
     return "CHAIRMANSHIP candidate requires stateId and lgaId.";
   }
 
+  if (officeType === "CHAIRMANSHIP" && (input.wardId || input.pollingUnitId)) {
+    return "CHAIRMANSHIP candidate must not include lower territory ids.";
+  }
+
   if (officeType === "COUNCILLOR" && (!input.stateId || !input.lgaId || !input.wardId)) {
     return "COUNCILLOR candidate requires stateId, lgaId, and wardId.";
+  }
+
+  if (officeType === "COUNCILLOR" && input.pollingUnitId) {
+    return "COUNCILLOR candidate must not include lower territory ids.";
   }
 
   return null;
