@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useMemo, useEffect, useState } from "react";
 import type {
   AuthUserProfile,
   CampaignEventItem,
@@ -42,6 +42,14 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ pointsRequested: "", amountRequested: "", note: "" });
   const [message, setMessage] = useState("");
+
+  const rewardSourceBreakdown = useMemo(() => {
+    return rewardHistory.reduce<Record<string, number>>((accumulator, entry) => {
+      const key = entry.kind === "EARNED" ? entry.title : entry.status;
+      accumulator[key] = (accumulator[key] || 0) + 1;
+      return accumulator;
+    }, {});
+  }, [rewardHistory]);
 
   async function loadDashboard(token: string) {
     const [
@@ -290,6 +298,15 @@ export default function DashboardPage() {
           </div>
           <span className="status-pill">{rewardHistory.length} entries</span>
         </div>
+        {rewardHistory.length > 0 ? (
+          <div className="badge-row" style={{ marginBottom: 16 }}>
+            {Object.entries(rewardSourceBreakdown).slice(0, 6).map(([label, count]) => (
+              <span key={label} className="status-badge live">
+                {label}: {count}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {rewardHistory.length === 0 ? (
           <p className="muted">No reward history is available yet.</p>
         ) : (
@@ -301,6 +318,7 @@ export default function DashboardPage() {
                 <p className="muted">
                   {entry.kind === "EARNED" ? "Earned" : "Redemption"} | {entry.status} | {entry.points} points
                 </p>
+                {entry.amount !== null ? <p className="muted">Amount: {entry.amount}</p> : null}
                 <p className="muted">
                   {new Date(entry.createdAt).toLocaleString()}
                   {entry.reviewedAt ? ` | Reviewed ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
@@ -377,7 +395,9 @@ export default function DashboardPage() {
               <article key={item.id} className="reward-item">
                 <strong>{item.status}</strong>
                 <p>{item.pointsRequested} points requested</p>
+                {item.amountRequested !== null ? <p className="muted">Requested amount: {item.amountRequested}</p> : null}
                 <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
+                {item.note ? <p className="muted">Review note: {item.note}</p> : null}
               </article>
             ))}
           </div>

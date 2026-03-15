@@ -251,6 +251,8 @@ const agentActivityQuerySchema = z.object({
 
 const incidentQuerySchema = z.object({
   status: z.nativeEnum(IncidentStatus).optional(),
+  type: z.nativeEnum(IncidentType).optional(),
+  reviewPriority: z.enum(["ROUTINE", "PRIORITY", "CRITICAL"]).optional(),
   flaggedOnly: z.enum(["true", "false"]).optional(),
   dateFrom: z.string().datetime().optional(),
   dateTo: z.string().datetime().optional(),
@@ -916,61 +918,61 @@ function buildBroadcastRecipientWhere(
 ) {
   const actorPartyId = actor?.role === UserRole.ADMIN ? actor.adminProfile?.politicalPartyId || undefined : undefined;
   const partyFilter = data.politicalPartyId || actorPartyId || undefined;
-    const adminClause = {
-      role: UserRole.ADMIN,
-      adminProfile: {
-        is: {
-          ...scope,
-          politicalPartyId: partyFilter,
-          adminLevel: data.adminLevel || undefined,
-        },
+  const adminClause = {
+    role: UserRole.ADMIN,
+    adminProfile: {
+      is: {
+        ...scope,
+        politicalPartyId: partyFilter,
+        adminLevel: data.adminLevel || undefined,
       },
-    };
-    const agentClause = {
-      role: UserRole.AGENT,
-      agentProfile: {
-        is: {
-          ...scope,
-          politicalPartyId: partyFilter,
-        },
+    },
+  };
+  const agentClause = {
+    role: UserRole.AGENT,
+    agentProfile: {
+      is: {
+        ...scope,
+        politicalPartyId: partyFilter,
       },
-      ...(data.taskStatus ? { assignedTasks: { some: { status: data.taskStatus } } } : {}),
-    };
-    const voterClause = {
-      role: UserRole.VOTER,
-      voterProfile: {
+    },
+    ...(data.taskStatus ? { assignedTasks: { some: { status: data.taskStatus } } } : {}),
+  };
+  const voterClause = {
+    role: UserRole.VOTER,
+    voterProfile: {
       is: {
         ...scope,
         contactConsent: true,
       },
     },
-    };
-    const candidateClause = {
-      role: UserRole.CANDIDATE,
-      candidateProfile: {
-        is: {
-          ...scope,
-          politicalPartyId: partyFilter,
-          officeType: data.officeType || undefined,
-        },
+  };
+  const candidateClause = {
+    role: UserRole.CANDIDATE,
+    candidateProfile: {
+      is: {
+        ...scope,
+        politicalPartyId: partyFilter,
+        officeType: data.officeType || undefined,
       },
-    };
-  
-    if (data.audience === BroadcastAudience.ADMINS) {
-      return adminClause;
-    }
-    if (data.audience === BroadcastAudience.AGENTS) {
-      return agentClause;
-    }
-    if (data.audience === BroadcastAudience.VOTERS) {
-      return voterClause;
-    }
-    if (data.audience === BroadcastAudience.CANDIDATES) {
-      return candidateClause;
-    }
+    },
+  };
+
+  if (data.audience === BroadcastAudience.ADMINS) {
+    return adminClause;
+  }
+  if (data.audience === BroadcastAudience.AGENTS) {
+    return agentClause;
+  }
+  if (data.audience === BroadcastAudience.VOTERS) {
+    return voterClause;
+  }
+  if (data.audience === BroadcastAudience.CANDIDATES) {
+    return candidateClause;
+  }
 
   return {
-    OR: [adminClause, agentClause, voterClause, candidateClause],
+    OR: partyFilter ? [adminClause, agentClause, candidateClause] : [adminClause, agentClause, voterClause, candidateClause],
   };
 }
 
@@ -991,6 +993,10 @@ function validateBroadcastTargeting(data: z.infer<typeof broadcastCreationSchema
 
   if (data.officeType && !["CANDIDATES", "ALL"].includes(data.audience)) {
     return "Office targeting is only available for candidate-inclusive broadcasts.";
+  }
+
+  if (data.politicalPartyId && data.audience === "VOTERS") {
+    return "Political-party targeting is not available for voter-only broadcasts.";
   }
 
   return null;
@@ -1097,6 +1103,24 @@ async function canViewAuditLog(
     });
 
     return Boolean(task && canCreateAgentInScope(actor, task));
+  }
+
+  if (log.targetType === "VoterEngagementTask") {
+    const task = await prisma.voterEngagementTask.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(task && isWithinAdminScope(actor, task));
   }
 
   if (log.targetType === "RewardRedemption") {
@@ -3258,6 +3282,7 @@ router.get("/incidents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
     where: {
       ...getFeedbackScopeFilter(request.authUser),
       status: parsed.data.status,
+      type: parsed.data.type,
       createdAt: getDateRange(parsed.data),
     },
     include: {
@@ -3305,10 +3330,17 @@ router.get("/incidents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
   });
 
   const governedIncidents = await buildGovernedIncidentItems(incidents);
-  const visibleIncidents =
-    parsed.data.flaggedOnly === "true"
-      ? governedIncidents.filter((incident) => (incident.governance?.flags.length || 0) > 0)
-      : governedIncidents;
+  const visibleIncidents = governedIncidents.filter((incident) => {
+    if (parsed.data.flaggedOnly === "true" && (incident.governance?.flags.length || 0) === 0) {
+      return false;
+    }
+
+    if (parsed.data.reviewPriority && incident.governance?.reviewPriority !== parsed.data.reviewPriority) {
+      return false;
+    }
+
+    return true;
+  });
 
   return response.json({
     page,
@@ -3358,6 +3390,7 @@ router.patch("/incidents/:incidentId/status", requireAuth, requireRole("ADMIN", 
       action: "INCIDENT_STATUS_UPDATED",
       targetType: "Incident",
       targetId: updatedIncident.id,
+      territory: updatedIncident,
       metadata: { status: updatedIncident.status },
     });
   });
@@ -3422,6 +3455,7 @@ router.patch("/incidents/:incidentId/assign", requireAuth, requireRole("ADMIN", 
       action: "INCIDENT_ASSIGNED",
       targetType: "Incident",
       targetId: updatedIncident.id,
+      territory: updatedIncident,
       metadata: { assignedAdminUserId: assignedAdmin.id },
     });
   });
@@ -3967,6 +4001,7 @@ router.post("/engagement-tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     action: "VOTER_ENGAGEMENT_TASK_CREATED",
     targetType: "VoterEngagementTask",
     targetId: task.id,
+    territory: task,
     metadata: {
       type: task.type,
       rewardPoints: task.rewardPoints,
@@ -4183,6 +4218,7 @@ router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADM
       action: "REWARD_REDEMPTION_APPROVED",
       targetType: "RewardRedemption",
       targetId: redemption.id,
+      territory: voterProfile,
       metadata: {
         note: parsed.data.note || null,
         voterUserId: redemption.voterUserId,
@@ -4249,6 +4285,7 @@ router.patch("/redemptions/:redemptionId/reject", requireAuth, requireRole("ADMI
       action: "REWARD_REDEMPTION_REJECTED",
       targetType: "RewardRedemption",
       targetId: redemption.id,
+      territory: voterProfile,
       metadata: {
         note: parsed.data.note || null,
         voterUserId: redemption.voterUserId,
@@ -4307,6 +4344,7 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
       action: "REWARD_REDEMPTION_PAID",
       targetType: "RewardRedemption",
       targetId: redemption.id,
+      territory: voterProfile,
       metadata: {
         voterUserId: redemption.voterUserId,
         pointsRequested: redemption.pointsRequested,

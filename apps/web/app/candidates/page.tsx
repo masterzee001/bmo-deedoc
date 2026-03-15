@@ -45,6 +45,19 @@ export default function CandidatesPage() {
     return new Set(candidates.map((candidate) => candidate.territory.stateId).filter(Boolean)).size;
   }, [candidates]);
 
+  const selectedStateName = useMemo(
+    () => states.find((item) => item.id === stateId)?.name || "",
+    [stateId, states],
+  );
+
+  const selectedPartyName = useMemo(() => {
+    if (partyId === "independent") {
+      return "Independent";
+    }
+
+    return parties.find((item) => item.id === partyId)?.name || "";
+  }, [parties, partyId]);
+
   async function loadDirectory(nextSearch = search, nextStateId = stateId, nextPartyId = partyId, nextOfficeType = officeType) {
     setError("");
     const [nextStates, nextParties, nextCandidates] = await Promise.all([
@@ -86,11 +99,39 @@ export default function CandidatesPage() {
     setLoading(true);
     try {
       await loadDirectory(search, stateId, partyId, officeType);
+      const params = new URLSearchParams();
+      if (search) {
+        params.set("search", search);
+      }
+      if (stateId) {
+        params.set("stateId", stateId);
+      }
+      if (partyId) {
+        params.set("partyId", partyId);
+      }
+      if (officeType) {
+        params.set("officeType", officeType);
+      }
+      const suffix = params.toString();
+      window.history.replaceState({}, "", suffix ? `/candidates?${suffix}` : "/candidates");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not apply candidate filters.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleClearFilters() {
+    setSearch("");
+    setStateId("");
+    setPartyId("");
+    setOfficeType("");
+    setLoading(true);
+
+    loadDirectory("", "", "", "")
+      .then(() => window.history.replaceState({}, "", "/candidates"))
+      .catch((caughtError) => setError(caughtError instanceof Error ? caughtError.message : "Could not reset candidate filters."))
+      .finally(() => setLoading(false));
   }
 
   return (
@@ -140,10 +181,21 @@ export default function CandidatesPage() {
           <button className="button" type="button" onClick={() => void handleApplyFilters()} disabled={loading}>
             {loading ? "Loading..." : "Apply filters"}
           </button>
+          <button className="button secondary" type="button" onClick={() => handleClearFilters()} disabled={loading}>
+            Clear filters
+          </button>
         </div>
         <p className="muted">
           Browse by party or jump to the <Link href="/parties">party portfolio</Link>.
         </p>
+        {search || stateId || partyId || officeType ? (
+          <div className="badge-row">
+            {search ? <span className="status-badge live">Search: {search}</span> : null}
+            {selectedStateName ? <span className="status-badge live">State: {selectedStateName}</span> : null}
+            {selectedPartyName ? <span className="status-badge live">Party: {selectedPartyName}</span> : null}
+            {officeType ? <span className="status-badge live">Office: {officeLabels[officeType]}</span> : null}
+          </div>
+        ) : null}
         {error ? <p className="error">{error}</p> : null}
       </section>
 
@@ -224,6 +276,10 @@ export default function CandidatesPage() {
                     candidate.territoryLabels.ward,
                   ].filter(Boolean).join(" | ")}
                 </p>
+                <div className="badge-row">
+                  <span className="status-badge live">{candidate.territoryLabels.state || "National"}</span>
+                  {candidate.party?.code ? <span className="status-badge live">{candidate.party.code}</span> : null}
+                </div>
                 <div className="action-row">
                   <Link href={`/candidates/${candidate.userId}`}>View profile</Link>
                   {candidate.party ? <Link href={`/parties/${candidate.party.id}`}>View party</Link> : null}

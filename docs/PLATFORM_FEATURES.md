@@ -1,7 +1,7 @@
 # PICS Nigeria Product Capability Guide
 
 ## What The Platform Does
-PICS Nigeria is a territory-governed political operations platform for party structures, campaign leadership, field administrators, candidates, agents, and supporters. It supports controlled user management, party-aligned operations, field tasking, live agent visibility, campaign communication, supporter engagement, rewards, and structured election-day reporting.
+PICS Nigeria is a territory-governed political operations platform for party structures, campaign leadership, field administrators, candidates, agents, and supporters. It supports controlled user management, party-aligned operations, field tasking, live agent visibility, campaign communication, supporter engagement, rewards, audit-friendly administration, and operational incident review.
 
 The platform is designed for live political operations, so authority is always constrained by both `rank` and `territory`. Users only see and act within the operational scope assigned to them.
 
@@ -14,6 +14,7 @@ The platform is designed for live political operations, so authority is always c
 - `Field execution`: agents receive tasks, submit activity, report incidents, and support election-day operations.
 - `Campaign engagement`: candidates manage public profile, posts, broadcasts, events, and supporter-facing engagement.
 - `Reward participation`: supporters can earn and redeem reward points through governed engagement workflows.
+- `Operational governance`: audit history, incident review signals, communication previews, and coverage insights support oversight without weakening live workflows.
 
 ## Major Modules
 - `Authentication and RBAC`
@@ -31,7 +32,7 @@ The platform is designed for live political operations, so authority is always c
 - `Voter and supporter engagement`
   registration, candidate discovery, consent-based communication, referrals, engagement tasks, and rewards.
 - `Reporting and oversight`
-  live activity views, map summaries, scoped notifications, incident monitoring, operational queues, and audit-friendly workflows.
+  live activity views, map summaries, scoped notifications, incident monitoring, operational queues, audit-friendly workflows, communication previews, and coverage intelligence.
 
 ## Candidate Discovery And Public Profile
 Current capability:
@@ -39,6 +40,10 @@ Current capability:
   - state
   - office
   - political party where available
+- public candidate listing now presents a clearer discovery experience with:
+  - visible candidate counts
+  - office coverage summaries
+  - quick office-based narrowing from visible results
 - public candidate detail pages already expose published candidate-facing information only
 - candidate public presence can include:
   - profile portrait
@@ -48,6 +53,7 @@ Current capability:
   - territory labels
   - published campaign materials
   - published campaign events
+  - related candidate and related party navigation where available
 
 Visibility controls:
 - only active candidate records with published public profiles are shown in discovery
@@ -69,7 +75,7 @@ Safe next-step direction:
 - `Ward Admin`
   coordinates polling-unit and ward field execution, supervises local agents, and handles ward-level reporting.
 - `Polling Unit Agent / Field Agent`
-  receives tasks, records field activities, submits incidents, updates task progress, and files election-day reports for assigned territory.
+  receives tasks, records field activities, submits incidents, updates task progress, and supports polling-unit operations for assigned territory.
 - `Candidate`
   manages campaign presence, supporter communications, materials, events, and campaign-facing live field visibility inside eligible scope.
 - `Voter / Supporter`
@@ -94,6 +100,7 @@ Higher-ranking admins can perform these actions only when backend rules allow:
 - edit lower-ranked users
 - assign or update allowed territory
 - link party-bound users to a political party
+- unlink or change party linkage where policy and scope permit
 - deactivate and reactivate accounts
 - delete accounts only when safe-policy checks pass
 - assign tasks to single agents or eligible bulk target groups
@@ -114,6 +121,26 @@ Current workflow pattern:
 - select target role or operational action
 - open a scoped list or scoped form
 - complete creation, edit, tracking, or tasking inside that scope
+
+Current admin workflow pages now separate:
+- `overview`
+  summary cards and next actions only
+- `select territory`
+  scope selection before management or tracking
+- `manage users`
+  scoped list and lifecycle actions
+- `create user`
+  scoped create and edit workflow
+- `live operations`
+  live tracking and task assignment
+- `incident review`
+  governed review signals for incident follow-up
+- `communications`
+  targeted messaging with preview before send
+- `rewards`
+  reward accountability and redemption visibility
+- `coverage`
+  weak territory and polling-unit intelligence
 
 Territory logic is used across:
 - dashboard summaries
@@ -139,6 +166,8 @@ Operational implications:
 - lower admins can only create or manage party-bound users inside allowed party scope
 - agent assignment and tasking must respect party compatibility where policy requires it
 - candidate and admin operations are aligned to permitted party structure
+- communication targeting is also party-aware for party-bound roles
+- scoped recipient previews and task assignment do not bypass party rules
 
 This ensures that platform operations reflect real campaign structure rather than generic user administration.
 
@@ -173,6 +202,14 @@ Current operational support:
   - candidate office
   - agent task status
 - preview and send remain backend-scoped so actors cannot message outside authorized territory or party authority
+- empty-target sends are blocked
+- a changed target selection requires a fresh preview before send in the admin workflow
+- party targeting is limited to party-linked recipient roles and is not available for voter-only broadcasts
+- preview now reflects both applied filters and the effective territory scope before send
+
+Operational result:
+- admins can send to all agents in one LGA, visible ward admins, scoped candidates, or consented voters within their authority
+- targeting remains understandable because the workflow shows recipient counts before a message is sent
 
 ## User Lifecycle Management
 The platform supports controlled user lifecycle operations for authorized admins.
@@ -191,6 +228,10 @@ Deletion is intentionally conservative:
 - accounts with dependent operational records may be blocked from deletion
 - dependency checks help preserve audit-friendliness and deployed data integrity
 
+Operational result:
+- admins can safely manage user lifecycle in production without guessing whether a destructive action will succeed
+- protected records are preserved when campaign, reward, incident, or task history still depends on them
+
 ## Dashboard And Operational Navigation
 Dashboard pages are intended to show summary and the next most important actions, not mixed operational forms.
 
@@ -203,6 +244,15 @@ Structure used by the product:
   dedicated create and edit workflows
 - `Live operations`
   territory-scoped field visibility, activity review, and tasking
+
+Current admin overview shortcuts now point into:
+- manage users
+- select territory
+- incident review
+- communications
+- rewards
+- coverage intelligence
+- account settings
 
 This separation reduces clutter and makes training and day-to-day usage easier for campaign teams.
 
@@ -219,6 +269,12 @@ Supported tasking patterns:
 - bulk target by state constituency
 - bulk target by selected visible agents
 
+Current safety rules:
+- task creation is checked against the admin's allowed territory
+- party-bound agent tasking is checked against allowed party scope
+- linked incident tasking is checked against visible incident scope
+- bulk assignment requires explicit confirmation in the UI
+
 Typical task types include:
 - mobilization activity
 - field verification
@@ -228,17 +284,18 @@ Typical task types include:
 - incident follow-up
 - election-day reporting
 
-Task lifecycle:
-- `Pending / Todo`
+Current implemented task lifecycle:
+- `Todo`
   task is assigned and waiting for action
 - `In Progress`
   agent has started the work
-- `Submitted`
-  work has been reported back for review where applicable
-- `Completed`
-  work is finished
-- `Approved`
-  admin review confirms successful completion where applicable
+- `Blocked`
+  agent cannot continue and needs intervention
+- `Done`
+  task is finished and recorded
+
+Planned safe extension:
+- a richer submitted, reviewed, or approved completion flow can be layered later without replacing current task status behavior
 
 Task lifecycle value:
 - gives admins clearer operational control
@@ -256,6 +313,18 @@ Current capability:
   - redemption request records
   - review fields for redemption decisions
 - reward balance is already computed from ledger and redemption state rather than from a single unsafe mutable counter
+- voter-facing reward history now combines:
+  - earned ledger entries
+  - redemption lifecycle states
+  - source and status breakdown visibility
+  - requested amount where applicable
+  - review note visibility where available
+  - review timestamps where available
+- admin-facing reward accountability now shows:
+  - posted reward history in scope
+  - visible redemption queue
+  - pending, approved, paid, and rejected states
+  - compact ledger-type breakdowns for operational review
 
 Operational meaning:
 - supporters can see reward outcomes relevant to their participation
@@ -263,7 +332,7 @@ Operational meaning:
 - reward activity is traceable at a foundational level even where the UI is still lightweight
 
 Safe next-step direction:
-- clearer approval history, richer reviewer notes, and expanded reward accountability presentation can continue to be added on top of the current model without replacing current balances
+- richer reviewer notes, more detailed approval history, and more explicit source categorization can continue to be added on top of the current model without replacing current balances
 
 ## Agent Operational Features
 Agents are not passive user accounts. They are active field-operational users.
@@ -275,13 +344,15 @@ Agent-facing capabilities include:
 - submit incidents
 - capture field observations
 - operate from assigned territory and polling-unit context
-- support election-day reporting
+- support election-period field execution
 
 Admin and candidate oversight capabilities include:
 - track live agent activity inside authorized scope
 - drill into one specific visible agent
 - review recent signals and last activity time
 - tie operational action back to territory and party structure
+- assign immediate single-agent tasks from live operations
+- assign territory-scoped bulk tasks from live operations
 
 ## Live Agent Tracking
 Live agent tracking is designed for operational supervision, not just analytics.
@@ -292,6 +363,7 @@ Capabilities include:
 - recent activity visibility
 - map-based operational summary
 - incident and agent-location review inside authorized scope
+- direct transition from tracking into task assignment for visible agents
 
 Tracking visibility always respects:
 - admin level
@@ -302,7 +374,7 @@ This means a state admin can supervise visible state agents, while an LGA admin 
 
 ## Election-Day Reporting Flow
 Current capability:
-- the current live system already supports election-period field operations through:
+- the live system supports election-period field operations through:
   - agent check-in and check-out
   - location pings
   - incident submission
@@ -310,16 +382,15 @@ Current capability:
   - live agent tracking
   - incident escalation
 
-Safe planned enhancement:
-- a dedicated structured election-day reporting workflow can be added on top of the current field-operations foundation for:
+Current limitation:
+- there is not yet a dedicated structured election-day result-report workflow for:
   - arrival confirmation
   - opening status
   - turnout observations
   - result entry
-  - labeled evidence photo handling
-  - scoped review by higher admins
+  - labeled evidence-photo capture
 
-Implementation caution:
+Safe planned enhancement:
 - this should be added as a dedicated additive reporting flow, not by overloading the current generic incident model
 
 ## Communication And Campaign Operations
@@ -332,6 +403,8 @@ Capabilities include:
 - scoped audience targeting
 - supporter engagement workflows
 - candidate-facing monitoring of relevant field activity
+- party and territory-aware admin messaging
+- preview-first communication governance for admin broadcasts
 
 Communications are intended to move through governed routes:
 - candidate to supporters
@@ -347,6 +420,8 @@ Capabilities include:
 - referral-based participation
 - redemption requests
 - admin review queues where applicable
+- reward history visibility for supporters
+- reward accountability visibility for admins in scope
 
 This helps connect field mobilization, supporter activity, and campaign engagement in one governed workflow.
 
@@ -366,6 +441,8 @@ Operational value:
 - sensitive actions are not entirely silent
 - user lifecycle changes, task actions, escalation actions, and other governed operations already have a reusable logging base
 - scoped admin activity history is now available for visible audit events through an admin-facing review page
+- audit records now support clearer operational context through structured metadata and scoped visibility checks
+- activity review now covers a broader set of visible operational events such as candidate and agent updates, incident assignment and status updates, engagement-task creation, and broadcast creation
 
 Current limitation:
 - audit-log visibility remains conservative and currently centered on high-trust admin access
@@ -384,6 +461,7 @@ Current capability:
   - assignment
   - escalation metadata
 - admin routes already support escalation of incidents through governed workflows
+- admin incident review now exposes a scoped queue with summary signals and filterable review visibility
 
 Current limitation:
 - suspicious patterns are treated as review signals first, not hard rejections
@@ -395,7 +473,32 @@ Current operational support:
   - missing location data
   - repeated reporter volume
   - open incidents still awaiting assignment
+- incident review can now be narrowed by status, incident type, flagged-only view, and governance review priority
 - these indicators help admins prioritize review without blocking legitimate submissions
+
+Operational result:
+- suspicious items can be reviewed faster
+- low-confidence anomalies do not break live field submission
+- review remains explainable to non-technical operations teams
+
+## Coverage Intelligence And Field Visibility
+Current capability:
+- the platform now exposes a dedicated coverage view for admins in scope
+- coverage intelligence highlights:
+  - wards with weak coverage pressure
+  - polling units without assigned agents
+  - polling units without recent activity
+  - polling units carrying open incident pressure
+- the coverage view now also separates actionable follow-up into:
+  - agent assignment gaps
+  - activity follow-up queues
+  - incident-pressure queues
+- the coverage view remains practical and operational rather than becoming a heavy analytics system
+
+Operational result:
+- admins can quickly identify blind spots in field deployment
+- ward and LGA follow-up can be prioritized from one focused page
+- weak territories can be actioned through the existing user-management and tasking workflows
 
 ## Governance And Safety Controls
 The platform is designed for deployed-system safety.

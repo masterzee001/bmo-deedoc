@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AuthUserProfile, CoverageInsights } from "@pics-nigeria/shared";
 import { ApiError, fetchAdminCoverageInsights, fetchCurrentUser } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
@@ -12,6 +12,27 @@ export default function AdminCoveragePage() {
   const [insights, setInsights] = useState<CoverageInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const unitsWithoutAgents = useMemo(
+    () => insights?.pollingUnits.filter((unit) => !unit.hasAssignedAgent) || [],
+    [insights],
+  );
+  const unitsWithoutRecentActivity = useMemo(
+    () => insights?.pollingUnits.filter((unit) => !unit.hasRecentActivity) || [],
+    [insights],
+  );
+  const unitsWithIncidentPressure = useMemo(
+    () => insights?.pollingUnits.filter((unit) => unit.openIncidentCount > 0) || [],
+    [insights],
+  );
+  const wardsWithNoAgents = useMemo(
+    () => insights?.wards.filter((ward) => ward.pollingUnitsWithoutAgents > 0).slice(0, 8) || [],
+    [insights],
+  );
+  const wardsWithNoRecentActivity = useMemo(
+    () => insights?.wards.filter((ward) => ward.pollingUnitsWithoutRecentActivity > 0).slice(0, 8) || [],
+    [insights],
+  );
 
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
@@ -92,6 +113,14 @@ export default function AdminCoveragePage() {
           <h2>No assigned agents</h2>
           <div className="value">{insights.summary.pollingUnitsWithoutAssignedAgents}</div>
         </article>
+        <article className="panel card">
+          <h2>No recent activity</h2>
+          <div className="value">{insights.summary.pollingUnitsWithoutActivity}</div>
+        </article>
+        <article className="panel card">
+          <h2>Open incident pressure</h2>
+          <div className="value">{insights.summary.pollingUnitsWithIncidents}</div>
+        </article>
       </section>
 
       <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
@@ -145,6 +174,77 @@ export default function AdminCoveragePage() {
                   <p className="muted">
                     {unit.hasAssignedAgent ? "Assigned" : "No assigned agent"} | {unit.hasRecentActivity ? "Recent activity present" : "No recent activity"}
                   </p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </section>
+
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>Agent assignment gaps</h2>
+              <p className="muted">Use this queue to identify wards and polling units that need agent coverage first.</p>
+            </div>
+            <span className="status-pill">{unitsWithoutAgents.length} units</span>
+          </div>
+          {unitsWithoutAgents.length === 0 ? (
+            <p className="muted">All visible polling units currently have assigned agents.</p>
+          ) : (
+            <div className="reward-list">
+              {wardsWithNoAgents.length ? wardsWithNoAgents.map((ward) => (
+                <article key={`gap-${ward.wardId}`} className="reward-item">
+                  <strong>{ward.wardName}</strong>
+                  <p>{ward.lgaName}</p>
+                  <p className="muted">{ward.pollingUnitsWithoutAgents} polling units without assigned agents</p>
+                </article>
+              )) : null}
+            </div>
+          )}
+        </section>
+
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>Activity follow-up</h2>
+              <p className="muted">These areas have visible polling units without recent field signals in the current window.</p>
+            </div>
+            <span className="status-pill">{unitsWithoutRecentActivity.length} units</span>
+          </div>
+          {unitsWithoutRecentActivity.length === 0 ? (
+            <p className="muted">All visible polling units have recent field activity.</p>
+          ) : (
+            <div className="reward-list">
+              {wardsWithNoRecentActivity.map((ward) => (
+                <article key={`activity-${ward.wardId}`} className="reward-item">
+                  <strong>{ward.wardName}</strong>
+                  <p>{ward.lgaName}</p>
+                  <p className="muted">{ward.pollingUnitsWithoutRecentActivity} polling units without recent activity</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>Incident pressure</h2>
+              <p className="muted">Polling units with open incident pressure should be checked against tasking and incident review.</p>
+            </div>
+            <span className="status-pill">{unitsWithIncidentPressure.length} units</span>
+          </div>
+          {unitsWithIncidentPressure.length === 0 ? (
+            <p className="muted">No visible polling units currently carry open incident pressure.</p>
+          ) : (
+            <div className="reward-list">
+              {unitsWithIncidentPressure.slice(0, 12).map((unit) => (
+                <article key={`incident-${unit.pollingUnitId}`} className="reward-item">
+                  <strong>{unit.pollingUnitName}</strong>
+                  <p>{unit.wardName} | {unit.lgaName}</p>
+                  <p className="muted">{unit.openIncidentCount} open incidents | {unit.assignedAgentCount} assigned agents</p>
                 </article>
               ))}
             </div>

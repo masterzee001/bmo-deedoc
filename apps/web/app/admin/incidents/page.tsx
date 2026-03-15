@@ -1,28 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import type { AuthUserProfile, IncidentGovernanceSummary, IncidentListItem } from "@pics-nigeria/shared";
+import { useEffect, useMemo, useState } from "react";
+import {
+  INCIDENT_TYPES,
+  type AuthUserProfile,
+  type IncidentGovernanceSummary,
+  type IncidentListItem,
+} from "@pics-nigeria/shared";
 import { ApiError, fetchAdminIncidentReview, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
 
 const statusOptions = ["", "OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
+const reviewPriorityOptions = ["", "ROUTINE", "PRIORITY", "CRITICAL"] as const;
 
 export default function AdminIncidentsPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [incidents, setIncidents] = useState<IncidentListItem[]>([]);
   const [governance, setGovernance] = useState<IncidentGovernanceSummary | null>(null);
   const [status, setStatus] = useState("");
+  const [incidentType, setIncidentType] = useState("");
+  const [reviewPriority, setReviewPriority] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadPage(token: string, nextStatus?: string, nextFlaggedOnly?: boolean) {
+  async function loadPage(
+    token: string,
+    nextStatus?: string,
+    nextIncidentType?: string,
+    nextReviewPriority?: string,
+    nextFlaggedOnly?: boolean,
+  ) {
     const [currentUser, review] = await Promise.all([
       fetchCurrentUser(token),
       fetchAdminIncidentReview(token, {
         status: nextStatus || undefined,
+        type: nextIncidentType || undefined,
+        reviewPriority: (nextReviewPriority || undefined) as "ROUTINE" | "PRIORITY" | "CRITICAL" | undefined,
         flaggedOnly: nextFlaggedOnly,
       }),
     ]);
@@ -43,7 +59,7 @@ export default function AdminIncidentsPage() {
       return;
     }
 
-    loadPage(token, status, flaggedOnly)
+    loadPage(token, status, incidentType, reviewPriority, flaggedOnly)
       .catch((caughtError) => setError(caughtError instanceof Error ? caughtError.message : "Could not load incident review."))
       .finally(() => setLoading(false));
   }, []);
@@ -58,13 +74,23 @@ export default function AdminIncidentsPage() {
     try {
       setLoading(true);
       setError("");
-      await loadPage(token, status, flaggedOnly);
+      await loadPage(token, status, incidentType, reviewPriority, flaggedOnly);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not filter incidents.");
     } finally {
       setLoading(false);
     }
   }
+
+  const topFlags = useMemo(() => {
+    if (!governance) {
+      return [];
+    }
+
+    return Object.entries(governance.byFlagCode)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 4);
+  }, [governance]);
 
   if (loading && !user) {
     return (
@@ -139,6 +165,27 @@ export default function AdminIncidentsPage() {
               ))}
             </select>
           </label>
+          <label className="field">
+            <span>Incident type</span>
+            <select value={incidentType} onChange={(event) => setIncidentType(event.target.value)}>
+              <option value="">All visible incident types</option>
+              {INCIDENT_TYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Review priority</span>
+            <select value={reviewPriority} onChange={(event) => setReviewPriority(event.target.value)}>
+              {reviewPriorityOptions.map((option) => (
+                <option key={option || "all"} value={option}>
+                  {option || "All review priorities"}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="checkbox-field" style={{ alignSelf: "end" }}>
             <input type="checkbox" checked={flaggedOnly} onChange={(event) => setFlaggedOnly(event.target.checked)} />
             <span>Show flagged incidents only</span>
@@ -159,6 +206,15 @@ export default function AdminIncidentsPage() {
           </div>
           <span className="status-pill">{incidents.length} visible</span>
         </div>
+        {topFlags.length ? (
+          <div className="badges" style={{ marginTop: 12, marginBottom: 12 }}>
+            {topFlags.map(([code, count]) => (
+              <span key={code} className="status-pill">
+                {code}: {count}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {incidents.length === 0 ? (
           <p className="muted">No incidents match the current review filter.</p>

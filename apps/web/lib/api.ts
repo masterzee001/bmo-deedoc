@@ -258,11 +258,17 @@ export async function fetchAdminIncidents(token: string): Promise<IncidentListIt
 
 export async function fetchAdminIncidentReview(
   token: string,
-  query?: { status?: string; flaggedOnly?: boolean },
+  query?: { status?: string; type?: string; reviewPriority?: "ROUTINE" | "PRIORITY" | "CRITICAL"; flaggedOnly?: boolean },
 ): Promise<{ incidents: IncidentListItem[]; governance: IncidentGovernanceSummary }> {
   const params = new URLSearchParams();
   if (query?.status) {
     params.set("status", query.status);
+  }
+  if (query?.type) {
+    params.set("type", query.type);
+  }
+  if (query?.reviewPriority) {
+    params.set("reviewPriority", query.reviewPriority);
   }
   if (query?.flaggedOnly !== undefined) {
     params.set("flaggedOnly", String(query.flaggedOnly));

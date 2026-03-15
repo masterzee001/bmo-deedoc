@@ -61,6 +61,13 @@ export default function AdminRewardsPage() {
     postedPoints: rewardLedger.reduce((sum, item) => sum + item.points, 0),
   }), [redemptions, rewardLedger]);
 
+  const ledgerTypeBreakdown = useMemo(() => {
+    return rewardLedger.reduce<Record<string, number>>((accumulator, entry) => {
+      accumulator[entry.type] = (accumulator[entry.type] || 0) + 1;
+      return accumulator;
+    }, {});
+  }, [rewardLedger]);
+
   if (loading && !user) {
     return (
       <main className="shell">
@@ -117,6 +124,10 @@ export default function AdminRewardsPage() {
           <div className="value">{summary.paid}</div>
         </article>
         <article className="panel card">
+          <h2>Rejected</h2>
+          <div className="value">{summary.rejected}</div>
+        </article>
+        <article className="panel card">
           <h2>Posted points</h2>
           <div className="value">{summary.postedPoints}</div>
         </article>
@@ -130,6 +141,15 @@ export default function AdminRewardsPage() {
           </div>
           <span className="status-pill">{rewardHistory.length} entries</span>
         </div>
+        {rewardLedger.length > 0 ? (
+          <div className="badge-row" style={{ marginBottom: 16 }}>
+            {Object.entries(ledgerTypeBreakdown).map(([label, count]) => (
+              <span key={label} className="status-badge live">
+                {label}: {count}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {rewardHistory.length === 0 ? (
           <p className="muted">No reward history is visible in your current scope.</p>
@@ -142,6 +162,7 @@ export default function AdminRewardsPage() {
                 <p className="muted">
                   {entry.kind === "EARNED" ? "Earned entry" : "Redemption"} | {entry.status} | {entry.points} points
                 </p>
+                {entry.amount !== null ? <p className="muted">Amount: {entry.amount}</p> : null}
                 <p className="muted">
                   Created {new Date(entry.createdAt).toLocaleString()}
                   {entry.reviewedAt ? ` | Reviewed ${new Date(entry.reviewedAt).toLocaleString()}` : ""}
@@ -169,11 +190,12 @@ export default function AdminRewardsPage() {
               <article key={item.id} className="reward-item">
                 <strong>{item.status}</strong>
                 <p>{item.pointsRequested} points requested</p>
+                {item.amountRequested !== null ? <p className="muted">Requested amount: {item.amountRequested}</p> : null}
                 <p className="muted">
                   Submitted {new Date(item.createdAt).toLocaleString()}
                   {item.reviewedAt ? ` | Reviewed ${new Date(item.reviewedAt).toLocaleString()}` : ""}
                 </p>
-                {item.note ? <p className="muted">{item.note}</p> : null}
+                {item.note ? <p className="muted">Review note: {item.note}</p> : null}
               </article>
             ))}
           </div>

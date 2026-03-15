@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CandidatePublicProfile } from "@pics-nigeria/shared";
 import { ApiError, fetchPublicCandidateProfile } from "../../../lib/api";
 
@@ -94,6 +94,13 @@ export default function CandidateDetailPage({ params }: Props) {
   }
 
   const narrative = splitProfileNarrative(candidate);
+  const materialBreakdown = useMemo(() => {
+    return candidate.materials.reduce<Record<string, number>>((accumulator, material) => {
+      accumulator[material.mediaType] = (accumulator[material.mediaType] || 0) + 1;
+      return accumulator;
+    }, {});
+  }, [candidate.materials]);
+
   const territoryLine = [
     candidate.territoryLabels.state || "National",
     candidate.territoryLabels.senatorialDistrict,
@@ -125,6 +132,9 @@ export default function CandidateDetailPage({ params }: Props) {
             </div>
             <div className="action-row" style={{ marginTop: 16 }}>
               <Link href={`/candidates?officeType=${encodeURIComponent(candidate.officeType)}`}>More {officeLabels[candidate.officeType] || candidate.officeType} candidates</Link>
+              {candidate.territory.stateId ? (
+                <Link href={`/candidates?stateId=${encodeURIComponent(candidate.territory.stateId)}`}>More candidates in {candidate.territoryLabels.state || "this state"}</Link>
+              ) : null}
               {candidate.party ? <Link href={`/parties/${candidate.party.id}`}>Party profile</Link> : null}
             </div>
           </div>
@@ -143,6 +153,10 @@ export default function CandidateDetailPage({ params }: Props) {
         <article className="panel card">
           <h2>Office</h2>
           <div className="value" style={{ fontSize: "1.2rem" }}>{officeLabels[candidate.officeType] || candidate.officeType}</div>
+        </article>
+        <article className="panel card">
+          <h2>Territory scope</h2>
+          <div className="value" style={{ fontSize: "1.05rem" }}>{candidate.territoryLabels.state || "National"}</div>
         </article>
       </section>
 
@@ -219,8 +233,9 @@ export default function CandidateDetailPage({ params }: Props) {
           <p className="muted">No structured highlights have been published yet.</p>
         ) : (
           <div className="reward-list">
-            {narrative.highlights.map((item) => (
+            {narrative.highlights.map((item, index) => (
               <article key={item} className="reward-item">
+                <strong>Highlight {index + 1}</strong>
                 <p>{item}</p>
               </article>
             ))}
@@ -242,24 +257,33 @@ export default function CandidateDetailPage({ params }: Props) {
             <p className="muted">Return later to see speeches, flyers, videos, and manifesto updates.</p>
           </section>
         ) : (
-          <div className="candidate-material-gallery">
-            {candidate.materials.map((material) => (
-              <article key={material.id} className="candidate-material-card">
-                {renderMaterialPreview(material)}
-                <div className="candidate-material-copy">
-                  <p className="eyebrow">{material.mediaType}</p>
-                  <h3>{material.title}</h3>
-                  <p>{material.content}</p>
-                  {material.mediaUrl ? (
-                    <a href={material.mediaUrl} target="_blank" rel="noreferrer">
-                      Open media
-                    </a>
-                  ) : null}
-                  <p className="muted">{new Date(material.createdAt).toLocaleString()}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className="badge-row" style={{ marginBottom: 16 }}>
+              {Object.entries(materialBreakdown).map(([mediaType, count]) => (
+                <span key={mediaType} className="status-badge live">
+                  {mediaType}: {count}
+                </span>
+              ))}
+            </div>
+            <div className="candidate-material-gallery">
+              {candidate.materials.map((material) => (
+                <article key={material.id} className="candidate-material-card">
+                  {renderMaterialPreview(material)}
+                  <div className="candidate-material-copy">
+                    <p className="eyebrow">{material.mediaType}</p>
+                    <h3>{material.title}</h3>
+                    <p>{material.content}</p>
+                    {material.mediaUrl ? (
+                      <a href={material.mediaUrl} target="_blank" rel="noreferrer">
+                        Open media
+                      </a>
+                    ) : null}
+                    <p className="muted">{new Date(material.createdAt).toLocaleString()}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </section>
 
@@ -289,6 +313,13 @@ export default function CandidateDetailPage({ params }: Props) {
                   <h3>{event.title}</h3>
                   <p>{event.description}</p>
                   <p className="muted">{new Date(event.startsAt).toLocaleString()} | {event.venue}</p>
+                  <p className="muted">
+                    {[
+                      event.territoryLabels.state || "National",
+                      event.territoryLabels.lga,
+                      event.territoryLabels.ward,
+                    ].filter(Boolean).join(" | ")}
+                  </p>
                   <p className="muted">Voters confirm attendance inside their account with RSVP.</p>
                   <Link href="/login">Voter login to RSVP</Link>
                 </div>
