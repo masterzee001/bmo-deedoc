@@ -133,6 +133,19 @@ export const CAMPAIGN_EVENT_RSVP_STATUSES = [
   "GOING",
 ] as const;
 
+export const ELECTION_DAY_OPENING_STATUSES = [
+  "OPENED_ON_TIME",
+  "OPENED_LATE",
+  "NOT_OPEN",
+] as const;
+
+export const ELECTION_DAY_REPORT_STATUSES = [
+  "SUBMITTED",
+  "UNDER_REVIEW",
+  "APPROVED",
+  "REJECTED",
+] as const;
+
 export type UserRole = (typeof USER_ROLES)[number];
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export type CandidateOfficeType = (typeof CANDIDATE_OFFICE_TYPES)[number];
@@ -150,6 +163,8 @@ export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
 export type VoterEngagementTaskType = (typeof VOTER_ENGAGEMENT_TASK_TYPES)[number];
 export type CampaignMediaType = (typeof CAMPAIGN_MEDIA_TYPES)[number];
 export type CampaignEventRsvpStatus = (typeof CAMPAIGN_EVENT_RSVP_STATUSES)[number];
+export type ElectionDayOpeningStatus = (typeof ELECTION_DAY_OPENING_STATUSES)[number];
+export type ElectionDayReportStatus = (typeof ELECTION_DAY_REPORT_STATUSES)[number];
 
 export type TerritoryScope = {
   geoPoliticalZoneId?: string | null;
@@ -676,11 +691,47 @@ export type NotificationItem = {
 export type AuditLogItem = {
   id: string;
   actorUserId: string;
+  actorName: string;
   action: string;
   targetType: string;
   targetId: string;
   metadataJson: string | null;
   createdAt: string;
+};
+
+export type ElectionDayVoteEntry = {
+  politicalPartyId: string;
+  politicalPartyName: string | null;
+  votes: number;
+};
+
+export type ElectionDayReportItem = {
+  id: string;
+  agentUserId: string;
+  agentName: string;
+  reviewedByUserId: string | null;
+  reviewedByName: string | null;
+  reportDate: string;
+  status: ElectionDayReportStatus;
+  openingStatus: ElectionDayOpeningStatus;
+  arrivalConfirmedAt: string;
+  turnoutObservation: string;
+  incidentNotes: string | null;
+  remarks: string | null;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  voteEntries: ElectionDayVoteEntry[];
+  arrivalPhotoAssetId: string;
+  postCountingPhotoAssetId: string;
+  territory: TerritorySummary;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ElectionDayReportAssetItem = {
+  id: string;
+  fileName: string;
+  fileUrl: string;
 };
 
 export type FieldTaskItem = {

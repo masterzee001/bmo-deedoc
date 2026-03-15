@@ -141,6 +141,24 @@ enum CandidateMediaAssetKind {
   EVENT_COVER
 }
 
+enum ElectionDayOpeningStatus {
+  OPENED_ON_TIME
+  OPENED_LATE
+  NOT_OPEN
+}
+
+enum ElectionDayReportStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum ElectionDayReportAssetKind {
+  ARRIVAL_PHOTO
+  POST_COUNTING_PHOTO
+}
+
 model User {
   id                     String                     @id @default(cuid())
   name                   String
@@ -188,6 +206,9 @@ model User {
   candidateCampaignEvents CampaignEvent[]           @relation("CampaignEventCandidate")
   campaignEventRsvps     CampaignEventRsvp[]
   candidateMediaAssets   CandidateMediaAsset[]      @relation("CandidateMediaOwner")
+  electionDayReports     ElectionDayReport[]        @relation("ElectionDayReportAgent")
+  reviewedElectionDayReports ElectionDayReport[]    @relation("ElectionDayReportReviewer")
+  electionDayReportAssets ElectionDayReportAsset[]  @relation("ElectionDayReportAssetOwner")
 
   @@index([role])
   @@index([isActive])
@@ -904,6 +925,80 @@ model AuditLog {
   @@index([createdAt])
 }
 
+model ElectionDayReportAsset {
+  id             String                      @id @default(cuid())
+  ownerUserId    String
+  kind           ElectionDayReportAssetKind
+  fileName       String
+  mimeType       String
+  data           Bytes
+  sizeBytes      Int
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  ownerUser      User                        @relation("ElectionDayReportAssetOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  arrivalReport  ElectionDayReport?         @relation("ElectionDayReportArrivalPhoto")
+  postCountingReport ElectionDayReport?     @relation("ElectionDayReportPostCountingPhoto")
+
+  @@index([ownerUserId])
+  @@index([kind])
+  @@index([createdAt])
+}
+
+model ElectionDayReport {
+  id                    String                    @id @default(cuid())
+  agentUserId           String
+  reviewedByUserId      String?
+  reportDate            DateTime
+  status                ElectionDayReportStatus  @default(SUBMITTED)
+  openingStatus         ElectionDayOpeningStatus
+  arrivalConfirmedAt    DateTime
+  turnoutObservation    String
+  incidentNotes         String?
+  remarks               String?
+  reviewNote            String?
+  voteEntriesJson       Json
+  arrivalPhotoAssetId   String                    @unique
+  postCountingPhotoAssetId String                 @unique
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  lgaId                 String
+  wardId                String
+  stateConstituencyId   String?
+  pollingUnitId         String
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  reviewedAt            DateTime?
+  agentUser             User                      @relation("ElectionDayReportAgent", fields: [agentUserId], references: [id], onDelete: Cascade)
+  reviewedByUser        User?                     @relation("ElectionDayReportReviewer", fields: [reviewedByUserId], references: [id])
+  arrivalPhotoAsset     ElectionDayReportAsset    @relation("ElectionDayReportArrivalPhoto", fields: [arrivalPhotoAssetId], references: [id], onDelete: Restrict)
+  postCountingPhotoAsset ElectionDayReportAsset   @relation("ElectionDayReportPostCountingPhoto", fields: [postCountingPhotoAssetId], references: [id], onDelete: Restrict)
+  geoPoliticalZone      GeoPoliticalZone?         @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                     @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?       @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency?      @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA                       @relation(fields: [lgaId], references: [id])
+  ward                  Ward                      @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?        @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit               @relation(fields: [pollingUnitId], references: [id])
+
+  @@unique([agentUserId, pollingUnitId, reportDate])
+  @@index([status])
+  @@index([agentUserId])
+  @@index([reviewedByUserId])
+  @@index([reportDate])
+  @@index([geoPoliticalZoneId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([stateConstituencyId])
+  @@index([pollingUnitId])
+  @@index([createdAt])
+}
+
 model MediaAttachment {
   id             String    @id @default(cuid())
   uploaderUserId String
@@ -942,6 +1037,7 @@ model GeoPoliticalZone {
   broadcastMessages  BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents     CampaignEvent[]
+  electionDayReports ElectionDayReport[]
 }
 
 model PoliticalParty {
@@ -988,6 +1084,7 @@ model State {
   broadcastMessages     BroadcastMessage[]
   voterEngagementTasks  VoterEngagementTask[]
   campaignEvents        CampaignEvent[]
+  electionDayReports    ElectionDayReport[]
   @@index([geoPoliticalZoneId])
 }
 
@@ -1011,6 +1108,7 @@ model SenatorialDistrict {
   broadcastMessages     BroadcastMessage[]
   voterEngagementTasks  VoterEngagementTask[]
   campaignEvents        CampaignEvent[]
+  electionDayReports    ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1035,6 +1133,7 @@ model FederalConstituency {
   broadcastMessages    BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents       CampaignEvent[]
+  electionDayReports   ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1064,6 +1163,7 @@ model LGA {
   broadcastMessages   BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents      CampaignEvent[]
+  electionDayReports  ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1092,6 +1192,7 @@ model Ward {
   broadcastMessages BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents    CampaignEvent[]
+  electionDayReports ElectionDayReport[]
 
   @@unique([lgaId, name])
   @@index([stateId])
@@ -1117,6 +1218,7 @@ model StateConstituency {
   broadcastMessages BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents    CampaignEvent[]
+  electionDayReports ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1147,6 +1249,7 @@ model PollingUnit {
   broadcastMessages BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents    CampaignEvent[]
+  electionDayReports ElectionDayReport[]
 
   @@unique([wardId, name])
   @@index([stateId])

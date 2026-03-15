@@ -202,6 +202,11 @@ export default function AgentDashboardPage() {
           {user.agentProfile?.wardId}
         </p>
         <p className="muted">Polling unit: {user.agentProfile?.pollingUnitId || "Not assigned"}</p>
+        <p style={{ marginTop: 12 }}>
+          <Link href="/agent/election-report" className="button">
+            Submit Election Report
+          </Link>
+        </p>
       </section>
 
       <section className="grid stats">

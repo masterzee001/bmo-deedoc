@@ -10,6 +10,7 @@ const items = [
   { href: "/admin/operations/coverage", label: "Coverage" },
   { href: "/admin/communications", label: "Communications" },
   { href: "/admin/incidents", label: "Incidents" },
+  { href: "/admin/election-reports", label: "Election Reports" },
   { href: "/admin/rewards", label: "Rewards" },
   { href: "/admin/activity", label: "Activity" },
   { href: "/admin/manage/territory", label: "Select Territory" },

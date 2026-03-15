@@ -25,6 +25,8 @@ import type {
   PollingUnitItem,
   PollingUnitCoverageSummary,
   CoverageInsights,
+  ElectionDayReportAssetItem,
+  ElectionDayReportItem,
   PoliticalPartyItem,
   PoliticalPartyPublicProfile,
   PollListItem,
@@ -1021,7 +1023,7 @@ export async function deletePoliticalParty(token: string, partyId: string) {
 
 export async function fetchAuditLogs(
   token: string,
-  query?: { actorUserId?: string; action?: string; targetType?: string },
+  query?: { actorUserId?: string; action?: string; targetType?: string; dateFrom?: string; dateTo?: string },
 ): Promise<AuditLogItem[]> {
   const params = new URLSearchParams();
   if (query?.actorUserId) {
@@ -1032,6 +1034,12 @@ export async function fetchAuditLogs(
   }
   if (query?.targetType) {
     params.set("targetType", query.targetType);
+  }
+  if (query?.dateFrom) {
+    params.set("dateFrom", query.dateFrom);
+  }
+  if (query?.dateTo) {
+    params.set("dateTo", query.dateTo);
   }
 
   const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -1052,6 +1060,67 @@ export async function fetchCandidatePosts(token: string): Promise<PostListItem[]
 
   const payload = await readJson<{ posts: PostListItem[] }>(response);
   return payload.posts;
+}
+
+export async function fetchAdminElectionDayReports(
+  token: string,
+  query?: { status?: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED"; reportDate?: string },
+): Promise<ElectionDayReportItem[]> {
+  const params = new URLSearchParams();
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+  if (query?.reportDate) {
+    params.set("reportDate", query.reportDate);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/admin/election-day-reports${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ reports: ElectionDayReportItem[] }>(response);
+  return payload.reports;
+}
+
+export async function updateAdminElectionDayReportStatus(
+  token: string,
+  reportId: string,
+  body: { status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED"; reviewNote?: string },
+): Promise<{ message: string; report: ElectionDayReportItem }> {
+  const response = await fetch(`${API_BASE_URL}/admin/election-day-reports/${reportId}/status`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; report: ElectionDayReportItem }>(response);
+}
+
+export async function fetchAdminElectionDayReportAsset(token: string, assetId: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/admin/election-day-report-assets/${assetId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    let message = "Request failed.";
+    try {
+      const payload = await response.json();
+      message = payload.message || message;
+      throw new ApiError(message, response.status, payload);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(message, response.status);
+    }
+  }
+
+  return response.blob();
 }
 
 export async function fetchCandidateProfileEditor(token: string): Promise<CandidateProfileEditorItem> {
@@ -1539,6 +1608,82 @@ export async function fetchAgentTasks(token: string): Promise<FieldTaskItem[]> {
 
   const payload = await readJson<{ tasks: FieldTaskItem[] }>(response);
   return payload.tasks;
+}
+
+export async function fetchAgentElectionDayReports(token: string): Promise<ElectionDayReportItem[]> {
+  const response = await fetch(`${API_BASE_URL}/agent/election-reports`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ reports: ElectionDayReportItem[] }>(response);
+  return payload.reports;
+}
+
+export async function uploadAgentElectionReportPhoto(
+  token: string,
+  kind: "arrival-photo" | "post-counting-photo",
+  file: File,
+): Promise<{ message: string; asset: ElectionDayReportAssetItem }> {
+  const response = await fetch(`${API_BASE_URL}/agent/election-report-assets/${kind}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": file.type,
+      "X-File-Name": file.name,
+    },
+    body: file,
+  });
+
+  return readJson<{ message: string; asset: ElectionDayReportAssetItem }>(response);
+}
+
+export async function createAgentElectionDayReport(
+  token: string,
+  body: {
+    reportDate: string;
+    openingStatus: "OPENED_ON_TIME" | "OPENED_LATE" | "NOT_OPEN";
+    arrivalConfirmedAt: string;
+    turnoutObservation: string;
+    incidentNotes?: string;
+    remarks?: string;
+    arrivalPhotoAssetId: string;
+    postCountingPhotoAssetId: string;
+    voteEntries: Array<{ politicalPartyId: string; votes: number }>;
+  },
+): Promise<{ message: string; report: ElectionDayReportItem }> {
+  const response = await fetch(`${API_BASE_URL}/agent/election-reports`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; report: ElectionDayReportItem }>(response);
+}
+
+export async function fetchAgentElectionDayReportAsset(token: string, assetId: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/agent/election-report-assets/${assetId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    let message = "Request failed.";
+    try {
+      const payload = await response.json();
+      message = payload.message || message;
+      throw new ApiError(message, response.status, payload);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(message, response.status);
+    }
+  }
+
+  return response.blob();
 }
 
 export async function createAgentActivity(

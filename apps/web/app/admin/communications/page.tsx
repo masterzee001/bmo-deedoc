@@ -25,6 +25,8 @@ import {
   previewAdminBroadcast,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { ConfirmDialog } from "../../../components/confirm-dialog";
+import { FeedbackBanner } from "../../../components/feedback-banner";
 import { describeTerritory } from "../../../components/admin-management-utils";
 
 const adminLevels: AdminLevel[] = ["NATIONAL", "GEO_POLITICAL_ZONE", "STATE", "SENATORIAL", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "LGA", "WARD"];
@@ -80,6 +82,7 @@ export default function AdminCommunicationsPage() {
   );
   const [previewSignature, setPreviewSignature] = useState("");
   const previewIsStale = preview && previewSignature !== previewKey;
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const canSend =
     !submitting &&
     !previewLoading &&
@@ -190,8 +193,7 @@ export default function AdminCommunicationsPage() {
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitCommunication() {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
       setError("Authentication is required.");
@@ -205,11 +207,6 @@ export default function AdminCommunicationsPage() {
 
     if (preview.recipientCount === 0) {
       setError("No visible recipients match the current communication target.");
-      return;
-    }
-
-    const confirmed = window.confirm(`Send this communication to ${preview.recipientCount} previewed recipients?`);
-    if (!confirmed) {
       return;
     }
 
@@ -248,8 +245,14 @@ export default function AdminCommunicationsPage() {
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not send the communication.");
     } finally {
+      setConfirmOpen(false);
       setSubmitting(false);
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setConfirmOpen(true);
   }
 
   if (loading) {
@@ -275,7 +278,8 @@ export default function AdminCommunicationsPage() {
   }
 
   return (
-    <main className="shell">
+    <>
+      <main className="shell">
       <section className="panel hero">
         <p className="eyebrow">Communications</p>
         <h1>Targeted messaging</h1>
@@ -292,8 +296,8 @@ export default function AdminCommunicationsPage() {
       </section>
 
       <AdminNav />
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      <FeedbackBanner tone="error" message={error} />
+      <FeedbackBanner tone="success" message={message} />
 
       <section className="grid" style={{ gridTemplateColumns: "minmax(320px, 2fr) minmax(280px, 1fr)", gap: 24 }}>
         <section className="panel card">
@@ -495,6 +499,16 @@ export default function AdminCommunicationsPage() {
           </div>
         )}
       </section>
-    </main>
+      </main>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Confirm communication send"
+        description={preview ? `Send this communication to ${preview.recipientCount} previewed recipients?` : ""}
+        confirmLabel="Send Communication"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => void submitCommunication()}
+        busy={submitting}
+      />
+    </>
   );
 }

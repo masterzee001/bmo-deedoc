@@ -162,6 +162,48 @@ textarea {
   color: var(--muted);
 }
 
+.feedback-banner {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.feedback-banner.success {
+  border-color: rgba(11, 143, 71, 0.24);
+  color: var(--flag-green);
+}
+
+.feedback-banner.error {
+  border-color: rgba(161, 40, 40, 0.24);
+  color: var(--danger);
+}
+
+.feedback-banner.info {
+  border-color: rgba(12, 107, 79, 0.22);
+  color: var(--accent);
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(20, 26, 20, 0.34);
+  z-index: 90;
+}
+
+.dialog-card {
+  width: min(100%, 420px);
+  padding: 24px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
 .grid {
   display: grid;
   gap: 16px;

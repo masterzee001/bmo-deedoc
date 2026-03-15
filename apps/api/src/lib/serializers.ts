@@ -23,6 +23,9 @@ import type {
   PollingUnitCoverageInsight,
   WardCoverageInsight,
   CoverageInsights,
+  ElectionDayReportAssetItem,
+  ElectionDayReportItem,
+  ElectionDayVoteEntry,
   PollListItem,
   RewardBalanceSummary,
   RewardLedgerItem,
@@ -624,6 +627,7 @@ export function serializeNotificationItem(notification: {
 export function serializeAuditLogItem(log: {
   id: string;
   actorUserId: string;
+  actorUser?: { name: string } | null;
   action: string;
   targetType: string;
   targetId: string;
@@ -633,11 +637,87 @@ export function serializeAuditLogItem(log: {
   return {
     id: log.id,
     actorUserId: log.actorUserId,
+    actorName: log.actorUser?.name || "Unknown user",
     action: log.action,
     targetType: log.targetType,
     targetId: log.targetId,
     metadataJson: log.metadataJson,
     createdAt: log.createdAt.toISOString(),
+  };
+}
+
+export function serializeElectionDayReportAssetItem(asset: {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+}): ElectionDayReportAssetItem {
+  return {
+    id: asset.id,
+    fileName: asset.fileName,
+    fileUrl: asset.fileUrl,
+  };
+}
+
+export function serializeElectionDayVoteEntries(
+  entries: Array<{ politicalPartyId: string; politicalPartyName: string | null; votes: number }>,
+): ElectionDayVoteEntry[] {
+  return entries.map((entry) => ({
+    politicalPartyId: entry.politicalPartyId,
+    politicalPartyName: entry.politicalPartyName,
+    votes: entry.votes,
+  }));
+}
+
+export function serializeElectionDayReportItem(report: {
+  id: string;
+  agentUserId: string;
+  reviewedByUserId: string | null;
+  reportDate: Date;
+  status: ElectionDayReportItem["status"];
+  openingStatus: ElectionDayReportItem["openingStatus"];
+  arrivalConfirmedAt: Date;
+  turnoutObservation: string;
+  incidentNotes: string | null;
+  remarks: string | null;
+  reviewNote: string | null;
+  reviewedAt: Date | null;
+  voteEntries: ElectionDayVoteEntry[];
+  arrivalPhotoAssetId: string;
+  postCountingPhotoAssetId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  geoPoliticalZoneId?: string | null;
+  stateId?: string | null;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId?: string | null;
+  wardId?: string | null;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+  agentUser?: { name: string } | null;
+  reviewedByUser?: { name: string } | null;
+}): ElectionDayReportItem {
+  return {
+    id: report.id,
+    agentUserId: report.agentUserId,
+    agentName: report.agentUser?.name || "Unknown agent",
+    reviewedByUserId: report.reviewedByUserId,
+    reviewedByName: report.reviewedByUser?.name || null,
+    reportDate: report.reportDate.toISOString(),
+    status: report.status,
+    openingStatus: report.openingStatus,
+    arrivalConfirmedAt: report.arrivalConfirmedAt.toISOString(),
+    turnoutObservation: report.turnoutObservation,
+    incidentNotes: report.incidentNotes,
+    remarks: report.remarks,
+    reviewNote: report.reviewNote,
+    reviewedAt: report.reviewedAt ? report.reviewedAt.toISOString() : null,
+    voteEntries: serializeElectionDayVoteEntries(report.voteEntries),
+    arrivalPhotoAssetId: report.arrivalPhotoAssetId,
+    postCountingPhotoAssetId: report.postCountingPhotoAssetId,
+    territory: serializeTerritory(report),
+    createdAt: report.createdAt.toISOString(),
+    updatedAt: report.updatedAt.toISOString(),
   };
 }
 

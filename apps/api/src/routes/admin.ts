@@ -6,6 +6,7 @@ import {
   AssignmentPermissionType,
   BroadcastAudience,
   CandidateOfficeType,
+  ElectionDayReportStatus,
   FieldTaskPriority,
   FieldTaskStatus,
   IncidentSeverity,
@@ -39,6 +40,7 @@ import {
   serializePollingUnitCoverageSummary,
   serializeCoverageInsights,
   serializeAuditLogItem,
+  serializeElectionDayReportItem,
   serializeFieldTaskItem,
   serializeNotificationItem,
   serializeRewardHistoryItem,
@@ -266,6 +268,16 @@ const incidentStatusUpdateSchema = z.object({
 
 const incidentAssignSchema = z.object({
   assignedAdminUserId: z.string().trim().min(1),
+});
+
+const electionDayReportQuerySchema = z.object({
+  status: z.nativeEnum(ElectionDayReportStatus).optional(),
+  reportDate: z.string().date().optional(),
+});
+
+const electionDayReportStatusSchema = z.object({
+  status: z.nativeEnum(ElectionDayReportStatus),
+  reviewNote: z.string().trim().max(1000).optional(),
 });
 
 const redemptionReviewSchema = z.object({
@@ -982,6 +994,36 @@ function getTodayStart() {
   return today;
 }
 
+function parseElectionDayVoteEntries(
+  value: Prisma.JsonValue,
+): Array<{ politicalPartyId: string; politicalPartyName: string | null; votes: number }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const record = entry as Record<string, Prisma.JsonValue>;
+      const politicalPartyId = typeof record.politicalPartyId === "string" ? record.politicalPartyId : null;
+      const politicalPartyName = typeof record.politicalPartyName === "string" ? record.politicalPartyName : null;
+      const votes = typeof record.votes === "number" ? record.votes : null;
+      if (!politicalPartyId || votes === null) {
+        return null;
+      }
+
+      return {
+        politicalPartyId,
+        politicalPartyName,
+        votes,
+      };
+    })
+    .filter((entry): entry is { politicalPartyId: string; politicalPartyName: string | null; votes: number } => Boolean(entry));
+}
+
 function validateBroadcastTargeting(data: z.infer<typeof broadcastCreationSchema>) {
   if (data.taskStatus && !["AGENTS", "ALL"].includes(data.audience)) {
     return "Task-status targeting is only available for agent-inclusive broadcasts.";
@@ -1166,6 +1208,24 @@ async function canViewAuditLog(
     });
 
     return Boolean(broadcast && isWithinAdminScope(actor, broadcast));
+  }
+
+  if (log.targetType === "ElectionDayReport") {
+    const report = await prisma.electionDayReport.findUnique({
+      where: { id: log.targetId },
+      select: {
+        geoPoliticalZoneId: true,
+        stateId: true,
+        senatorialDistrictId: true,
+        federalConstituencyId: true,
+        lgaId: true,
+        wardId: true,
+        stateConstituencyId: true,
+        pollingUnitId: true,
+      },
+    });
+
+    return Boolean(report && canCreateAgentInScope(actor, report));
   }
 
   if (log.targetType === "Poll") {
@@ -3521,6 +3581,163 @@ router.patch("/incidents/:incidentId/escalate", requireAuth, requireRole("ADMIN"
   });
 });
 
+router.get("/election-day-reports", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = electionDayReportQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid election-day report query.", errors: parsed.error.flatten() });
+  }
+
+  const reports = await prisma.electionDayReport.findMany({
+    where: {
+      ...(request.authUser && !isSuperAdmin(request.authUser)
+        ? toScopeFilter(getAgentScopeFilter(request.authUser))
+        : {}),
+      status: parsed.data.status,
+      reportDate: parsed.data.reportDate ? new Date(`${parsed.data.reportDate}T00:00:00.000Z`) : undefined,
+    },
+    include: {
+      agentUser: { select: { name: true } },
+      reviewedByUser: { select: { name: true } },
+    },
+    orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
+    take: 100,
+  });
+
+  return response.json({
+    reports: reports.map((report) =>
+      serializeElectionDayReportItem({
+        ...report,
+        voteEntries: parseElectionDayVoteEntries(report.voteEntriesJson),
+      }),
+    ),
+  });
+});
+
+router.get("/election-day-report-assets/:assetId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const assetId = readRouteId(response, request.params.assetId, "asset id");
+  if (!assetId) {
+    return;
+  }
+
+  const asset = await prisma.electionDayReportAsset.findUnique({
+    where: { id: assetId },
+    include: {
+      arrivalReport: {
+        select: {
+          geoPoliticalZoneId: true,
+          stateId: true,
+          senatorialDistrictId: true,
+          federalConstituencyId: true,
+          lgaId: true,
+          wardId: true,
+          stateConstituencyId: true,
+          pollingUnitId: true,
+        },
+      },
+      postCountingReport: {
+        select: {
+          geoPoliticalZoneId: true,
+          stateId: true,
+          senatorialDistrictId: true,
+          federalConstituencyId: true,
+          lgaId: true,
+          wardId: true,
+          stateConstituencyId: true,
+          pollingUnitId: true,
+        },
+      },
+    },
+  });
+
+  if (!asset) {
+    return response.status(404).json({ message: "Election report asset was not found." });
+  }
+
+  const relatedReport = asset.arrivalReport || asset.postCountingReport;
+  if (!relatedReport || (request.authUser && !isSuperAdmin(request.authUser) && !canCreateAgentInScope(request.authUser, relatedReport))) {
+    return response.status(403).json({ message: "You do not have permission to view this election report asset." });
+  }
+
+  response.setHeader("Content-Type", asset.mimeType);
+  response.setHeader("Content-Length", asset.data.length.toString());
+  response.setHeader("Cache-Control", "private, max-age=300");
+  response.setHeader("Last-Modified", asset.updatedAt.toUTCString());
+  return response.send(Buffer.from(asset.data));
+});
+
+router.patch("/election-day-reports/:reportId/status", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = electionDayReportStatusSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid election-day report review payload.", errors: parsed.error.flatten() });
+  }
+
+  const reportId = readRouteId(response, request.params.reportId, "report id");
+  if (!reportId) {
+    return;
+  }
+
+  const report = await prisma.electionDayReport.findUnique({
+    where: { id: reportId },
+    include: {
+      agentUser: { select: { name: true } },
+      reviewedByUser: { select: { name: true } },
+    },
+  });
+
+  if (!report) {
+    return response.status(404).json({ message: "Election-day report was not found." });
+  }
+
+  if (request.authUser && !isSuperAdmin(request.authUser) && !canCreateAgentInScope(request.authUser, report)) {
+    return response.status(403).json({ message: "You do not have permission to review this election-day report." });
+  }
+
+  const updatedReport = await prisma.$transaction(async (transaction) => {
+    const nextReport = await transaction.electionDayReport.update({
+      where: { id: report.id },
+      data: {
+        status: parsed.data.status,
+        reviewNote: parsed.data.reviewNote?.trim() || null,
+        reviewedByUserId: request.authUser!.id,
+        reviewedAt: new Date(),
+      },
+      include: {
+        agentUser: { select: { name: true } },
+        reviewedByUser: { select: { name: true } },
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: nextReport.agentUserId,
+      type: NotificationType.SYSTEM,
+      title: "Election-day report reviewed",
+      message: `Your election-day report is now ${nextReport.status}.`,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_REPORT_STATUS_UPDATED",
+      targetType: "ElectionDayReport",
+      targetId: nextReport.id,
+      territory: nextReport,
+      metadata: {
+        status: nextReport.status,
+        reviewNote: parsed.data.reviewNote?.trim() || null,
+      },
+    });
+
+    return nextReport;
+  });
+
+  return response.json({
+    message: "Election-day report status updated successfully.",
+    report: serializeElectionDayReportItem({
+      ...updatedReport,
+      voteEntries: parseElectionDayVoteEntries(updatedReport.voteEntriesJson),
+    }),
+  });
+});
+
 router.get("/tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const tasks = await prisma.fieldTask.findMany({
     where: getFieldTaskScopeFilter(request.authUser),
@@ -4708,6 +4925,11 @@ router.get("/audit-logs", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asyn
       action: parsed.data.action,
       targetType: parsed.data.targetType,
       createdAt: getDateRange(parsed.data),
+    },
+    include: {
+      actorUser: {
+        select: { name: true },
+      },
     },
     orderBy: { createdAt: "desc" },
     take: 100,

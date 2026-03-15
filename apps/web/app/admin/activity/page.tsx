@@ -6,6 +6,7 @@ import type { AuditLogItem, AuthUserProfile } from "@pics-nigeria/shared";
 import { ApiError, fetchAuditLogs, fetchCurrentUser } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import { FeedbackBanner } from "../../../components/feedback-banner";
 
 const actionOptions = [
   "",
@@ -24,6 +25,8 @@ const actionOptions = [
   "INCIDENT_STATUS_UPDATED",
   "INCIDENT_ASSIGNED",
   "INCIDENT_ESCALATED",
+  "ELECTION_DAY_REPORT_SUBMITTED",
+  "ELECTION_DAY_REPORT_STATUS_UPDATED",
   "BROADCAST_CREATED",
   "REWARD_REDEMPTION_APPROVED",
   "REWARD_REDEMPTION_REJECTED",
@@ -39,6 +42,7 @@ const targetTypeOptions = [
   "RewardRedemption",
   "BroadcastMessage",
   "Poll",
+  "ElectionDayReport",
 ] as const;
 
 function parseMetadata(metadataJson: string | null) {
@@ -53,20 +57,28 @@ function parseMetadata(metadataJson: string | null) {
   }
 }
 
+function toIsoDateTime(value: string) {
+  return value ? new Date(value).toISOString() : undefined;
+}
+
 export default function AdminActivityPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [action, setAction] = useState("");
   const [targetType, setTargetType] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadPage(token: string, nextAction?: string, nextTargetType?: string) {
+  async function loadPage(token: string, nextAction?: string, nextTargetType?: string, nextDateFrom?: string, nextDateTo?: string) {
     const [currentUser, logs] = await Promise.all([
       fetchCurrentUser(token),
       fetchAuditLogs(token, {
         action: nextAction || undefined,
         targetType: nextTargetType || undefined,
+        dateFrom: toIsoDateTime(nextDateFrom || ""),
+        dateTo: toIsoDateTime(nextDateTo || ""),
       }),
     ]);
 
@@ -107,7 +119,7 @@ export default function AdminActivityPage() {
     try {
       setLoading(true);
       setError("");
-      await loadPage(token, action, targetType);
+      await loadPage(token, action, targetType, dateFrom, dateTo);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not filter activity history.");
     } finally {
@@ -155,7 +167,7 @@ export default function AdminActivityPage() {
       </section>
 
       <AdminNav />
-      {error ? <p className="error">{error}</p> : null}
+      <FeedbackBanner tone="error" message={error} />
 
       <section className="panel card">
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
@@ -178,6 +190,14 @@ export default function AdminActivityPage() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="field">
+            <span>Date from</span>
+            <input type="datetime-local" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Date to</span>
+            <input type="datetime-local" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
           </label>
         </div>
         <div className="action-row" style={{ marginTop: 16 }}>
@@ -204,6 +224,7 @@ export default function AdminActivityPage() {
               <article key={item.id} className="reward-item">
                 <strong>{item.action}</strong>
                 <p>{item.targetType} | {item.targetId}</p>
+                <p className="muted">Actor: {item.actorName}</p>
                 <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
                 {item.metadata ? (
                   <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem", margin: 0 }}>
