@@ -833,7 +833,11 @@ export async function updateAgent(token: string, userId: string, body: {
   return readJson(response);
 }
 
-export async function setUserActivation(token: string, userId: string, isActive: boolean) {
+export async function setUserActivation(
+  token: string,
+  userId: string,
+  isActive: boolean,
+): Promise<{ message: string; user: AuthUserProfile | null }> {
   const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/deactivation`, {
     method: "PATCH",
     headers: {
@@ -947,7 +951,19 @@ export async function uploadCandidateImage(
     body: file,
   });
 
-  return readJson(response);
+  return readJson<{ message: string; asset: { id: string; fileName: string; fileUrl: string | null } }>(response);
+}
+
+export async function deleteManagedUser(
+  token: string,
+  userId: string,
+): Promise<{ message: string; dependencyCounts?: Record<string, number> }> {
+  const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string; dependencyCounts?: Record<string, number> }>(response);
 }
 
 export async function fetchCandidateVoters(token: string): Promise<CandidateVoterItem[]> {

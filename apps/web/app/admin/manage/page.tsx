@@ -2,39 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { AdminUserItem, AgentUserItem, AuthUserProfile, CandidateListItem, ManagedUserItem } from "@pics-nigeria/shared";
-import { ApiError, fetchAdminCandidates, fetchAdminUsers, fetchAgents, fetchCurrentUser, fetchManagedUsers, setUserActivation } from "../../../lib/api";
+import { emptyTerritorySummary } from "@pics-nigeria/shared";
+import type { AuthUserProfile, ManagedUserItem } from "@pics-nigeria/shared";
+import { ApiError, fetchCurrentUser, fetchManagedUsers } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
 
 export default function AdminManagePage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
-  const [adminUsers, setAdminUsers] = useState<AdminUserItem[]>([]);
-  const [candidates, setCandidates] = useState<CandidateListItem[]>([]);
-  const [agents, setAgents] = useState<AgentUserItem[]>([]);
   const [managedUsers, setManagedUsers] = useState<ManagedUserItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-
-  async function loadData(token: string) {
-    const [currentUser, nextAdmins, nextCandidates, nextAgents, nextManagedUsers] = await Promise.all([
-      fetchCurrentUser(token),
-      fetchAdminUsers(token, ""),
-      fetchAdminCandidates(token),
-      fetchAgents(token),
-      fetchManagedUsers(token, { limit: 24 }),
-    ]);
-
-    if (currentUser.role !== "ADMIN" && currentUser.role !== "SUPER_ADMIN") {
-      throw new ApiError("This page is available to admins only.", 403);
-    }
-
-    setUser(currentUser);
-    setAdminUsers(nextAdmins);
-    setCandidates(nextCandidates);
-    setAgents(nextAgents);
-    setManagedUsers(nextManagedUsers);
-  }
 
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
@@ -43,31 +21,21 @@ export default function AdminManagePage() {
       return;
     }
 
-    loadData(token)
+    Promise.all([fetchCurrentUser(token), fetchManagedUsers(token, { limit: 100 })])
+      .then(([currentUser, users]) => {
+        if (currentUser.role !== "ADMIN" && currentUser.role !== "SUPER_ADMIN") {
+          throw new ApiError("This page is available to admins only.", 403);
+        }
+
+        setUser(currentUser);
+        setManagedUsers(users);
+      })
       .catch((caughtError) => {
         localStorage.removeItem("picsNigeriaAdminToken");
-        setError(caughtError instanceof Error ? caughtError.message : "Could not load management workspace.");
+        setError(caughtError instanceof Error ? caughtError.message : "Could not load management overview.");
       })
       .finally(() => setLoading(false));
   }, []);
-
-  async function handleToggleUser(userId: string, isActive: boolean) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
-    if (!token) {
-      setError("Authentication is required.");
-      return;
-    }
-
-    try {
-      setError("");
-      setMessage("");
-      await setUserActivation(token, userId, isActive);
-      await loadData(token);
-      setMessage(isActive ? "User reactivated." : "User deactivated.");
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Could not update user status.");
-    }
-  }
 
   if (loading) {
     return (
@@ -91,94 +59,56 @@ export default function AdminManagePage() {
     );
   }
 
+  const adminCount = managedUsers.filter((item) => item.role === "ADMIN").length;
+  const candidateCount = managedUsers.filter((item) => item.role === "CANDIDATE").length;
+  const agentCount = managedUsers.filter((item) => item.role === "AGENT").length;
+  const voterCount = managedUsers.filter((item) => item.role === "VOTER").length;
+
   return (
     <main className="shell">
       <section className="panel hero">
-        <p className="eyebrow">Management workspace</p>
-        <h1>Users and campaign roles</h1>
-        <p>Use this page for day-to-day management access while the main dashboard stays focused on operations, incidents, coverage, and activity.</p>
+        <p className="eyebrow">{getScopeTitle(user)}</p>
+        <h1>Management workspace</h1>
+        <p>Authority is scoped to {describeTerritory(user.adminProfile || emptyTerritorySummary())}. Choose a territory first, then move into focused user workflows.</p>
       </section>
 
       <AdminNav />
 
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
-
       <section className="grid stats">
         <article className="panel card">
           <h2>Admins</h2>
-          <div className="value">{adminUsers.length}</div>
-          <Link href="/admin/dashboard#admin-management">Open admin management</Link>
+          <div className="value">{adminCount}</div>
         </article>
         <article className="panel card">
           <h2>Candidates</h2>
-          <div className="value">{candidates.length}</div>
-          <Link href="/admin/dashboard#candidate-management">Open candidate management</Link>
+          <div className="value">{candidateCount}</div>
         </article>
         <article className="panel card">
           <h2>Agents</h2>
-          <div className="value">{agents.length}</div>
-          <Link href="/admin/dashboard#agent-management">Open agent management</Link>
+          <div className="value">{agentCount}</div>
         </article>
         <article className="panel card">
-          <h2>Unified users</h2>
-          <div className="value">{managedUsers.length}</div>
-          <Link href="/admin/dashboard#unified-management">Open unified control</Link>
+          <h2>Supporters</h2>
+          <div className="value">{voterCount}</div>
         </article>
       </section>
 
-      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
         <section className="panel card">
-          <h2>Recent admins</h2>
-          <div className="reward-list">
-            {adminUsers.slice(0, 6).map((item) => (
-              <article key={item.userId} className="reward-item">
-                <strong>{item.name}</strong>
-                <p className="muted">{item.adminLevel}</p>
-              </article>
-            ))}
-          </div>
+          <h2>Select Territory</h2>
+          <p className="muted">Start every management workflow by narrowing to the territory you control.</p>
+          <Link href="/admin/manage/territory">Open territory selector</Link>
         </section>
-
         <section className="panel card">
-          <h2>Recent candidates</h2>
-          <div className="reward-list">
-            {candidates.slice(0, 6).map((item) => (
-              <article key={item.userId} className="reward-item">
-                <strong>{item.name}</strong>
-                <p className="muted">{item.officeType}</p>
-              </article>
-            ))}
-          </div>
+          <h2>Manage Users</h2>
+          <p className="muted">Review scoped user lists, open edit workflows, link party assignments, and control activation safely.</p>
+          <Link href="/admin/manage/users">Open user management</Link>
         </section>
-
         <section className="panel card">
-          <h2>Recent agents</h2>
-          <div className="reward-list">
-            {agents.slice(0, 6).map((item) => (
-              <article key={item.userId} className="reward-item">
-                <strong>{item.name}</strong>
-                <p className="muted">{item.phone || "No phone"}</p>
-              </article>
-            ))}
-          </div>
+          <h2>Reference Structures</h2>
+          <p className="muted">Super-admin-only zone and party maintenance stays outside day-to-day user operations.</p>
+          <Link href="/admin/reference">Open reference data</Link>
         </section>
-      </section>
-
-      <section className="panel card" style={{ marginTop: 24 }}>
-        <h2>Scoped unified control</h2>
-        <p className="muted">Fast activation control across the users visible to your current admin scope.</p>
-        <div className="reward-list">
-          {managedUsers.map((item) => (
-            <article key={item.userId} className="reward-item">
-              <strong>{item.name}</strong>
-              <p className="muted">{item.role} | {item.isActive ? "Active" : "Inactive"}</p>
-              <button className="button secondary" type="button" onClick={() => void handleToggleUser(item.userId, !item.isActive)}>
-                {item.isActive ? "Deactivate" : "Reactivate"}
-              </button>
-            </article>
-          ))}
-        </div>
       </section>
     </main>
   );

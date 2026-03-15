@@ -188,6 +188,29 @@ const userDeactivationSchema = z.object({
   isActive: z.boolean(),
 });
 
+type ManagedUserDependencyCounts = {
+  assignedAdmins: number;
+  assignedAgents: number;
+  managedCandidateLinks: number;
+  assignedCandidateLinks: number;
+  createdTasks: number;
+  assignedTasks: number;
+  createdBroadcasts: number;
+  createdPolls: number;
+  authoredPosts: number;
+  candidatePosts: number;
+  createdCampaignEvents: number;
+  candidateCampaignEvents: number;
+  notifications: number;
+  rewardEntries: number;
+  rewardRedemptions: number;
+  agentActivities: number;
+  reportedIncidents: number;
+  feedbackItems: number;
+  voterProfileDependents: number;
+  engagementTaskClaims: number;
+};
+
 const participationSchema = z.object({
   voterUserId: z.string().trim().min(1),
   type: z.string().trim().min(2),
@@ -2289,6 +2312,135 @@ router.patch("/users/:userId/deactivation", requireAuth, requireRole("ADMIN", "S
     message: parsed.data.isActive ? "User reactivated successfully." : "User deactivated successfully.",
     user: await getAuthUserProfile(updatedUser.id),
   });
+});
+
+router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const userId = readRouteId(response, request.params.userId, "user id");
+  if (!userId) {
+    return;
+  }
+
+  if (request.authUser?.id === userId) {
+    return response.status(400).json({ message: "You cannot delete your own account." });
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      adminProfile: true,
+      candidateProfile: true,
+      agentProfile: true,
+      voterProfile: true,
+    },
+  });
+
+  if (!targetUser) {
+    return response.status(404).json({ message: "User not found." });
+  }
+
+  if (targetUser.role === UserRole.SUPER_ADMIN) {
+    return response.status(403).json({ message: "Super admin accounts cannot be deleted from this workflow." });
+  }
+
+  if (targetUser.isActive) {
+    return response.status(400).json({ message: "Deactivate the account before deleting it." });
+  }
+
+  const targetAuth = await getAuthUserProfile(targetUser.id);
+  if (!request.authUser || !targetAuth || !canManageUser(request.authUser, targetAuth)) {
+    return response.status(403).json({ message: "You cannot delete this account." });
+  }
+
+  const [
+    assignedAdmins,
+    assignedAgents,
+    managedCandidateLinks,
+    assignedCandidateLinks,
+    createdTasks,
+    assignedTasks,
+    createdBroadcasts,
+    createdPolls,
+    authoredPosts,
+    candidatePosts,
+    createdCampaignEvents,
+    candidateCampaignEvents,
+    notifications,
+    rewardEntries,
+    rewardRedemptions,
+    agentActivities,
+    reportedIncidents,
+    voterFeedbackItems,
+    agentFeedbackItems,
+    candidateFeedbackItems,
+    voterProfileDependents,
+    engagementTaskClaims,
+  ] = await prisma.$transaction([
+    prisma.adminProfile.count({ where: { userId } }),
+    prisma.agentProfile.count({ where: { assignedAdminUserId: userId } }),
+    prisma.adminCandidateAssignment.count({ where: { adminUserId: userId } }),
+    prisma.adminCandidateAssignment.count({ where: { candidateUserId: userId } }),
+    prisma.fieldTask.count({ where: { createdByUserId: userId } }),
+    prisma.fieldTask.count({ where: { assignedToUserId: userId } }),
+    prisma.broadcastMessage.count({ where: { createdByUserId: userId } }),
+    prisma.poll.count({ where: { createdByUserId: userId } }),
+    prisma.post.count({ where: { authorUserId: userId } }),
+    prisma.post.count({ where: { candidateUserId: userId } }),
+    prisma.campaignEvent.count({ where: { createdByUserId: userId } }),
+    prisma.campaignEvent.count({ where: { candidateUserId: userId } }),
+    prisma.notification.count({ where: { userId } }),
+    prisma.rewardLedger.count({ where: { OR: [{ voterUserId: userId }, { relatedUserId: userId }] } }),
+    prisma.rewardRedemption.count({ where: { OR: [{ voterUserId: userId }, { reviewedByUserId: userId }] } }),
+    prisma.agentActivity.count({ where: { agentUserId: userId } }),
+    prisma.incident.count({ where: { OR: [{ reportedByUserId: userId }, { assignedAdminUserId: userId }, { escalatedByUserId: userId }] } }),
+    prisma.feedback.count({ where: { voterUserId: userId } }),
+    prisma.feedback.count({ where: { agentUserId: userId } }),
+    prisma.feedback.count({ where: { candidateUserId: userId } }),
+    prisma.voterProfile.count({ where: { referredByUserId: userId } }),
+    prisma.voterEngagementClaim.count({ where: { voterUserId: userId } }),
+  ]);
+
+  const dependencyCounts: ManagedUserDependencyCounts = {
+    assignedAdmins,
+    assignedAgents,
+    managedCandidateLinks,
+    assignedCandidateLinks,
+    createdTasks,
+    assignedTasks,
+    createdBroadcasts,
+    createdPolls,
+    authoredPosts,
+    candidatePosts,
+    createdCampaignEvents,
+    candidateCampaignEvents,
+    notifications,
+    rewardEntries,
+    rewardRedemptions,
+    agentActivities,
+    reportedIncidents,
+    feedbackItems: voterFeedbackItems + agentFeedbackItems + candidateFeedbackItems,
+    voterProfileDependents,
+    engagementTaskClaims,
+  };
+
+  const hasDependencies = Object.values(dependencyCounts).some((count) => count > 0);
+  if (hasDependencies) {
+    return response.status(409).json({
+      message: "This account cannot be deleted because operational records still depend on it.",
+      dependencyCounts,
+    });
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  await createAuditLog(prisma, {
+    actorUserId: request.authUser.id,
+    action: "USER_DELETED",
+    targetType: "User",
+    targetId: userId,
+    metadata: { role: targetUser.role },
+  });
+
+  return response.json({ message: "User deleted successfully." });
 });
 
 router.get("/agent-activity-summaries", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {

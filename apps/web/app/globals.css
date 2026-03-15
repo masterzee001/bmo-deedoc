@@ -245,6 +245,11 @@ textarea {
   box-shadow: 0 10px 24px rgba(90, 69, 43, 0.18);
 }
 
+.button.danger {
+  background: linear-gradient(135deg, var(--danger), #c94b4b);
+  box-shadow: 0 10px 24px rgba(161, 40, 40, 0.22);
+}
+
 .error {
   color: var(--danger);
   background: rgba(161, 40, 40, 0.08);
