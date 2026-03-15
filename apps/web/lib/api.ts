@@ -84,7 +84,7 @@ export async function loginUser(email: string, password: string): Promise<{ toke
     body: JSON.stringify({ email, password }),
   });
 
-  return readJson(response);
+  return readJson<{ token: string; user: AuthUserProfile }>(response);
 }
 
 export async function registerVoterUser(body: {
@@ -108,7 +108,7 @@ export async function registerVoterUser(body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile }>(response);
 }
 
 export async function fetchPublicStates(): Promise<StateItem[]> {
@@ -172,7 +172,7 @@ export async function updateCurrentUserProfile(
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile }>(response);
 }
 
 export async function updateCurrentUserPassword(
@@ -188,7 +188,7 @@ export async function updateCurrentUserPassword(
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string }>(response);
 }
 
 export async function fetchVoterRewards(token: string): Promise<RewardsSummary> {
@@ -453,7 +453,15 @@ export async function fetchAdminUsers(token: string, stateId: string, lgaId?: st
 
 export async function fetchManagedUsers(
   token: string,
-  query?: { role?: "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER"; isActive?: boolean; search?: string; limit?: number },
+  query?: {
+    role?: "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER";
+    isActive?: boolean;
+    search?: string;
+    stateId?: string;
+    lgaId?: string;
+    wardId?: string;
+    limit?: number;
+  },
 ): Promise<ManagedUserItem[]> {
   const params = new URLSearchParams();
   if (query?.role) {
@@ -464,6 +472,15 @@ export async function fetchManagedUsers(
   }
   if (query?.search) {
     params.set("search", query.search);
+  }
+  if (query?.stateId) {
+    params.set("stateId", query.stateId);
+  }
+  if (query?.lgaId) {
+    params.set("lgaId", query.lgaId);
+  }
+  if (query?.wardId) {
+    params.set("wardId", query.wardId);
   }
   if (query?.limit) {
     params.set("limit", String(query.limit));
@@ -591,7 +608,7 @@ export async function createAdminUser(token: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function createPoliticalParty(token: string, body: {
@@ -639,7 +656,7 @@ export async function createCandidate(token: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function createAgent(token: string, body: {
@@ -666,7 +683,7 @@ export async function createAgent(token: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function createAdminTask(token: string, body: {
@@ -687,6 +704,32 @@ export async function createAdminTask(token: string, body: {
   });
 
   return readJson<{ message: string; task: FieldTaskItem }>(response);
+}
+
+export async function createAdminBulkTasks(token: string, body: {
+  title: string;
+  description: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  dueAt?: string;
+  agentUserIds?: string[];
+  stateId?: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId?: string;
+  wardId?: string;
+  stateConstituencyId?: string;
+  pollingUnitId?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/admin/tasks/bulk`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; count: number; tasks: FieldTaskItem[] }>(response);
 }
 
 export async function createAdminBroadcast(token: string, body: {
@@ -781,7 +824,7 @@ export async function updateAdminUser(token: string, userId: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function updateCandidate(token: string, userId: string, body: {
@@ -805,7 +848,7 @@ export async function updateCandidate(token: string, userId: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function updateAgent(token: string, userId: string, body: {
@@ -830,7 +873,7 @@ export async function updateAgent(token: string, userId: string, body: {
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; user: AuthUserProfile | null }>(response);
 }
 
 export async function setUserActivation(
@@ -1009,7 +1052,7 @@ export async function createCandidateBroadcast(
     body: JSON.stringify(body),
   });
 
-  return readJson(response);
+  return readJson<{ message: string; broadcast: BroadcastMessageItem }>(response);
 }
 
 export async function createCandidatePost(
@@ -1154,7 +1197,27 @@ export async function fetchCandidateIncidents(
     cache: "no-store",
   });
 
-  return readJson(response);
+  return readJson<{ totalIncidents: number; incidents: IncidentListItem[] }>(response);
+}
+
+export async function fetchCandidateAgentActivitySummaries(token: string): Promise<AgentActivitySummary[]> {
+  const response = await fetch(`${API_BASE_URL}/candidate/agent-activity-summaries`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ agentActivitySummaries: AgentActivitySummary[] }>(response);
+  return payload.agentActivitySummaries;
+}
+
+export async function fetchCandidateMapSummary(token: string): Promise<AdminMapSummary> {
+  const response = await fetch(`${API_BASE_URL}/candidate/map-summary`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ mapSummary: AdminMapSummary }>(response);
+  return payload.mapSummary;
 }
 
 export async function fetchNotifications(token: string): Promise<NotificationItem[]> {

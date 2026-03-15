@@ -1108,8 +1108,13 @@ export default function CandidateDashboardPage() {
                 <p>{item.type} | {item.severity} | {item.status}</p>
               </article>
             ))}
-          </div>
-        </section>
+        </div>
+        <div className="action-row">
+          <Link href="/candidate/operations/live" className="button">
+            Track agent activity
+          </Link>
+        </div>
+      </section>
       </section>
     </main>
   );

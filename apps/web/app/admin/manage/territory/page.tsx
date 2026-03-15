@@ -6,7 +6,9 @@ import { emptyTerritorySummary } from "@pics-nigeria/shared";
 import type { AuthUserProfile, LgaItem, StateItem, WardItem } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchLgas, fetchStates, fetchWards } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
-import { describeTerritory } from "../../../../components/admin-management-utils";
+import { describeTerritory, getManagedRoleLabel, MANAGED_ROLE_OPTIONS } from "../../../../components/admin-management-utils";
+
+type LocatorAction = "manage-users" | "create-user" | "track-agents";
 
 export default function AdminManageTerritoryPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -16,6 +18,8 @@ export default function AdminManageTerritoryPage() {
   const [selectedStateId, setSelectedStateId] = useState("");
   const [selectedLgaId, setSelectedLgaId] = useState("");
   const [selectedWardId, setSelectedWardId] = useState("");
+  const [selectedRole, setSelectedRole] = useState<"" | "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER">("");
+  const [action, setAction] = useState<LocatorAction>("manage-users");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -77,10 +81,18 @@ export default function AdminManageTerritoryPage() {
     if (selectedWardId) {
       params.set("wardId", selectedWardId);
     }
+    if (selectedRole) {
+      params.set("role", selectedRole);
+    }
 
     const query = params.toString();
-    return query ? `/admin/manage/users?${query}` : "/admin/manage/users";
-  }, [selectedLgaId, selectedStateId, selectedWardId]);
+    const basePath = action === "create-user"
+      ? "/admin/manage/create"
+      : action === "track-agents"
+        ? "/admin/operations/live"
+        : "/admin/manage/users";
+    return query ? `${basePath}?${query}` : basePath;
+  }, [action, selectedLgaId, selectedRole, selectedStateId, selectedWardId]);
 
   if (loading) {
     return (
@@ -116,8 +128,25 @@ export default function AdminManageTerritoryPage() {
 
       <section className="panel card">
         <h2>Choose scope</h2>
-        <p className="muted">Only territories already visible to your current admin account should be selected here.</p>
+        <p className="muted">Use the same locator flow for user management, creation, and live agent tracking.</p>
         <div className="form">
+          <label className="field">
+            <span>Action</span>
+            <select value={action} onChange={(event) => setAction(event.target.value as LocatorAction)}>
+              <option value="manage-users">Manage Users</option>
+              <option value="create-user">Create User</option>
+              <option value="track-agents">Track Agents</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Role</span>
+            <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value as "" | "ADMIN" | "CANDIDATE" | "AGENT" | "VOTER")}>
+              <option value="">{action === "track-agents" ? "Agent operations" : "Select role"}</option>
+              {MANAGED_ROLE_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
           <label className="field">
             <span>State</span>
             <select value={selectedStateId} onChange={(event) => setSelectedStateId(event.target.value)}>
@@ -152,8 +181,26 @@ export default function AdminManageTerritoryPage() {
             </select>
           </label>
         </div>
+        <p className="muted" style={{ marginTop: 16 }}>
+          {action === "track-agents"
+            ? "Open scoped live tracking for agents inside the selected territory."
+            : selectedRole
+              ? `Continue with ${getManagedRoleLabel(selectedRole)} records in the selected territory.`
+              : "Select a role before opening user management or create user."}
+        </p>
         <div className="action-row" style={{ marginTop: 16 }}>
-          <Link className="button" href={nextHref}>View users in this scope</Link>
+          <Link
+            className="button"
+            href={nextHref}
+            aria-disabled={action !== "track-agents" && !selectedRole}
+            onClick={(event) => {
+              if (action !== "track-agents" && !selectedRole) {
+                event.preventDefault();
+              }
+            }}
+          >
+            {action === "manage-users" ? "Open scoped users" : action === "create-user" ? "Open create workflow" : "Open live tracking"}
+          </Link>
           <Link className="button secondary" href="/admin/manage">Back to management</Link>
         </div>
       </section>

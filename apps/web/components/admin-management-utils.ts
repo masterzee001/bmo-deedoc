@@ -2,6 +2,17 @@
 
 import type { AuthUserProfile, TerritorySummary } from "@pics-nigeria/shared";
 
+export const MANAGED_ROLE_OPTIONS = [
+  { value: "ADMIN", label: "Admin" },
+  { value: "CANDIDATE", label: "Candidate" },
+  { value: "AGENT", label: "Agent" },
+  { value: "VOTER", label: "Voter / Supporter" },
+] as const;
+
+export function getManagedRoleLabel(role: string): string {
+  return MANAGED_ROLE_OPTIONS.find((item) => item.value === role)?.label || role;
+}
+
 export function getScopeTitle(user: AuthUserProfile | null): string {
   if (!user) {
     return "Scoped operations";

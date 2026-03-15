@@ -105,6 +105,11 @@ export default function AdminManagePage() {
           <Link href="/admin/manage/users">Open user management</Link>
         </section>
         <section className="panel card">
+          <h2>Create User</h2>
+          <p className="muted">Start with territory and role, then create a new admin, candidate, or agent with the right party relationship.</p>
+          <Link href="/admin/manage/create">Open create workflow</Link>
+        </section>
+        <section className="panel card">
           <h2>Reference Structures</h2>
           <p className="muted">Super-admin-only zone and party maintenance stays outside day-to-day user operations.</p>
           <Link href="/admin/reference">Open reference data</Link>

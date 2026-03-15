@@ -7,6 +7,8 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
 import {
+  serializeAdminMapSummary,
+  serializeAgentActivitySummary,
   serializeBroadcastMessageItem,
   serializeCampaignEventItem,
   serializeCandidateProfileEditorItem,
@@ -1270,6 +1272,154 @@ router.get("/incidents", requireAuth, requireRole("CANDIDATE"), async (request, 
   return response.json({
     totalIncidents: incidents.length,
     incidents: incidents.map(serializeIncidentItem),
+  });
+});
+
+router.get("/agent-activity-summaries", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const candidateProfile = request.authUser?.candidateProfile;
+  if (!candidateProfile) {
+    return response.status(403).json({ message: "Candidate profile is required." });
+  }
+
+  const scope = buildCandidateScope(candidateProfile);
+  const agents = await prisma.user.findMany({
+    where: {
+      role: UserRole.AGENT,
+      isActive: true,
+      agentProfile: {
+        is: {
+          ...scope,
+          politicalPartyId: candidateProfile.politicalPartyId || undefined,
+        },
+      },
+    },
+    include: {
+      agentProfile: true,
+      agentActivities: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return response.json({
+    agentActivitySummaries: agents
+      .filter((agent) => agent.agentProfile)
+      .map((agent) => {
+        const latest = agent.agentActivities[0];
+        return serializeAgentActivitySummary({
+          agentUserId: agent.id,
+          name: agent.name,
+          email: agent.email,
+          territory: serializeTerritory(agent.agentProfile!),
+          latestActivityType: latest?.type || null,
+          latestActivityAt: latest?.createdAt.toISOString() || null,
+          latestLatitude: latest?.latitude ?? null,
+          latestLongitude: latest?.longitude ?? null,
+          pollingUnitId: latest?.pollingUnitId || agent.agentProfile?.pollingUnitId || null,
+        });
+      }),
+  });
+});
+
+router.get("/map-summary", requireAuth, requireRole("CANDIDATE"), async (request, response) => {
+  const candidateProfile = request.authUser?.candidateProfile;
+  if (!candidateProfile) {
+    return response.status(403).json({ message: "Candidate profile is required." });
+  }
+
+  const scope = buildCandidateScope(candidateProfile);
+  const [agents, incidents, pollingUnits] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        role: UserRole.AGENT,
+        isActive: true,
+        agentProfile: {
+          is: {
+            ...scope,
+            politicalPartyId: candidateProfile.politicalPartyId || undefined,
+          },
+        },
+      },
+      include: {
+        agentProfile: true,
+        agentActivities: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+      take: 150,
+    }),
+    prisma.incident.findMany({
+      where: {
+        stateId: candidateProfile.stateId || undefined,
+        senatorialDistrictId: candidateProfile.senatorialDistrictId || undefined,
+        lgaId: candidateProfile.lgaId || undefined,
+        wardId: candidateProfile.wardId || undefined,
+        pollingUnitId: candidateProfile.pollingUnitId || undefined,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+    prisma.pollingUnit.findMany({
+      where: {
+        stateId: candidateProfile.stateId || undefined,
+        lgaId: candidateProfile.lgaId || undefined,
+        wardId: candidateProfile.wardId || undefined,
+      },
+      orderBy: { name: "asc" },
+      take: 200,
+    }),
+  ]);
+
+  const activeAgents = agents
+    .filter((agent) => agent.agentProfile)
+    .map((agent) => {
+      const latest = agent.agentActivities[0];
+      return serializeAgentActivitySummary({
+        agentUserId: agent.id,
+        name: agent.name,
+        email: agent.email,
+        territory: serializeTerritory(agent.agentProfile!),
+        latestActivityType: latest?.type || null,
+        latestActivityAt: latest?.createdAt.toISOString() || null,
+        latestLatitude: latest?.latitude ?? null,
+        latestLongitude: latest?.longitude ?? null,
+        pollingUnitId: latest?.pollingUnitId || agent.agentProfile?.pollingUnitId || null,
+      });
+    })
+    .filter((item) => item.latestLatitude !== null && item.latestLongitude !== null);
+
+  const counts = {
+    byStatus: incidents.reduce<Record<string, number>>((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, {}),
+    bySeverity: incidents.reduce<Record<string, number>>((acc, item) => {
+      acc[item.severity] = (acc[item.severity] || 0) + 1;
+      return acc;
+    }, {}),
+    byType: incidents.reduce<Record<string, number>>((acc, item) => {
+      acc[item.type] = (acc[item.type] || 0) + 1;
+      return acc;
+    }, {}),
+  };
+
+  return response.json({
+    mapSummary: serializeAdminMapSummary({
+      activeAgents,
+      incidents: incidents.filter((item) => item.latitude !== null && item.longitude !== null).map(serializeIncidentItem),
+      pollingUnits: pollingUnits.map((unit) => ({
+        id: unit.id,
+        name: unit.name,
+        stateId: unit.stateId,
+        lgaId: unit.lgaId,
+        wardId: unit.wardId,
+      })),
+      counts,
+    }),
   });
 });
 

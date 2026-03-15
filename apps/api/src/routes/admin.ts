@@ -302,6 +302,9 @@ const managedUsersQuerySchema = z.object({
   role: z.nativeEnum(UserRole).optional(),
   isActive: z.enum(["true", "false"]).optional(),
   search: z.string().trim().optional(),
+  stateId: z.string().trim().optional(),
+  lgaId: z.string().trim().optional(),
+  wardId: z.string().trim().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
@@ -322,6 +325,22 @@ const fieldTaskCreationSchema = z.object({
   incidentId: z.string().trim().optional(),
   priority: z.nativeEnum(FieldTaskPriority).default(FieldTaskPriority.MEDIUM),
   dueAt: z.string().datetime().optional(),
+});
+
+const fieldTaskBulkCreationSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(5).max(1000),
+  priority: z.nativeEnum(FieldTaskPriority).default(FieldTaskPriority.MEDIUM),
+  dueAt: z.string().datetime().optional(),
+  agentUserIds: z.array(z.string().trim().min(1)).max(200).optional(),
+  geoPoliticalZoneId: z.string().trim().optional(),
+  stateId: z.string().trim().optional(),
+  senatorialDistrictId: z.string().trim().optional(),
+  federalConstituencyId: z.string().trim().optional(),
+  lgaId: z.string().trim().optional(),
+  wardId: z.string().trim().optional(),
+  stateConstituencyId: z.string().trim().optional(),
+  pollingUnitId: z.string().trim().optional(),
 });
 
 const fieldTaskUpdateSchema = z.object({
@@ -602,6 +621,117 @@ function getFieldTaskScopeFilter(actor: Express.Request["authUser"]) {
     stateConstituencyId: actor.adminProfile.stateConstituencyId || undefined,
     pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
   };
+}
+
+function buildAgentTerritory(agentProfile: {
+  geoPoliticalZoneId?: string | null;
+  stateId: string;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  lgaId: string;
+  wardId: string;
+  stateConstituencyId?: string | null;
+  pollingUnitId?: string | null;
+}) {
+  return {
+    geoPoliticalZoneId: agentProfile.geoPoliticalZoneId || undefined,
+    stateId: agentProfile.stateId,
+    senatorialDistrictId: agentProfile.senatorialDistrictId || undefined,
+    federalConstituencyId: agentProfile.federalConstituencyId || undefined,
+    lgaId: agentProfile.lgaId,
+    wardId: agentProfile.wardId,
+    stateConstituencyId: agentProfile.stateConstituencyId || undefined,
+    pollingUnitId: agentProfile.pollingUnitId || undefined,
+  };
+}
+
+async function createScopedFieldTask(
+  actor: NonNullable<Express.Request["authUser"]>,
+  assignedAgent: {
+    id: string;
+    agentProfile: {
+      politicalPartyId: string | null;
+      geoPoliticalZoneId: string | null;
+      stateId: string;
+      senatorialDistrictId: string | null;
+      federalConstituencyId: string | null;
+      lgaId: string;
+      wardId: string;
+      stateConstituencyId: string | null;
+      pollingUnitId: string | null;
+    };
+  },
+  payload: {
+    title: string;
+    description: string;
+    priority: FieldTaskPriority;
+    dueAt?: string;
+    incidentId?: string;
+  },
+  linkedIncident?: Awaited<ReturnType<typeof prisma.incident.findUnique>> | null,
+) {
+  if (!isWithinActorParty(actor, assignedAgent.agentProfile.politicalPartyId)) {
+    throw new Error("You cannot assign tasks outside your political party scope.");
+  }
+
+  const territory = linkedIncident
+    ? {
+        geoPoliticalZoneId: linkedIncident.geoPoliticalZoneId ?? assignedAgent.agentProfile.geoPoliticalZoneId,
+        stateId: linkedIncident.stateId,
+        senatorialDistrictId: linkedIncident.senatorialDistrictId ?? assignedAgent.agentProfile.senatorialDistrictId,
+        federalConstituencyId: assignedAgent.agentProfile.federalConstituencyId,
+        lgaId: linkedIncident.lgaId,
+        wardId: linkedIncident.wardId ?? assignedAgent.agentProfile.wardId,
+        stateConstituencyId: assignedAgent.agentProfile.stateConstituencyId,
+        pollingUnitId: linkedIncident.pollingUnitId ?? assignedAgent.agentProfile.pollingUnitId,
+      }
+    : buildAgentTerritory(assignedAgent.agentProfile);
+
+  const task = await prisma.$transaction(async (transaction) => {
+    const createdTask = await transaction.fieldTask.create({
+      data: {
+        title: payload.title,
+        description: payload.description,
+        status: FieldTaskStatus.TODO,
+        priority: payload.priority,
+        createdByUserId: actor.id,
+        assignedToUserId: assignedAgent.id,
+        incidentId: payload.incidentId || null,
+        dueAt: payload.dueAt ? new Date(payload.dueAt) : null,
+        geoPoliticalZoneId: territory.geoPoliticalZoneId || null,
+        stateId: territory.stateId,
+        senatorialDistrictId: territory.senatorialDistrictId || null,
+        federalConstituencyId: territory.federalConstituencyId || null,
+        lgaId: territory.lgaId,
+        wardId: territory.wardId,
+        stateConstituencyId: territory.stateConstituencyId || null,
+        pollingUnitId: territory.pollingUnitId || null,
+      },
+      include: {
+        createdByUser: { select: { name: true } },
+        assignedToUser: { select: { name: true } },
+      },
+    });
+
+    await createNotification(transaction, {
+      userId: assignedAgent.id,
+      type: NotificationType.SYSTEM,
+      title: "New field task assigned",
+      message: `${payload.title} has been assigned to you.`,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: actor.id,
+      action: "FIELD_TASK_CREATED",
+      targetType: "FieldTask",
+      targetId: createdTask.id,
+      metadata: { assignedToUserId: assignedAgent.id, incidentId: payload.incidentId || null },
+    });
+
+    return createdTask;
+  });
+
+  return task;
 }
 
 function buildBroadcastScope(data: z.infer<typeof broadcastCreationSchema>) {
@@ -1289,16 +1419,77 @@ router.get("/users/manage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), as
   if (actor?.role === UserRole.ADMIN && !actorPartyId) {
     return response.status(403).json({ message: "Your admin account is not linked to a political party." });
   }
+
+  const stateScopeError = parsed.data.stateId ? enforceStateScope(actor, parsed.data.stateId) : null;
+  if (stateScopeError) {
+    return response.status(403).json({ message: stateScopeError });
+  }
+
+  const lgaScopeError = parsed.data.lgaId ? enforceLgaScope(actor, parsed.data.lgaId) : null;
+  if (lgaScopeError) {
+    return response.status(403).json({ message: lgaScopeError });
+  }
+
   const users = await prisma.user.findMany({
     where: {
       role: parsed.data.role || undefined,
       isActive: parsed.data.isActive === undefined ? undefined : parsed.data.isActive === "true",
-      OR: parsed.data.search
-        ? [
-            { name: { contains: parsed.data.search } },
-            { email: { contains: parsed.data.search } },
-          ]
-        : undefined,
+      AND: [
+        ...(parsed.data.search
+          ? [
+              {
+                OR: [
+                  { name: { contains: parsed.data.search } },
+                  { email: { contains: parsed.data.search } },
+                ],
+              },
+            ]
+          : []),
+        ...(parsed.data.stateId || parsed.data.lgaId || parsed.data.wardId
+          ? [
+              {
+                OR: [
+                  {
+                    adminProfile: {
+                      is: {
+                        stateId: parsed.data.stateId || undefined,
+                        lgaId: parsed.data.lgaId || undefined,
+                        wardId: parsed.data.wardId || undefined,
+                      },
+                    },
+                  },
+                  {
+                    candidateProfile: {
+                      is: {
+                        stateId: parsed.data.stateId || undefined,
+                        lgaId: parsed.data.lgaId || undefined,
+                        wardId: parsed.data.wardId || undefined,
+                      },
+                    },
+                  },
+                  {
+                    agentProfile: {
+                      is: {
+                        stateId: parsed.data.stateId || undefined,
+                        lgaId: parsed.data.lgaId || undefined,
+                        wardId: parsed.data.wardId || undefined,
+                      },
+                    },
+                  },
+                  {
+                    voterProfile: {
+                      is: {
+                        stateId: parsed.data.stateId || undefined,
+                        lgaId: parsed.data.lgaId || undefined,
+                        wardId: parsed.data.wardId || undefined,
+                      },
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
+      ],
     },
     include: {
       adminProfile: true,
@@ -2898,6 +3089,10 @@ router.post("/tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     return response.status(403).json({ message: "You cannot assign tasks outside your agent scope." });
   }
 
+  if (request.authUser && !isWithinActorParty(request.authUser, assignedAgent.agentProfile.politicalPartyId)) {
+    return response.status(403).json({ message: "You cannot assign tasks outside your political party scope." });
+  }
+
   let linkedIncident: Awaited<ReturnType<typeof prisma.incident.findUnique>> | null = null;
   if (parsed.data.incidentId) {
     linkedIncident = await prisma.incident.findUnique({ where: { id: parsed.data.incidentId } });
@@ -2910,86 +3105,110 @@ router.post("/tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
     }
   }
 
-  const territory = linkedIncident
-    ? {
-        geoPoliticalZoneId: linkedIncident.geoPoliticalZoneId ?? assignedAgent.agentProfile.geoPoliticalZoneId,
-        stateId: linkedIncident.stateId,
-        senatorialDistrictId: linkedIncident.senatorialDistrictId ?? assignedAgent.agentProfile.senatorialDistrictId,
-        federalConstituencyId: assignedAgent.agentProfile.federalConstituencyId,
-        lgaId: linkedIncident.lgaId,
-        wardId: linkedIncident.wardId ?? assignedAgent.agentProfile.wardId,
-        stateConstituencyId: assignedAgent.agentProfile.stateConstituencyId,
-        pollingUnitId: linkedIncident.pollingUnitId ?? assignedAgent.agentProfile.pollingUnitId,
-      }
-    : {
-        geoPoliticalZoneId: assignedAgent.agentProfile.geoPoliticalZoneId,
-        stateId: assignedAgent.agentProfile.stateId,
-        senatorialDistrictId: assignedAgent.agentProfile.senatorialDistrictId,
-        federalConstituencyId: assignedAgent.agentProfile.federalConstituencyId,
-        lgaId: assignedAgent.agentProfile.lgaId,
-        wardId: assignedAgent.agentProfile.wardId,
-        stateConstituencyId: assignedAgent.agentProfile.stateConstituencyId,
-        pollingUnitId: assignedAgent.agentProfile.pollingUnitId,
-      };
-
-  const taskId = await prisma.$transaction(async (transaction) => {
-    const createdTask = await transaction.fieldTask.create({
-      data: {
-        title: parsed.data.title,
-        description: parsed.data.description,
-        assignedToUserId: assignedAgent.id,
-        createdByUserId: request.authUser!.id,
-        incidentId: parsed.data.incidentId || null,
-        priority: parsed.data.priority,
-        dueAt: parsed.data.dueAt ? new Date(parsed.data.dueAt) : null,
-        geoPoliticalZoneId: territory.geoPoliticalZoneId || undefined,
-        stateId: territory.stateId,
-        senatorialDistrictId: territory.senatorialDistrictId || undefined,
-        federalConstituencyId: territory.federalConstituencyId || undefined,
-        lgaId: territory.lgaId,
-        wardId: territory.wardId,
-        stateConstituencyId: territory.stateConstituencyId || undefined,
-        pollingUnitId: territory.pollingUnitId || undefined,
-      },
-    });
-
-    await createNotification(transaction, {
-      userId: assignedAgent.id,
-      type: NotificationType.SYSTEM,
-      title: "New field task assigned",
-      message: `${createdTask.title} has been assigned to you.`,
-    });
-
-    await createAuditLog(transaction, {
-      actorUserId: request.authUser!.id,
-      action: "FIELD_TASK_CREATED",
-      targetType: "FieldTask",
-      targetId: createdTask.id,
-      metadata: {
-        assignedToUserId: assignedAgent.id,
-        incidentId: parsed.data.incidentId || null,
-        priority: parsed.data.priority,
-      },
-    });
-
-    return createdTask.id;
-  });
-
-  const task = await prisma.fieldTask.findUnique({
-    where: { id: taskId },
-    include: {
-      createdByUser: { select: { name: true } },
-      assignedToUser: { select: { name: true } },
-    },
-  });
-
-  if (!task) {
-    return response.status(500).json({ message: "Field task was created but could not be loaded." });
-  }
+  const task = await createScopedFieldTask(
+    request.authUser!,
+    assignedAgent as Awaited<ReturnType<typeof prisma.user.findUnique>> & { agentProfile: NonNullable<typeof assignedAgent.agentProfile> },
+    parsed.data,
+    linkedIncident,
+  );
 
   return response.status(201).json({
     message: "Field task created successfully.",
     task: serializeFieldTaskItem(task),
+  });
+});
+
+router.post("/tasks/bulk", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const parsed = fieldTaskBulkCreationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid bulk task payload.", errors: parsed.error.flatten() });
+  }
+
+  const scopedPayload = applyActorAdminScope(request.authUser, parsed.data);
+  if (
+    !scopedPayload.agentUserIds?.length &&
+    !scopedPayload.stateId &&
+    !scopedPayload.lgaId &&
+    !scopedPayload.wardId &&
+    !scopedPayload.senatorialDistrictId &&
+    !scopedPayload.federalConstituencyId &&
+    !scopedPayload.stateConstituencyId &&
+    !scopedPayload.pollingUnitId
+  ) {
+    return response.status(400).json({ message: "Select agents directly or provide a territory or constituency filter." });
+  }
+
+  const territoryReferenceError = await validateTerritoryReferences({
+    geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId,
+    stateId: scopedPayload.stateId,
+    senatorialDistrictId: scopedPayload.senatorialDistrictId,
+    federalConstituencyId: scopedPayload.federalConstituencyId,
+    lgaId: scopedPayload.lgaId,
+    wardId: scopedPayload.wardId,
+    stateConstituencyId: scopedPayload.stateConstituencyId,
+    pollingUnitId: scopedPayload.pollingUnitId,
+  });
+
+  if (territoryReferenceError) {
+    return response.status(400).json({ message: territoryReferenceError });
+  }
+
+  const agents = await prisma.user.findMany({
+    where: {
+      role: UserRole.AGENT,
+      isActive: true,
+      ...(scopedPayload.agentUserIds?.length ? { id: { in: scopedPayload.agentUserIds } } : {}),
+      agentProfile: {
+        is: {
+          ...(scopedPayload.geoPoliticalZoneId ? { geoPoliticalZoneId: scopedPayload.geoPoliticalZoneId } : {}),
+          ...(scopedPayload.stateId ? { stateId: scopedPayload.stateId } : {}),
+          ...(scopedPayload.senatorialDistrictId ? { senatorialDistrictId: scopedPayload.senatorialDistrictId } : {}),
+          ...(scopedPayload.federalConstituencyId ? { federalConstituencyId: scopedPayload.federalConstituencyId } : {}),
+          ...(scopedPayload.lgaId ? { lgaId: scopedPayload.lgaId } : {}),
+          ...(scopedPayload.wardId ? { wardId: scopedPayload.wardId } : {}),
+          ...(scopedPayload.stateConstituencyId ? { stateConstituencyId: scopedPayload.stateConstituencyId } : {}),
+          ...(scopedPayload.pollingUnitId ? { pollingUnitId: scopedPayload.pollingUnitId } : {}),
+        },
+      },
+    },
+    include: {
+      agentProfile: true,
+    },
+    take: 250,
+  });
+
+  const eligibleAgents = agents.filter((agent) => {
+    if (!agent.agentProfile || !request.authUser) {
+      return false;
+    }
+
+    return canCreateAgentInScope(request.authUser, agent.agentProfile) && isWithinActorParty(request.authUser, agent.agentProfile.politicalPartyId);
+  });
+
+  if (eligibleAgents.length === 0) {
+    return response.status(404).json({ message: "No eligible agents were found for the selected target." });
+  }
+
+  const tasks = [];
+  for (const agent of eligibleAgents) {
+    const task = await createScopedFieldTask(
+      request.authUser!,
+      agent as Awaited<ReturnType<typeof prisma.user.findUnique>> & { agentProfile: NonNullable<typeof agent.agentProfile> },
+      {
+        title: scopedPayload.title,
+        description: scopedPayload.description,
+        priority: scopedPayload.priority,
+        dueAt: scopedPayload.dueAt,
+      },
+      null,
+    );
+    tasks.push(task);
+  }
+
+  return response.status(201).json({
+    message: `${tasks.length} field task${tasks.length === 1 ? "" : "s"} assigned successfully.`,
+    count: tasks.length,
+    tasks: tasks.map(serializeFieldTaskItem),
   });
 });
 

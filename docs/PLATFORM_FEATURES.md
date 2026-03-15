@@ -6,6 +6,7 @@ PICS Nigeria is a campaign operations and field coordination platform for politi
 ## Major Modules
 - `Access and administration`: role-based sign-in, scoped dashboards, admin hierarchy, activation control, and audited management actions.
 - `Territory management`: national, zone, state, LGA, ward, constituency, and polling-unit assignment used to control visibility and authority.
+- `Locator workflows`: territory-first selectors for opening scoped user management, creation flows, and live field operations without loading unrelated records.
 - `Campaign operations`: candidate profiles, campaign materials, events, voter engagement, and consent-based communication.
 - `Field operations`: agent assignment, attendance, activity logging, incident reporting, and task coordination.
 - `Rewards and participation`: supporter rewards, redemptions, engagement tasks, and participation tracking.
@@ -34,12 +35,19 @@ Authority follows both `role hierarchy` and `territory scope`.
 - Admins and candidates can send scoped communication to the audiences they are allowed to reach.
 - Agents submit operational updates from the field, including attendance, location activity, task progress, and incident reports.
 - Admin dashboards aggregate scoped notifications, field activity, coverage, incidents, and management workflows for review.
+- Higher-ranking admins can use locator-driven live operations to track all visible agents in a territory or drill into one agent at a time.
 
 ## Rewards, Tasks, Materials, and Election-Day Activity
 - `Rewards`: supporters earn points through participation and referrals, then request redemptions through controlled workflows.
-- `Tasks`: admins coordinate field execution by assigning scoped tasks to agents and tracking progress.
+- `Tasks`: admins coordinate field execution by assigning scoped tasks to one agent or bulk target groups by territory, then tracking progress.
 - `Campaign materials`: candidates publish text, image, video, and document updates for voter discovery and engagement.
 - `Election-day reporting`: field reporting is tied to assigned territory so polling-unit operations, turnout observations, incidents, and result updates can flow upward through the admin structure.
+
+## Workflow Pattern
+- `Dashboard home`: summary and highest-priority actions only.
+- `Locator first`: choose territory, then choose role or live-ops action.
+- `Scoped lists`: load only the records that match the selected role and territory.
+- `Dedicated forms`: create and edit users in focused workflows with party and territory controls built in.
 
 ## Operating Principle
 The platform is designed to keep operational control close to the relevant territory, reduce cross-scope errors, and preserve secure oversight for live political campaign activity.
