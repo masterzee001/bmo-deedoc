@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { AuthUserProfile, FieldTaskItem, NotificationItem } from "@pics-nigeria/shared";
 import {
   ApiError,
@@ -23,15 +23,13 @@ export default function AgentDashboardPage() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [gpsGateError, setGpsGateError] = useState("");
   const [activityMessage, setActivityMessage] = useState("");
   const [incidentMessage, setIncidentMessage] = useState("");
-  const [locationForm, setLocationForm] = useState({
-    latitude: "",
-    longitude: "",
-    accuracyMeters: "",
-    note: "",
-    pollingUnitId: "",
-  });
+  const [trackingActive, setTrackingActive] = useState(false);
+  const [locationPending, setLocationPending] = useState(false);
+  const [trackerStatus, setTrackerStatus] = useState("");
+  const [lastPingAt, setLastPingAt] = useState("");
   const [incidentForm, setIncidentForm] = useState({
     type: "OTHER",
     title: "",
@@ -41,6 +39,8 @@ export default function AgentDashboardPage() {
     latitude: "",
     longitude: "",
   });
+  const trackerWatchId = useRef<number | null>(null);
+  const lastTrackerSendAt = useRef(0);
 
   async function loadAgentDashboard(token: string) {
     const [currentUser, recentActivities, taskItems, notificationItems] = await Promise.all([
@@ -58,6 +58,25 @@ export default function AgentDashboardPage() {
     setActivities(recentActivities);
     setTasks(taskItems);
     setNotifications(notificationItems);
+  }
+
+  function requireGpsForDashboard() {
+    return new Promise<void>((resolve, reject) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        reject(new Error("Device GPS is required for agent access."));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        () => resolve(),
+        () => reject(new Error("Turn on device GPS and allow location access to access the agent dashboard.")),
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 20_000,
+        },
+      );
+    });
   }
 
   async function handleTaskStatusUpdate(taskId: string, status: FieldTaskItem["status"]) {
@@ -84,54 +103,154 @@ export default function AgentDashboardPage() {
       return;
     }
 
-    loadAgentDashboard(token)
+    requireGpsForDashboard()
+      .then(() => loadAgentDashboard(token))
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAgentToken");
-        setError(caughtError instanceof Error ? caughtError.message : "Could not load your agent dashboard.");
+        setGpsGateError(caughtError instanceof Error ? caughtError.message : "Device GPS is required.");
       })
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleActivity(path: "check-in" | "check-out") {
+  useEffect(() => {
+    return () => {
+      if (trackerWatchId.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.clearWatch(trackerWatchId.current);
+      }
+    };
+  }, []);
+
+  function readCurrentPosition() {
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        reject(new Error("Device GPS is not available on this browser."));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20_000,
+      });
+    });
+  }
+
+  async function sendDeviceLocation(path: "check-in" | "check-out" | "location", options?: { refreshDashboard?: boolean }) {
     const token = localStorage.getItem("picsNigeriaAgentToken");
     if (!token) {
       setError("Authentication is required.");
       return;
     }
 
-    setActivityMessage("");
+    setError("");
+    setLocationPending(true);
+
     try {
-      await createAgentActivity(token, path, {});
-      setActivityMessage(path === "check-in" ? "Check-in recorded." : "Check-out recorded.");
-      await loadAgentDashboard(token);
+      const position = await readCurrentPosition();
+      const result = (await createAgentActivity(token, path, {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
+      })) as { message?: string };
+
+      const message =
+        typeof result?.message === "string"
+          ? result.message
+          : path === "location"
+            ? "Live location synced."
+            : path === "check-in"
+              ? "Check-in recorded."
+              : "Check-out recorded.";
+
+      if (path === "location") {
+        setTrackerStatus(message);
+        setLastPingAt(new Date().toISOString());
+      } else {
+        setActivityMessage(message);
+      }
+
+      if (options?.refreshDashboard) {
+        await loadAgentDashboard(token);
+      }
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Activity submission failed.");
+      const message = caughtError instanceof Error ? caughtError.message : "Location access failed.";
+      if (path === "location") {
+        setTrackerStatus(message);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setLocationPending(false);
     }
   }
 
-  async function handleLocationSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleActivity(path: "check-in" | "check-out") {
+    setActivityMessage("");
+    void sendDeviceLocation(path, { refreshDashboard: true });
+  }
+
+  async function handleStartTracking() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setError("Device GPS is not available on this browser.");
+      return;
+    }
+
     const token = localStorage.getItem("picsNigeriaAgentToken");
     if (!token) {
       setError("Authentication is required.");
       return;
     }
 
-    setActivityMessage("");
-    try {
-      await createAgentActivity(token, "location", {
-        latitude: locationForm.latitude ? Number(locationForm.latitude) : undefined,
-        longitude: locationForm.longitude ? Number(locationForm.longitude) : undefined,
-        accuracyMeters: locationForm.accuracyMeters ? Number(locationForm.accuracyMeters) : undefined,
-        note: locationForm.note || undefined,
-        pollingUnitId: locationForm.pollingUnitId || undefined,
-      });
-      setActivityMessage("Location ping submitted.");
-      setLocationForm({ latitude: "", longitude: "", accuracyMeters: "", note: "", pollingUnitId: "" });
-      await loadAgentDashboard(token);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Location submission failed.");
+    if (trackerWatchId.current !== null) {
+      navigator.geolocation.clearWatch(trackerWatchId.current);
+      trackerWatchId.current = null;
     }
+
+    setError("");
+    setTrackerStatus("Live tracking is starting. Allow GPS access on your device.");
+    setTrackingActive(true);
+    lastTrackerSendAt.current = 0;
+
+    trackerWatchId.current = navigator.geolocation.watchPosition(
+      async (position) => {
+        const now = Date.now();
+        if (now - lastTrackerSendAt.current < 30_000) {
+          return;
+        }
+
+        lastTrackerSendAt.current = now;
+        try {
+          const result = (await createAgentActivity(token, "location", {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
+          })) as { message?: string };
+          setTrackerStatus(typeof result?.message === "string" ? result.message : "Live location synced.");
+          setLastPingAt(new Date().toISOString());
+        } catch (caughtError) {
+          setTrackerStatus(caughtError instanceof Error ? caughtError.message : "Live tracking failed.");
+        }
+      },
+      (geoError) => {
+        trackerWatchId.current = null;
+        setTrackingActive(false);
+        setTrackerStatus(geoError.message || "Live tracking permission was denied.");
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20_000,
+      },
+    );
+  }
+
+  function handleStopTracking() {
+    if (trackerWatchId.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(trackerWatchId.current);
+      trackerWatchId.current = null;
+    }
+
+    setTrackingActive(false);
+    setTrackerStatus("Live tracking is paused.");
   }
 
   async function handleIncidentSubmit(event: FormEvent<HTMLFormElement>) {
@@ -184,7 +303,14 @@ export default function AgentDashboardPage() {
       <main className="shell">
         <section className="panel card">
           <h1>Unable to load dashboard</h1>
-          <p className="error">{error || "Authentication is required."}</p>
+          <p className="error">{gpsGateError || error || "Authentication is required."}</p>
+          {gpsGateError ? (
+            <p>
+              <button className="button" type="button" onClick={() => window.location.reload()}>
+                Retry GPS check
+              </button>
+            </p>
+          ) : null}
           <p>
             <Link href="/agent/login">Return to agent login</Link>
           </p>
@@ -224,41 +350,33 @@ export default function AgentDashboardPage() {
         <section className="panel card">
           <h2>Attendance</h2>
           <div className="action-row">
-            <button className="button" type="button" onClick={() => void handleActivity("check-in")}>
-              Check in
+            <button className="button" type="button" onClick={() => void handleActivity("check-in")} disabled={locationPending}>
+              {locationPending ? "Waiting for GPS..." : "Check in"}
             </button>
-            <button className="button secondary" type="button" onClick={() => void handleActivity("check-out")}>
-              Check out
+            <button className="button secondary" type="button" onClick={() => void handleActivity("check-out")} disabled={locationPending}>
+              {locationPending ? "Waiting for GPS..." : "Check out"}
             </button>
           </div>
+          <p className="muted">Attendance records now use device GPS coordinates instead of typed location values.</p>
           {activityMessage ? <p className="muted">{activityMessage}</p> : null}
         </section>
 
         <section className="panel card">
-          <h2>Location Ping</h2>
-          <form className="form" onSubmit={handleLocationSubmit}>
-            <label className="field">
-              <span>Latitude</span>
-              <input value={locationForm.latitude} onChange={(event) => setLocationForm({ ...locationForm, latitude: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Longitude</span>
-              <input value={locationForm.longitude} onChange={(event) => setLocationForm({ ...locationForm, longitude: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Accuracy Meters</span>
-              <input value={locationForm.accuracyMeters} onChange={(event) => setLocationForm({ ...locationForm, accuracyMeters: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Polling Unit Id</span>
-              <input value={locationForm.pollingUnitId} onChange={(event) => setLocationForm({ ...locationForm, pollingUnitId: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>Note</span>
-              <input value={locationForm.note} onChange={(event) => setLocationForm({ ...locationForm, note: event.target.value })} />
-            </label>
-            <button className="button" type="submit">Submit location</button>
-          </form>
+          <h2>Live Tracking</h2>
+          <p className="muted">Use device GPS and network position to send live polling-unit field location to the admin tracker map.</p>
+          <div className="action-row">
+            <button className="button" type="button" onClick={() => void handleStartTracking()} disabled={trackingActive || locationPending}>
+              {trackingActive ? "Tracking live" : "Start live tracking"}
+            </button>
+            <button className="button secondary" type="button" onClick={handleStopTracking} disabled={!trackingActive}>
+              Stop tracking
+            </button>
+            <button className="button secondary" type="button" onClick={() => void sendDeviceLocation("location")} disabled={locationPending}>
+              {locationPending ? "Syncing..." : "Send location now"}
+            </button>
+          </div>
+          {trackerStatus ? <p className="muted">{trackerStatus}</p> : null}
+          {lastPingAt ? <p className="muted">Last live ping: {new Date(lastPingAt).toLocaleString()}</p> : null}
         </section>
       </section>
 

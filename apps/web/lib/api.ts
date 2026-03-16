@@ -84,11 +84,15 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function loginUser(email: string, password: string): Promise<{ token: string; user: AuthUserProfile }> {
+export async function loginUser(
+  email: string,
+  password: string,
+  options?: { agentGpsConsent?: boolean },
+): Promise<{ token: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, agentGpsConsent: options?.agentGpsConsent }),
   });
 
   return readJson<{ token: string; user: AuthUserProfile }>(response);

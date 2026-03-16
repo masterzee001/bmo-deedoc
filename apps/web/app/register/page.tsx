@@ -159,6 +159,9 @@ export default function RegisterPage() {
         <p>
           Already registered? <Link href="/login">Go to voter login</Link>
         </p>
+        <p>
+          Need to confirm your polling unit first? <Link href="/polling-units">Find polling unit location</Link>
+        </p>
       </section>
 
       <section className="panel card" style={{ maxWidth: 720 }}>

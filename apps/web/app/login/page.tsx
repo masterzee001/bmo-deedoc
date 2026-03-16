@@ -43,6 +43,9 @@ export default function LoginPage() {
           New voter? <Link href="/register">Create your account</Link>
         </p>
         <p>
+          Need your polling unit? <Link href="/polling-units">Find polling unit location</Link>
+        </p>
+        <p>
           <Link href="/admin/login">Admin login</Link> | <Link href="/candidate/login">Candidate login</Link> |{" "}
           <Link href="/agent/login">Agent login</Link>
         </p>

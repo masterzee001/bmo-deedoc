@@ -140,6 +140,16 @@ export default function AdminLiveOperationsPage() {
     selectedAgentIds: [] as string[],
   });
 
+  async function refreshLiveSignals(token: string) {
+    const [nextMapSummary, nextActivity] = await Promise.all([
+      fetchAdminMapSummary(token),
+      fetchAdminAgentActivitySummaries(token),
+    ]);
+
+    setMapSummary(nextMapSummary);
+    setActivity(nextActivity);
+  }
+
   async function loadPage(token: string) {
     const [currentUser, nextMapSummary, nextActivity, nextAgents, nextTasks] = await Promise.all([
       fetchCurrentUser(token),
@@ -184,6 +194,21 @@ export default function AdminLiveOperationsPage() {
         setError(caughtError instanceof Error ? caughtError.message : "Could not load live operations.");
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshLiveSignals(token).catch(() => {
+        // Keep the existing live view visible if one refresh fails.
+      });
+    }, 30_000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -413,7 +438,7 @@ export default function AdminLiveOperationsPage() {
           <div className="section-head">
             <div>
               <h2>Live field map</h2>
-              <p className="muted">Agent locations and incident points in your current scope.</p>
+              <p className="muted">Device GPS agent locations and incident points in your current scope. The map refreshes automatically.</p>
             </div>
             <span className="status-pill">{visibleMarkers.length} live points</span>
           </div>

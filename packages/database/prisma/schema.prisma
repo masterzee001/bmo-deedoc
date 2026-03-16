@@ -307,6 +307,8 @@ model AgentProfile {
   userId              String       @unique
   assignedAdminUserId String?
   politicalPartyId    String?
+  gpsTrackingConsentAt DateTime?
+  activeSessionNonce  String?
   geoPoliticalZoneId  String?
   stateId             String
   senatorialDistrictId String?
@@ -332,6 +334,7 @@ model AgentProfile {
   @@index([geoPoliticalZoneId])
   @@index([assignedAdminUserId])
   @@index([politicalPartyId])
+  @@index([activeSessionNonce])
   @@index([stateId])
   @@index([senatorialDistrictId])
   @@index([federalConstituencyId])

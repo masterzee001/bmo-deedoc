@@ -210,6 +210,7 @@ export type AuthUserProfile = {
   } & TerritorySummary) | null;
   agentProfile: ({
     politicalPartyId: string | null;
+    gpsTrackingConsentAt: string | null;
   } & TerritorySummary) | null;
 };
 
@@ -573,6 +574,9 @@ export type IncidentGovernanceSummary = {
 };
 
 export type PollingUnitCoverageSummary = {
+  totalStatesInScope: number;
+  totalLgasInScope: number;
+  totalWardsInScope: number;
   totalPollingUnitsInScope: number;
   pollingUnitsWithAssignedAgents: number;
   pollingUnitsWithRecentActivity: number;

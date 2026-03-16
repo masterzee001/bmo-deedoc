@@ -5006,7 +5006,16 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const { where: pollingUnitScope, scopeWarning } = await getCoveragePollingUnitScope(request.authUser);
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
-  const [pollingUnits, agents, recentActivities, incidents] = await Promise.all([
+  const [statesInScope, lgasInScope, wardsInScope, pollingUnits, agents, recentActivities, incidents] = await Promise.all([
+    prisma.state.count({
+      where: getStateReferenceScopeFilter(request.authUser),
+    }),
+    prisma.lGA.count({
+      where: getLgaReferenceScopeFilter(request.authUser),
+    }),
+    prisma.ward.count({
+      where: getWardReferenceScopeFilter(request.authUser),
+    }),
     prisma.pollingUnit.findMany({
       where: pollingUnitScope,
       select: { id: true },
@@ -5045,6 +5054,9 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
 
   return response.json({
     coverage: serializePollingUnitCoverageSummary({
+      totalStatesInScope: statesInScope,
+      totalLgasInScope: lgasInScope,
+      totalWardsInScope: wardsInScope,
       totalPollingUnitsInScope,
       pollingUnitsWithAssignedAgents: assignedSet.size,
       pollingUnitsWithRecentActivity: recentSet.size,
@@ -5288,6 +5300,9 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
   return response.json({
     insights: serializeCoverageInsights({
       summary: {
+        totalStatesInScope: loadedStates,
+        totalLgasInScope: loadedLgas,
+        totalWardsInScope: loadedWards,
         totalPollingUnitsInScope: pollingUnits.length,
         pollingUnitsWithAssignedAgents: pollingUnitInsights.filter((item) => item.hasAssignedAgent).length,
         pollingUnitsWithRecentActivity: pollingUnitInsights.filter((item) => item.hasRecentActivity).length,

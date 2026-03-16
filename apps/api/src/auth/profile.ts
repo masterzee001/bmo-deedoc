@@ -71,6 +71,7 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
     agentProfile: user.agentProfile
       ? {
           politicalPartyId: user.agentProfile.politicalPartyId,
+          gpsTrackingConsentAt: user.agentProfile.gpsTrackingConsentAt?.toISOString() || null,
           ...toTerritorySummary(user.agentProfile),
         }
       : null,

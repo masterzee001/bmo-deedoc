@@ -36,6 +36,12 @@ export default function AdminCoveragePage() {
     () => insights?.wards.filter((ward) => ward.pollingUnitsWithoutRecentActivity > 0).slice(0, 8) || [],
     [insights],
   );
+  const wardsNeedingAttention = useMemo(
+    () =>
+      insights?.wards.filter((ward) => ward.pollingUnitsWithoutAgents > 0 || ward.pollingUnitsWithoutRecentActivity > 0 || ward.openIncidentCount > 0)
+        .length || 0,
+    [insights],
+  );
   const agentAssignmentGaps = insights?.agentsWithoutPollingUnitAssignments || [];
   const canSetTargets = user?.role === "SUPER_ADMIN" || user?.adminProfile?.adminLevel === "NATIONAL" || user?.adminProfile?.adminLevel === "STATE";
 
@@ -155,7 +161,7 @@ export default function AdminCoveragePage() {
           stateConstituencyId: null,
           pollingUnitId: null,
         })}</p>
-        <p className="muted">Coverage totals are limited to your current territory. Agent counts use only the agents visible in that scope.</p>
+        <p className="muted">Coverage totals are restricted to your current authority and use the national reference dataset loaded for production. Agent counts use only the party-visible agents inside that territory.</p>
       </section>
 
       <AdminNav />
@@ -165,12 +171,24 @@ export default function AdminCoveragePage() {
 
       <section className="grid stats">
         <article className="panel card">
-          <h2>Polling units</h2>
-          <div className="value">{insights.summary.totalPollingUnitsInScope}</div>
+          <h2>States in scope</h2>
+          <div className="value">{insights.referenceData.loadedStates}</div>
+        </article>
+        <article className="panel card">
+          <h2>LGAs in scope</h2>
+          <div className="value">{insights.referenceData.loadedLgas}</div>
         </article>
         <article className="panel card">
           <h2>Wards in scope</h2>
-          <div className="value">{insights.summary.wardsInScope}</div>
+          <div className="value">{insights.referenceData.loadedWards}</div>
+        </article>
+        <article className="panel card">
+          <h2>Polling units in scope</h2>
+          <div className="value">{insights.summary.totalPollingUnitsInScope}</div>
+        </article>
+        <article className="panel card">
+          <h2>Wards with coverage pressure</h2>
+          <div className="value">{wardsNeedingAttention}</div>
         </article>
         <article className="panel card">
           <h2>Weak coverage</h2>
@@ -214,23 +232,27 @@ export default function AdminCoveragePage() {
         <section className="panel card">
           <div className="section-head">
             <div>
-              <h2>Reference readiness</h2>
-              <p className="muted">This shows how much territory reference data is currently loaded inside your visible scope.</p>
+              <h2>Territory inventory</h2>
+              <p className="muted">These are the reference counts the platform uses for staffing and coverage decisions in your visible territory.</p>
             </div>
             <span className="status-pill">{insights.referenceData.loadedPollingUnits} polling units</span>
           </div>
           <div className="reward-list">
             <article className="reward-item">
-              <strong>States loaded</strong>
+              <strong>States in scope</strong>
               <p className="muted">{insights.referenceData.loadedStates}</p>
             </article>
             <article className="reward-item">
-              <strong>LGAs loaded</strong>
+              <strong>LGAs in scope</strong>
               <p className="muted">{insights.referenceData.loadedLgas}</p>
             </article>
             <article className="reward-item">
-              <strong>Wards loaded</strong>
+              <strong>Wards in scope</strong>
               <p className="muted">{insights.referenceData.loadedWards}</p>
+            </article>
+            <article className="reward-item">
+              <strong>Polling units in scope</strong>
+              <p className="muted">{insights.referenceData.loadedPollingUnits}</p>
             </article>
             <article className="reward-item">
               <strong>Wards without polling units</strong>

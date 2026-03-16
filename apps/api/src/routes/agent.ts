@@ -181,6 +181,13 @@ async function createAgentActivity(
     }
   }
 
+  if (
+    type === AgentActivityType.LOCATION_PING &&
+    (typeof payload.latitude !== "number" || typeof payload.longitude !== "number")
+  ) {
+    throw new Error("Live tracking requires device GPS coordinates.");
+  }
+
   return prisma.agentActivity.create({
     data: {
       agentUserId,

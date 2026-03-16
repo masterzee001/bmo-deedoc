@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import type { UserRole } from "@pics-nigeria/shared";
 import { verifyAccessToken } from "../auth/jwt";
 import { getAuthUserProfile } from "../auth/profile";
+import { prisma } from "../prisma";
 
 declare global {
   namespace Express {
@@ -36,6 +37,17 @@ export async function requireAuth(request: Request, response: Response, next: Ne
 
     if (!user.isActive) {
       return response.status(403).json({ message: "This account has been deactivated." });
+    }
+
+    if (user.role === "AGENT") {
+      const agentProfile = await prisma.agentProfile.findUnique({
+        where: { userId: user.id },
+        select: { activeSessionNonce: true },
+      });
+
+      if (!agentProfile || !payload.sessionNonce || agentProfile.activeSessionNonce !== payload.sessionNonce) {
+        return response.status(401).json({ message: "This agent session is no longer active. Please sign in again." });
+      }
     }
 
     request.authUser = user;

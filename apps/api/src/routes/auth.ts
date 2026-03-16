@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "node:crypto";
 import { NotificationType, Prisma, RewardType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { normalizeEmail } from "@pics-nigeria/shared";
@@ -18,6 +19,7 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+  agentGpsConsent: z.boolean().optional(),
 });
 
 const territoryQuerySchema = z.object({
@@ -74,13 +76,40 @@ router.post("/login", async (request, response) => {
     return response.status(403).json({ message: "This account has been deactivated." });
   }
 
+  let sessionNonce: string | undefined;
+  if (user.role === UserRole.AGENT) {
+    const agentProfile = await prisma.agentProfile.findUnique({
+      where: { userId: user.id },
+      select: { userId: true, gpsTrackingConsentAt: true },
+    });
+
+    if (!agentProfile) {
+      return response.status(404).json({ message: "Agent profile not found." });
+    }
+
+    if (!agentProfile.gpsTrackingConsentAt && parsed.data.agentGpsConsent !== true) {
+      return response.status(400).json({
+        message: "Agent sign-in requires GPS consent before access can be granted.",
+      });
+    }
+
+    sessionNonce = crypto.randomUUID();
+    await prisma.agentProfile.update({
+      where: { userId: user.id },
+      data: {
+        gpsTrackingConsentAt: agentProfile.gpsTrackingConsentAt || new Date(),
+        activeSessionNonce: sessionNonce,
+      },
+    });
+  }
+
   const authUser = await getAuthUserProfile(user.id);
   if (!authUser) {
     return response.status(404).json({ message: "User profile not found." });
   }
 
   return response.json({
-    token: signAccessToken(authUser),
+    token: signAccessToken(authUser, { sessionNonce }),
     user: authUser,
   });
 });

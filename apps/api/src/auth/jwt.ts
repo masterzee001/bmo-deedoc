@@ -6,10 +6,11 @@ import { env } from "../env";
 type AuthTokenPayload = {
   sub: string;
   role: AuthUserProfile["role"];
+  sessionNonce?: string;
 };
 
-export function signAccessToken(user: AuthUserProfile): string {
-  return jwt.sign({ sub: user.id, role: user.role }, env.JWT_SECRET, {
+export function signAccessToken(user: AuthUserProfile, options?: { sessionNonce?: string }): string {
+  return jwt.sign({ sub: user.id, role: user.role, sessionNonce: options?.sessionNonce }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"],
   });
 }

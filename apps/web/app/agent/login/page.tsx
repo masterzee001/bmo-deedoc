@@ -9,8 +9,28 @@ export default function AgentLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [gpsConsent, setGpsConsent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function verifyGpsAccess() {
+    return new Promise<void>((resolve, reject) => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        reject(new Error("Device GPS is required for agent access."));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        () => resolve(),
+        () => reject(new Error("Turn on device GPS and allow location access to continue.")),
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 20_000,
+        },
+      );
+    });
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,7 +38,12 @@ export default function AgentLoginPage() {
     setLoading(true);
 
     try {
-      const data = await loginUser(email, password);
+      if (!gpsConsent) {
+        throw new Error("You must agree to the agent GPS tracking terms before signing in.");
+      }
+
+      await verifyGpsAccess();
+      const data = await loginUser(email, password, { agentGpsConsent: gpsConsent });
 
       if (data.user.role !== "AGENT") {
         setError("This login page is for agents only.");
@@ -56,8 +81,16 @@ export default function AgentLoginPage() {
             <span>Password</span>
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           </label>
+          <label className="field" style={{ alignItems: "flex-start" }}>
+            <span>GPS access agreement</span>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={gpsConsent} onChange={(event) => setGpsConsent(event.target.checked)} required />
+              <span>I agree that PICS Nigeria may use this device GPS for agent attendance, live field tracking, and operational transparency while I am signed in.</span>
+            </label>
+          </label>
+          <p className="muted">GPS must be turned on before agent access is granted.</p>
           {error ? <p className="error">{error}</p> : null}
-          <button className="button" type="submit" disabled={loading}>
+          <button className="button" type="submit" disabled={loading || !gpsConsent}>
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>

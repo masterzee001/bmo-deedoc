@@ -136,6 +136,18 @@ export default function AdminDashboardPage() {
           {data.coverage.scopeWarning ? <p className="muted">{data.coverage.scopeWarning}</p> : null}
           <div className="reward-list">
             <article className="reward-item">
+              <strong>States in scope</strong>
+              <p>{data.coverage.totalStatesInScope}</p>
+            </article>
+            <article className="reward-item">
+              <strong>LGAs in scope</strong>
+              <p>{data.coverage.totalLgasInScope}</p>
+            </article>
+            <article className="reward-item">
+              <strong>Wards in scope</strong>
+              <p>{data.coverage.totalWardsInScope}</p>
+            </article>
+            <article className="reward-item">
               <strong>Polling units in scope</strong>
               <p>{data.coverage.totalPollingUnitsInScope}</p>
             </article>
