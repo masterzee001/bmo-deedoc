@@ -31,6 +31,7 @@ const actionOptions = [
   "REWARD_REDEMPTION_APPROVED",
   "REWARD_REDEMPTION_REJECTED",
   "REWARD_REDEMPTION_PAID",
+  "STATE_AGENT_TARGET_UPDATED",
 ] as const;
 
 const targetTypeOptions = [
@@ -43,6 +44,7 @@ const targetTypeOptions = [
   "BroadcastMessage",
   "Poll",
   "ElectionDayReport",
+  "State",
 ] as const;
 
 function parseMetadata(metadataJson: string | null) {

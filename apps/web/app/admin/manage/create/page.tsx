@@ -119,7 +119,6 @@ export default function AdminManageCreatePage() {
     password: "",
     phone: "",
     politicalPartyId: "",
-    assignedAdminUserId: "",
     pollingUnitId: "",
     ...baseTerritory(),
   });
@@ -279,7 +278,6 @@ export default function AdminManageCreatePage() {
           password: "",
           phone: target.phone || "",
           politicalPartyId: target.politicalPartyId || actorPartyId,
-          assignedAdminUserId: target.assignedAdminUserId || "",
           pollingUnitId: target.territory.pollingUnitId || "",
           stateId: target.territory.stateId || "",
           senatorialDistrictId: target.territory.senatorialDistrictId || "",
@@ -501,7 +499,7 @@ export default function AdminManageCreatePage() {
               await refreshLookups(token, stateId);
               if (role === "ADMIN") { setAdminForm({ ...adminForm, ...baseTerritory(), stateId, politicalPartyId: adminForm.politicalPartyId, adminLevel: adminForm.adminLevel, name: adminForm.name, email: adminForm.email, password: adminForm.password }); }
               if (role === "CANDIDATE") { setCandidateForm({ ...candidateForm, ...baseTerritory(), stateId, politicalPartyId: candidateForm.politicalPartyId, officeType: candidateForm.officeType, name: candidateForm.name, email: candidateForm.email, password: candidateForm.password }); }
-              if (role === "AGENT") { setAgentForm({ ...agentForm, ...baseTerritory(), stateId, pollingUnitId: "", politicalPartyId: agentForm.politicalPartyId, assignedAdminUserId: agentForm.assignedAdminUserId, name: agentForm.name, email: agentForm.email, password: agentForm.password, phone: agentForm.phone }); }
+              if (role === "AGENT") { setAgentForm({ ...agentForm, ...baseTerritory(), stateId, pollingUnitId: "", politicalPartyId: agentForm.politicalPartyId, name: agentForm.name, email: agentForm.email, password: agentForm.password, phone: agentForm.phone }); }
             }}>
               <option value="">Select state</option>
               {states.filter((item) => !user.adminProfile?.stateId || item.id === user.adminProfile.stateId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}

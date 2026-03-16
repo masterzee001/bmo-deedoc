@@ -1092,6 +1092,36 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
+function getAdminPartyScopedAgentProfileFilter(actor: Express.Request["authUser"]): Prisma.AgentProfileWhereInput {
+  if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
+    return {};
+  }
+
+  return actor.adminProfile?.politicalPartyId
+    ? { politicalPartyId: actor.adminProfile.politicalPartyId }
+    : { politicalPartyId: "__no_visible_party_scope__" };
+}
+
+function getAdminPartyScopedAgentUserFilter(actor: Express.Request["authUser"]): Prisma.UserWhereInput {
+  if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
+    return {};
+  }
+
+  return actor.adminProfile?.politicalPartyId
+    ? { agentProfile: { is: { politicalPartyId: actor.adminProfile.politicalPartyId } } }
+    : { id: "__no_visible_party_scope__" };
+}
+
+function getAdminPartyScopedAgentRelationFilter(actor: Express.Request["authUser"]): Prisma.UserScalarRelationFilter | undefined {
+  if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
+    return undefined;
+  }
+
+  return actor.adminProfile?.politicalPartyId
+    ? { is: { agentProfile: { is: { politicalPartyId: actor.adminProfile.politicalPartyId } } } }
+    : { is: { id: "__no_visible_party_scope__" } };
+}
+
 function canSetStateAgentTarget(actor: Express.Request["authUser"], stateId: string) {
   if (!actor) {
     return false;
@@ -1354,6 +1384,7 @@ async function canViewAuditLog(
     const report = await prisma.electionDayReport.findUnique({
       where: { id: log.targetId },
       select: {
+        agentUserId: true,
         geoPoliticalZoneId: true,
         stateId: true,
         senatorialDistrictId: true,
@@ -1365,7 +1396,25 @@ async function canViewAuditLog(
       },
     });
 
-    return Boolean(report && canCreateAgentInScope(actor, report));
+    if (!report || !canCreateAgentInScope(actor, report)) {
+      return false;
+    }
+
+    const agentProfile = await prisma.agentProfile.findUnique({
+      where: { userId: report.agentUserId },
+      select: { politicalPartyId: true },
+    });
+
+    return Boolean(agentProfile && isWithinActorParty(actor, agentProfile.politicalPartyId));
+  }
+
+  if (log.targetType === "State") {
+    const state = await prisma.state.findUnique({
+      where: { id: log.targetId },
+      select: { id: true },
+    });
+
+    return Boolean(state && isWithinAdminScope(actor, { stateId: state.id }));
   }
 
   if (log.targetType === "Poll") {
@@ -3283,7 +3332,10 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
 router.get("/agent-activity-summaries", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const scopeFilter = getAgentScopeFilter(request.authUser);
   const agents = await prisma.user.findMany({
-    where: { role: UserRole.AGENT },
+    where: {
+      role: UserRole.AGENT,
+      ...getAdminPartyScopedAgentUserFilter(request.authUser),
+    },
     include: {
       agentProfile: true,
       agentActivities: {
@@ -3764,6 +3816,7 @@ router.get("/election-day-reports", requireAuth, requireRole("ADMIN", "SUPER_ADM
       ...(request.authUser && !isSuperAdmin(request.authUser)
         ? toScopeFilter(getAgentScopeFilter(request.authUser))
         : {}),
+      agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
       status: parsed.data.status,
       reportDate: parsed.data.reportDate ? new Date(`${parsed.data.reportDate}T00:00:00.000Z`) : undefined,
     },
@@ -3830,6 +3883,17 @@ router.get("/election-day-report-assets/:assetId", requireAuth, requireRole("ADM
     return response.status(403).json({ message: "You do not have permission to view this election report asset." });
   }
 
+  if (request.authUser && !isSuperAdmin(request.authUser) && request.authUser.role === UserRole.ADMIN) {
+    const ownerProfile = await prisma.agentProfile.findUnique({
+      where: { userId: asset.ownerUserId },
+      select: { politicalPartyId: true },
+    });
+
+    if (!ownerProfile || !isWithinActorParty(request.authUser, ownerProfile.politicalPartyId)) {
+      return response.status(403).json({ message: "You do not have permission to view this election report asset." });
+    }
+  }
+
   response.setHeader("Content-Type", asset.mimeType);
   response.setHeader("Content-Length", asset.data.length.toString());
   response.setHeader("Cache-Control", "private, max-age=300");
@@ -3862,6 +3926,17 @@ router.patch("/election-day-reports/:reportId/status", requireAuth, requireRole(
 
   if (request.authUser && !isSuperAdmin(request.authUser) && !canCreateAgentInScope(request.authUser, report)) {
     return response.status(403).json({ message: "You do not have permission to review this election-day report." });
+  }
+
+  if (request.authUser && !isSuperAdmin(request.authUser) && request.authUser.role === UserRole.ADMIN) {
+    const agentProfile = await prisma.agentProfile.findUnique({
+      where: { userId: report.agentUserId },
+      select: { politicalPartyId: true },
+    });
+
+    if (!agentProfile || !isWithinActorParty(request.authUser, agentProfile.politicalPartyId)) {
+      return response.status(403).json({ message: "You do not have permission to review this election-day report." });
+    }
   }
 
   const updatedReport = await prisma.$transaction(async (transaction) => {
@@ -4412,7 +4487,10 @@ router.post("/engagement-tasks", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
 router.get("/map-summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const [agents, incidents, pollingUnits] = await Promise.all([
     prisma.user.findMany({
-      where: { role: UserRole.AGENT },
+      where: {
+        role: UserRole.AGENT,
+        ...getAdminPartyScopedAgentUserFilter(request.authUser),
+      },
       include: {
         agentProfile: true,
         agentActivities: {
@@ -4801,6 +4879,7 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const pollingUnitScope = getPollingUnitScopeFilter(request.authUser);
   const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
+  const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
     prisma.pollingUnit.findMany({
       where: pollingUnitScope,
@@ -4819,6 +4898,7 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     prisma.agentProfile.findMany({
       where: {
         ...agentScope,
+        ...partyScopedAgentProfileFilter,
         pollingUnitId: { not: null },
       },
       select: { pollingUnitId: true },
@@ -4826,6 +4906,7 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     prisma.agentActivity.findMany({
       where: {
         ...toScopeFilter(getAgentActivityScopeFilter(request.authUser)),
+        agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
         pollingUnitId: { not: null },
         createdAt: { gte: recentActivitySince },
       },
@@ -4845,6 +4926,7 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
         agentProfile: {
           is: {
             ...agentScope,
+            ...partyScopedAgentProfileFilter,
             pollingUnitId: null,
           },
         },

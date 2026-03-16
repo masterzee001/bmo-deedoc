@@ -751,7 +751,6 @@ export async function createAgent(token: string, body: {
   wardId: string;
   stateConstituencyId?: string;
   pollingUnitId?: string;
-  assignedAdminUserId?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/admin/agents`, {
     method: "POST",
@@ -973,7 +972,6 @@ export async function updateAgent(token: string, userId: string, body: {
   wardId: string;
   stateConstituencyId?: string;
   pollingUnitId?: string;
-  assignedAdminUserId?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/admin/agents/${userId}`, {
     method: "PATCH",
