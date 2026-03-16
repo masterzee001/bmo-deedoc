@@ -155,6 +155,7 @@ export default function AdminCoveragePage() {
           stateConstituencyId: null,
           pollingUnitId: null,
         })}</p>
+        <p className="muted">Coverage totals are limited to your current territory. Agent counts use only the agents visible in that scope.</p>
       </section>
 
       <AdminNav />
@@ -241,7 +242,7 @@ export default function AdminCoveragePage() {
           <div className="section-head">
             <div>
               <h2>State staffing targets</h2>
-              <p className="muted">Target staffing is calculated per state. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
+              <p className="muted">Target staffing is calculated only from polling units inside your visible territory. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
             </div>
             <span className="status-pill">{insights.stateTargets.length} states</span>
           </div>
@@ -253,7 +254,7 @@ export default function AdminCoveragePage() {
                 <article key={stateTarget.stateId} className="reward-item">
                   <strong>{stateTarget.stateName}</strong>
                   <p className="muted">
-                    Polling units: {stateTarget.pollingUnitCount} | Current agents: {stateTarget.assignedAgentCount} | Target agents: {stateTarget.targetAgentCount}
+                    Polling units in scope: {stateTarget.pollingUnitCount} | Current visible agents: {stateTarget.assignedAgentCount} | Target agents: {stateTarget.targetAgentCount}
                   </p>
                   <p className="muted">Agents left to target: {stateTarget.remainingAgentCount}</p>
                   {canSetTargets && canEditStateTarget(stateTarget.stateId) ? (
@@ -314,7 +315,7 @@ export default function AdminCoveragePage() {
           <div className="section-head">
             <div>
               <h2>Priority wards</h2>
-              <p className="muted">Wards are sorted by missing agents, missing recent activity, and open incident pressure.</p>
+              <p className="muted">Wards are sorted by missing agents, missing recent activity, and open incident pressure inside your current territory.</p>
             </div>
             <span className="status-pill">{insights.wards.length} wards</span>
           </div>

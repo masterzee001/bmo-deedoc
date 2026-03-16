@@ -1092,6 +1092,39 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
+function getCoveragePollingUnitScopeFilter(actor: Express.Request["authUser"]): Prisma.PollingUnitWhereInput {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
+    return {};
+  }
+
+  const scope = actor.adminProfile;
+  if (scope.pollingUnitId) {
+    return { id: scope.pollingUnitId };
+  }
+
+  if (scope.wardId) {
+    return { wardId: scope.wardId };
+  }
+
+  if (scope.lgaId) {
+    return { lgaId: scope.lgaId };
+  }
+
+  if (scope.stateId) {
+    return { stateId: scope.stateId };
+  }
+
+  if (scope.geoPoliticalZoneId) {
+    return {
+      state: {
+        geoPoliticalZoneId: scope.geoPoliticalZoneId,
+      },
+    };
+  }
+
+  return {};
+}
+
 function getAdminPartyScopedAgentProfileFilter(actor: Express.Request["authUser"]): Prisma.AgentProfileWhereInput {
   if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
     return {};
@@ -1175,7 +1208,6 @@ async function resolveTerritoryAdminUserId(input: {
       },
     },
     include: { adminProfile: true },
-    orderBy: { createdAt: "asc" },
   });
 
   const matchingAdmins = admins.filter((admin) => {
@@ -1212,13 +1244,14 @@ async function resolveTerritoryAdminUserId(input: {
     return true;
   });
 
-  matchingAdmins.sort((left, right) => {
-    const leftRank = adminLevelSpecificity[left.adminProfile!.adminLevel];
-    const rightRank = adminLevelSpecificity[right.adminProfile!.adminLevel];
-    return leftRank - rightRank;
-  });
+  if (matchingAdmins.length === 0) {
+    return null;
+  }
 
-  return matchingAdmins[0]?.id || null;
+  const topSpecificity = Math.min(...matchingAdmins.map((admin) => adminLevelSpecificity[admin.adminProfile!.adminLevel]));
+  const topMatches = matchingAdmins.filter((admin) => adminLevelSpecificity[admin.adminProfile!.adminLevel] === topSpecificity);
+
+  return topMatches.length === 1 ? topMatches[0]!.id : null;
 }
 
 function getStateReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma.StateWhereInput {
@@ -4829,7 +4862,7 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
 
 router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const pollingUnitScope = getPollingUnitScopeFilter(request.authUser);
+  const pollingUnitScope = getCoveragePollingUnitScopeFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents] = await Promise.all([
     prisma.pollingUnit.findMany({
       where: pollingUnitScope,
@@ -4877,7 +4910,7 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
 
 router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const pollingUnitScope = getPollingUnitScopeFilter(request.authUser);
+  const pollingUnitScope = getCoveragePollingUnitScopeFilter(request.authUser);
   const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
