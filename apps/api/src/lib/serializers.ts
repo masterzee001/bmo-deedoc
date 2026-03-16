@@ -565,6 +565,7 @@ export function serializePollingUnitCoverageInsight(summary: PollingUnitCoverage
 export function serializeCoverageInsights(summary: CoverageInsights): CoverageInsights {
   return {
     summary: summary.summary,
+    scopeWarning: summary.scopeWarning ?? null,
     referenceData: summary.referenceData,
     stateTargets: summary.stateTargets,
     wards: summary.wards.map(serializeWardCoverageInsight),

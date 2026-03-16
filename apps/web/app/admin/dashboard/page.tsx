@@ -133,6 +133,7 @@ export default function AdminDashboardPage() {
       <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
         <section className="panel card">
           <h2>Territory Coverage</h2>
+          {data.coverage.scopeWarning ? <p className="muted">{data.coverage.scopeWarning}</p> : null}
           <div className="reward-list">
             <article className="reward-item">
               <strong>Polling units in scope</strong>

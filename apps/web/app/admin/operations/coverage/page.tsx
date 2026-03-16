@@ -161,6 +161,7 @@ export default function AdminCoveragePage() {
       <AdminNav />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
+      {insights.scopeWarning ? <p className="muted">{insights.scopeWarning}</p> : null}
 
       <section className="grid stats">
         <article className="panel card">

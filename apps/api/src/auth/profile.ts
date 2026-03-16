@@ -70,7 +70,6 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
       : null,
     agentProfile: user.agentProfile
       ? {
-          assignedAdminUserId: user.agentProfile.assignedAdminUserId,
           politicalPartyId: user.agentProfile.politicalPartyId,
           ...toTerritorySummary(user.agentProfile),
         }

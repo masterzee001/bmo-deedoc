@@ -549,8 +549,11 @@ function getAgentScopeFilter(actor: Express.Request["authUser"]) {
   return {
     geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
     stateId: actor.adminProfile.stateId || undefined,
+    senatorialDistrictId: actor.adminProfile.senatorialDistrictId || undefined,
+    federalConstituencyId: actor.adminProfile.federalConstituencyId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
+    stateConstituencyId: actor.adminProfile.stateConstituencyId || undefined,
     pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
   };
 }
@@ -567,8 +570,11 @@ function getAgentActivityScopeFilter(actor: Express.Request["authUser"]) {
   return {
     geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
     stateId: actor.adminProfile.stateId || undefined,
+    senatorialDistrictId: actor.adminProfile.senatorialDistrictId || undefined,
+    federalConstituencyId: actor.adminProfile.federalConstituencyId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
+    stateConstituencyId: actor.adminProfile.stateConstituencyId || undefined,
     pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
   };
 }
@@ -588,6 +594,27 @@ function getFeedbackScopeFilter(actor: Express.Request["authUser"]) {
     senatorialDistrictId: actor.adminProfile.senatorialDistrictId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
+    pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
+  };
+}
+
+function getIncidentScopeFilter(actor: Express.Request["authUser"]) {
+  if (!actor || isSuperAdmin(actor)) {
+    return {};
+  }
+
+  if (!actor.adminProfile) {
+    return {};
+  }
+
+  return {
+    geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
+    stateId: actor.adminProfile.stateId || undefined,
+    senatorialDistrictId: actor.adminProfile.senatorialDistrictId || undefined,
+    federalConstituencyId: actor.adminProfile.federalConstituencyId || undefined,
+    lgaId: actor.adminProfile.lgaId || undefined,
+    wardId: actor.adminProfile.wardId || undefined,
+    stateConstituencyId: actor.adminProfile.stateConstituencyId || undefined,
     pollingUnitId: actor.adminProfile.pollingUnitId || undefined,
   };
 }
@@ -1092,37 +1119,61 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
-function getCoveragePollingUnitScopeFilter(actor: Express.Request["authUser"]): Prisma.PollingUnitWhereInput {
+async function getCoveragePollingUnitScope(actor: Express.Request["authUser"]): Promise<{
+  where: Prisma.PollingUnitWhereInput;
+  scopeWarning: string | null;
+}> {
   if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
-    return {};
+    return { where: {}, scopeWarning: null };
   }
 
   const scope = actor.adminProfile;
   if (scope.pollingUnitId) {
-    return { id: scope.pollingUnitId };
+    return { where: { id: scope.pollingUnitId }, scopeWarning: null };
   }
 
   if (scope.wardId) {
-    return { wardId: scope.wardId };
+    return { where: { wardId: scope.wardId }, scopeWarning: null };
   }
 
   if (scope.lgaId) {
-    return { lgaId: scope.lgaId };
+    return { where: { lgaId: scope.lgaId }, scopeWarning: null };
+  }
+
+  if (scope.stateConstituencyId) {
+    const constituency = await prisma.stateConstituency.findUnique({
+      where: { id: scope.stateConstituencyId },
+      select: { lgaId: true },
+    });
+
+    if (constituency?.lgaId) {
+      return { where: { lgaId: constituency.lgaId }, scopeWarning: null };
+    }
+  }
+
+  if (scope.stateId && (scope.senatorialDistrictId || scope.federalConstituencyId)) {
+    return {
+      where: { stateId: scope.stateId },
+      scopeWarning: "Polling-unit reference totals for this admin level currently fall back to state boundaries because constituency-level polling-unit mapping is not yet available in the reference dataset.",
+    };
   }
 
   if (scope.stateId) {
-    return { stateId: scope.stateId };
+    return { where: { stateId: scope.stateId }, scopeWarning: null };
   }
 
   if (scope.geoPoliticalZoneId) {
     return {
-      state: {
-        geoPoliticalZoneId: scope.geoPoliticalZoneId,
+      where: {
+        state: {
+          geoPoliticalZoneId: scope.geoPoliticalZoneId,
+        },
       },
+      scopeWarning: null,
     };
   }
 
-  return {};
+  return { where: {}, scopeWarning: null };
 }
 
 function getAdminPartyScopedAgentProfileFilter(actor: Express.Request["authUser"]): Prisma.AgentProfileWhereInput {
@@ -1153,6 +1204,90 @@ function getAdminPartyScopedAgentRelationFilter(actor: Express.Request["authUser
   return actor.adminProfile?.politicalPartyId
     ? { is: { agentProfile: { is: { politicalPartyId: actor.adminProfile.politicalPartyId } } } }
     : { is: { id: "__no_visible_party_scope__" } };
+}
+
+function getAdminPartyScopedIncidentWhere(actor: Express.Request["authUser"]): Prisma.IncidentWhereInput {
+  if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
+    return {};
+  }
+
+  const actorPartyId = actor.adminProfile?.politicalPartyId || null;
+  const voterIncidentScope: Prisma.IncidentWhereInput = {
+    reportedByUser: {
+      is: {
+        role: UserRole.VOTER,
+      },
+    },
+  };
+
+  if (!actorPartyId) {
+    return voterIncidentScope;
+  }
+
+  return {
+    OR: [
+      voterIncidentScope,
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.ADMIN,
+            adminProfile: { is: { politicalPartyId: actorPartyId } },
+          },
+        },
+      },
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.AGENT,
+            agentProfile: { is: { politicalPartyId: actorPartyId } },
+          },
+        },
+      },
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.CANDIDATE,
+            candidateProfile: { is: { politicalPartyId: actorPartyId } },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function getAdminPartyScopedFeedbackWhere(actor: Express.Request["authUser"]): Prisma.FeedbackWhereInput {
+  if (!actor || isSuperAdmin(actor) || actor.role !== UserRole.ADMIN) {
+    return {};
+  }
+
+  const actorPartyId = actor.adminProfile?.politicalPartyId || null;
+  const voterFeedbackScope: Prisma.FeedbackWhereInput = {
+    voterUserId: { not: null },
+  };
+
+  if (!actorPartyId) {
+    return voterFeedbackScope;
+  }
+
+  return {
+    OR: [
+      voterFeedbackScope,
+      {
+        agentUser: {
+          is: {
+            agentProfile: { is: { politicalPartyId: actorPartyId } },
+          },
+        },
+      },
+      {
+        candidateUser: {
+          is: {
+            candidateProfile: { is: { politicalPartyId: actorPartyId } },
+          },
+        },
+      },
+    ],
+  };
 }
 
 function canSetStateAgentTarget(actor: Express.Request["authUser"], stateId: string) {
@@ -2201,7 +2336,6 @@ router.get("/users/manage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), as
       officeType: user.candidateProfile?.officeType || null,
       politicalPartyId: user.adminProfile?.politicalPartyId || user.candidateProfile?.politicalPartyId || user.agentProfile?.politicalPartyId || null,
       voterCardNumber: user.voterProfile?.voterCardNumber || null,
-      assignedAdminUserId: user.agentProfile?.assignedAdminUserId || null,
     });
   }
 
@@ -2755,7 +2889,6 @@ router.get("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
       email: agent.email,
       isActive: agent.isActive,
       phone: agent.phone || null,
-      assignedAdminUserId: agent.agentProfile!.assignedAdminUserId || null,
       politicalPartyId: agent.agentProfile!.politicalPartyId || null,
       territory: serializeTerritory(agent.agentProfile!),
     }));
@@ -3426,6 +3559,7 @@ router.get("/agent-activities", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
   const activities = await prisma.agentActivity.findMany({
     where: {
       ...scopeFilter,
+      agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
       agentUserId: parsed.data.agentUserId,
       type: parsed.data.type,
       createdAt: createdAtFilter,
@@ -3576,8 +3710,12 @@ router.get("/polls/:pollId/results", requireAuth, requireRole("ADMIN", "SUPER_AD
 
 router.get("/feedback", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const actorScope = getFeedbackScopeFilter(request.authUser);
+  const partyScope = getAdminPartyScopedFeedbackWhere(request.authUser);
   const feedback = await prisma.feedback.findMany({
-    where: actorScope,
+    where: {
+      ...actorScope,
+      ...partyScope,
+    },
     orderBy: { createdAt: "desc" },
     take: 20,
   });
@@ -3597,7 +3735,8 @@ router.get("/incidents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
   const pageSize = parsed.data.pageSize || 20;
   const incidents = await prisma.incident.findMany({
     where: {
-      ...getFeedbackScopeFilter(request.authUser),
+      ...getIncidentScopeFilter(request.authUser),
+      ...getAdminPartyScopedIncidentWhere(request.authUser),
       status: parsed.data.status,
       type: parsed.data.type,
       createdAt: getDateRange(parsed.data),
@@ -4533,7 +4672,10 @@ router.get("/map-summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), asy
       },
     }),
     prisma.incident.findMany({
-      where: getFeedbackScopeFilter(request.authUser),
+      where: {
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
@@ -4862,7 +5004,8 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
 
 router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const pollingUnitScope = getCoveragePollingUnitScopeFilter(request.authUser);
+  const { where: pollingUnitScope, scopeWarning } = await getCoveragePollingUnitScope(request.authUser);
+  const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents] = await Promise.all([
     prisma.pollingUnit.findMany({
       where: pollingUnitScope,
@@ -4871,6 +5014,7 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
     prisma.agentProfile.findMany({
       where: {
         ...toScopeFilter(getAgentScopeFilter(request.authUser)),
+        ...partyScopedAgentProfileFilter,
         pollingUnitId: { not: null },
       },
       select: { pollingUnitId: true },
@@ -4878,6 +5022,7 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
     prisma.agentActivity.findMany({
       where: {
         ...toScopeFilter(getAgentActivityScopeFilter(request.authUser)),
+        agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
         pollingUnitId: { not: null },
         createdAt: { gte: recentActivitySince },
       },
@@ -4885,7 +5030,8 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
     }),
     prisma.incident.findMany({
       where: {
-        ...getFeedbackScopeFilter(request.authUser),
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
         pollingUnitId: { not: null },
       },
       select: { pollingUnitId: true },
@@ -4904,13 +5050,14 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
       pollingUnitsWithRecentActivity: recentSet.size,
       pollingUnitsWithIncidents: incidentSet.size,
       pollingUnitsWithoutActivity: Math.max(totalPollingUnitsInScope - recentSet.size, 0),
+      scopeWarning,
     }),
   });
 });
 
 router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const pollingUnitScope = getCoveragePollingUnitScopeFilter(request.authUser);
+  const { where: pollingUnitScope, scopeWarning } = await getCoveragePollingUnitScope(request.authUser);
   const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
@@ -4947,7 +5094,8 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     }),
     prisma.incident.findMany({
       where: {
-        ...getFeedbackScopeFilter(request.authUser),
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
         pollingUnitId: { not: null },
         status: { in: [IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS] },
       },
@@ -5152,7 +5300,9 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
         assignedAgentsInScope,
         targetAgentsInScope,
         remainingAgentsToTarget,
+        scopeWarning,
       },
+      scopeWarning,
       referenceData: {
         loadedStates,
         loadedLgas,
@@ -5190,7 +5340,8 @@ router.get("/recent-changes", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), 
   const [newIncidents, newAgentActivities, updatedIncidentStatuses] = await Promise.all([
     prisma.incident.findMany({
       where: {
-        ...getFeedbackScopeFilter(request.authUser),
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
         createdAt: { gt: since },
       },
       orderBy: { createdAt: "desc" },
@@ -5199,6 +5350,7 @@ router.get("/recent-changes", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), 
     prisma.agentActivity.findMany({
       where: {
         ...toScopeFilter(getAgentActivityScopeFilter(request.authUser)),
+        agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
         createdAt: { gt: since },
       },
       orderBy: { createdAt: "desc" },
@@ -5206,7 +5358,8 @@ router.get("/recent-changes", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), 
     }),
     prisma.incident.findMany({
       where: {
-        ...getFeedbackScopeFilter(request.authUser),
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
         updatedAt: { gt: since },
         NOT: { createdAt: { gt: since } },
       },
@@ -5232,7 +5385,8 @@ router.get("/analytics", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
   const [incidents, agentActivities, rewards, polls, voterRegistrations] = await Promise.all([
     prisma.incident.findMany({
       where: {
-        ...getFeedbackScopeFilter(request.authUser),
+        ...getIncidentScopeFilter(request.authUser),
+        ...getAdminPartyScopedIncidentWhere(request.authUser),
         createdAt: dateRange,
       },
       select: { type: true, severity: true, status: true },
@@ -5240,6 +5394,7 @@ router.get("/analytics", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async
     prisma.agentActivity.findMany({
       where: {
         ...toScopeFilter(getAgentActivityScopeFilter(request.authUser)),
+        agentUser: getAdminPartyScopedAgentRelationFilter(request.authUser),
         createdAt: dateRange,
       },
       select: { type: true },
@@ -5356,8 +5511,11 @@ router.get("/summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
   const actor = request.authUser;
   const voterScopeFilter = getVoterScopeFilter(actor);
   const agentScopeFilter = getAgentScopeFilter(actor);
+  const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(actor);
   const feedbackScopeFilter = getFeedbackScopeFilter(actor);
+  const partyScopedFeedbackFilter = getAdminPartyScopedFeedbackWhere(actor);
   const pollScopeFilter = getPollScopeFilter(actor);
+  const incidentScopeFilter = getIncidentScopeFilter(actor);
   const todayStart = getTodayStart();
 
   const [
@@ -5375,12 +5533,13 @@ router.get("/summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
   ] =
     await Promise.all([
       prisma.voterProfile.count({ where: voterScopeFilter }),
-      prisma.agentProfile.count({ where: agentScopeFilter }),
-      prisma.feedback.count({ where: feedbackScopeFilter }),
+      prisma.agentProfile.count({ where: { ...agentScopeFilter, ...partyScopedAgentProfileFilter } }),
+      prisma.feedback.count({ where: { ...feedbackScopeFilter, ...partyScopedFeedbackFilter } }),
       prisma.poll.count({ where: { ...pollScopeFilter, isActive: true } }),
       prisma.agentActivity.count({
         where: {
           ...toScopeFilter(getAgentActivityScopeFilter(actor)),
+          agentUser: getAdminPartyScopedAgentRelationFilter(actor),
           type: AgentActivityType.CHECK_IN,
           createdAt: { gte: todayStart },
         },
@@ -5388,6 +5547,7 @@ router.get("/summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
       prisma.agentActivity.findMany({
         where: {
           ...toScopeFilter(getAgentActivityScopeFilter(actor)),
+          agentUser: getAdminPartyScopedAgentRelationFilter(actor),
           createdAt: { gte: todayStart },
         },
         select: { agentUserId: true },
@@ -5395,13 +5555,15 @@ router.get("/summary", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
       }),
       prisma.incident.count({
         where: {
-          ...getFeedbackScopeFilter(actor),
+          ...incidentScopeFilter,
+          ...getAdminPartyScopedIncidentWhere(actor),
           status: IncidentStatus.OPEN,
         },
       }),
       prisma.incident.count({
         where: {
-          ...getFeedbackScopeFilter(actor),
+          ...incidentScopeFilter,
+          ...getAdminPartyScopedIncidentWhere(actor),
           severity: IncidentSeverity.CRITICAL,
         },
       }),

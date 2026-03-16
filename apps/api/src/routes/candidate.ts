@@ -139,7 +139,9 @@ const candidateEventUpdateSchema = z.object({
   }
 });
 
-function buildCandidateScope(candidateProfile: NonNullable<Request["authUser"]>["candidateProfile"]) {
+type CandidateAuthProfile = NonNullable<NonNullable<Request["authUser"]>["candidateProfile"]>;
+
+function buildCandidateScope(candidateProfile: CandidateAuthProfile) {
   return {
     geoPoliticalZoneId: candidateProfile?.geoPoliticalZoneId || undefined,
     stateId: candidateProfile?.stateId || undefined,
@@ -149,6 +151,86 @@ function buildCandidateScope(candidateProfile: NonNullable<Request["authUser"]>[
     wardId: candidateProfile?.wardId || undefined,
     stateConstituencyId: candidateProfile?.stateConstituencyId || undefined,
     pollingUnitId: candidateProfile?.pollingUnitId || undefined,
+  };
+}
+
+function getCandidatePartyScopedIncidentWhere(
+  candidateProfile: CandidateAuthProfile,
+): Prisma.IncidentWhereInput {
+  const partyId = candidateProfile.politicalPartyId || null;
+  const voterIncidentScope: Prisma.IncidentWhereInput = {
+    reportedByUser: {
+      is: {
+        role: UserRole.VOTER,
+      },
+    },
+  };
+
+  if (!partyId) {
+    return voterIncidentScope;
+  }
+
+  return {
+    OR: [
+      voterIncidentScope,
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.ADMIN,
+            adminProfile: { is: { politicalPartyId: partyId } },
+          },
+        },
+      },
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.AGENT,
+            agentProfile: { is: { politicalPartyId: partyId } },
+          },
+        },
+      },
+      {
+        reportedByUser: {
+          is: {
+            role: UserRole.CANDIDATE,
+            candidateProfile: { is: { politicalPartyId: partyId } },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function getCandidatePartyScopedFeedbackWhere(
+  candidateProfile: CandidateAuthProfile,
+): Prisma.FeedbackWhereInput {
+  const partyId = candidateProfile.politicalPartyId || null;
+  const voterFeedbackScope: Prisma.FeedbackWhereInput = {
+    voterUserId: { not: null },
+  };
+
+  if (!partyId) {
+    return voterFeedbackScope;
+  }
+
+  return {
+    OR: [
+      voterFeedbackScope,
+      {
+        agentUser: {
+          is: {
+            agentProfile: { is: { politicalPartyId: partyId } },
+          },
+        },
+      },
+      {
+        candidateUser: {
+          is: {
+            candidateProfile: { is: { politicalPartyId: partyId } },
+          },
+        },
+      },
+    ],
   };
 }
 
@@ -1228,6 +1310,7 @@ router.get("/feedback", requireAuth, requireRole("CANDIDATE"), async (request, r
 
   const feedback = await prisma.feedback.findMany({
     where: {
+      ...getCandidatePartyScopedFeedbackWhere(candidateProfile),
       OR: [
         { candidateUserId: actor.id },
         {
@@ -1259,6 +1342,7 @@ router.get("/incidents", requireAuth, requireRole("CANDIDATE"), async (request, 
 
   const incidents = await prisma.incident.findMany({
     where: {
+      ...getCandidatePartyScopedIncidentWhere(candidateProfile),
       stateId: candidateProfile.stateId || undefined,
       senatorialDistrictId: candidateProfile.senatorialDistrictId || undefined,
       lgaId: candidateProfile.lgaId || undefined,
@@ -1354,11 +1438,8 @@ router.get("/map-summary", requireAuth, requireRole("CANDIDATE"), async (request
     }),
     prisma.incident.findMany({
       where: {
-        stateId: candidateProfile.stateId || undefined,
-        senatorialDistrictId: candidateProfile.senatorialDistrictId || undefined,
-        lgaId: candidateProfile.lgaId || undefined,
-        wardId: candidateProfile.wardId || undefined,
-        pollingUnitId: candidateProfile.pollingUnitId || undefined,
+        ...scope,
+        ...getCandidatePartyScopedIncidentWhere(candidateProfile),
       },
       orderBy: { createdAt: "desc" },
       take: 100,

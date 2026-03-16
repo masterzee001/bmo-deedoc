@@ -209,7 +209,6 @@ export type AuthUserProfile = {
     referredByUserId: string | null;
   } & TerritorySummary) | null;
   agentProfile: ({
-    assignedAdminUserId: string | null;
     politicalPartyId: string | null;
   } & TerritorySummary) | null;
 };
@@ -365,7 +364,6 @@ export type AgentUserItem = {
   email: string;
   isActive: boolean;
   phone: string | null;
-  assignedAdminUserId: string | null;
   politicalPartyId: string | null;
   territory: TerritorySummary;
 };
@@ -405,7 +403,6 @@ export type ManagedUserItem = {
   officeType: CandidateOfficeType | null;
   politicalPartyId: string | null;
   voterCardNumber: string | null;
-  assignedAdminUserId: string | null;
 };
 
 export type PoliticalPartyItem = {
@@ -581,6 +578,7 @@ export type PollingUnitCoverageSummary = {
   pollingUnitsWithRecentActivity: number;
   pollingUnitsWithIncidents: number;
   pollingUnitsWithoutActivity: number;
+  scopeWarning?: string | null;
 };
 
 export type ReferenceDataReadinessSummary = {
@@ -652,6 +650,7 @@ export type CoverageInsights = {
     targetAgentsInScope: number;
     remainingAgentsToTarget: number;
   };
+  scopeWarning?: string | null;
   referenceData: ReferenceDataReadinessSummary;
   stateTargets: StateCoverageTargetItem[];
   wards: WardCoverageInsight[];
