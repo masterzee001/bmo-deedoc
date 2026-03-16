@@ -1,18 +1,23 @@
 :root {
   color-scheme: light;
-  --flag-green: #0b8f47;
-  --flag-white: #f7fff9;
-  --bg: #f5efe0;
-  --panel: rgba(255, 251, 241, 0.88);
-  --panel-strong: #fffdf8;
-  --text: #162116;
-  --muted: #5f6758;
-  --line: rgba(57, 74, 47, 0.16);
+  --flag-green: #0a8f4d;
+  --flag-white: #f7fbf8;
+  --navy: #12314b;
+  --navy-soft: #1d4464;
+  --bg: #eef3f1;
+  --bg-deep: #e2ebe7;
+  --panel: rgba(249, 252, 250, 0.9);
+  --panel-strong: #ffffff;
+  --panel-tint: rgba(235, 244, 239, 0.82);
+  --text: #122435;
+  --muted: #5d6f7a;
+  --line: rgba(18, 49, 75, 0.12);
+  --line-strong: rgba(18, 49, 75, 0.18);
   --accent: #0c6b4f;
-  --accent-2: #d88a1d;
+  --accent-2: #1d4464;
   --accent-3: #9f2f2d;
   --danger: #a12828;
-  --shadow: 0 18px 60px rgba(36, 48, 34, 0.12);
+  --shadow: 0 18px 50px rgba(18, 49, 75, 0.1);
 }
 
 * {
@@ -27,9 +32,9 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   background:
-    radial-gradient(circle at top left, rgba(216, 138, 29, 0.14), transparent 26%),
-    radial-gradient(circle at top right, rgba(12, 107, 79, 0.18), transparent 24%),
-    linear-gradient(180deg, #fff8e8 0%, #f6efdf 34%, #efe6d2 100%);
+    radial-gradient(circle at top left, rgba(18, 49, 75, 0.1), transparent 24%),
+    radial-gradient(circle at top right, rgba(10, 143, 77, 0.12), transparent 22%),
+    linear-gradient(180deg, #f5f9f7 0%, var(--bg) 38%, var(--bg-deep) 100%);
   color: var(--text);
   font-family: "Palatino Linotype", "Book Antiqua", Baskerville, Georgia, serif;
 }
@@ -47,9 +52,9 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    linear-gradient(130deg, rgba(255, 255, 255, 0.2), transparent 40%),
-    repeating-linear-gradient(90deg, rgba(22, 33, 22, 0.018) 0, rgba(22, 33, 22, 0.018) 1px, transparent 1px, transparent 32px);
-  opacity: 0.55;
+    linear-gradient(130deg, rgba(255, 255, 255, 0.28), transparent 42%),
+    repeating-linear-gradient(90deg, rgba(18, 49, 75, 0.024) 0, rgba(18, 49, 75, 0.024) 1px, transparent 1px, transparent 36px);
+  opacity: 0.45;
 }
 
 body::after {
@@ -94,10 +99,10 @@ textarea {
   z-index: -1;
   border-radius: 28px;
   background:
-    linear-gradient(180deg, rgba(11, 143, 71, 0.09), rgba(247, 255, 249, 0.05) 34%, rgba(11, 143, 71, 0.08)),
-    linear-gradient(90deg, rgba(11, 143, 71, 0.12) 0 33.33%, rgba(255, 255, 255, 0.12) 33.33% 66.66%, rgba(11, 143, 71, 0.12) 66.66% 100%);
-  filter: blur(18px);
-  opacity: 0.7;
+    linear-gradient(180deg, rgba(18, 49, 75, 0.08), rgba(247, 251, 248, 0.02) 34%, rgba(10, 143, 77, 0.07)),
+    linear-gradient(90deg, rgba(18, 49, 75, 0.08) 0 33.33%, rgba(255, 255, 255, 0.08) 33.33% 66.66%, rgba(10, 143, 77, 0.08) 66.66% 100%);
+  filter: blur(20px);
+  opacity: 0.62;
 }
 
 .panel {
@@ -118,7 +123,7 @@ textarea {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(145deg, rgba(255, 253, 248, 0.92), rgba(244, 235, 210, 0.92)),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(238, 246, 242, 0.94)),
     var(--panel);
   border-top: 8px solid var(--flag-green);
 }
@@ -133,7 +138,7 @@ textarea {
   width: 220px;
   height: 220px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(12, 107, 79, 0.2), transparent 65%);
+  background: radial-gradient(circle, rgba(18, 49, 75, 0.12), transparent 65%);
 }
 
 .hero::before {
@@ -167,7 +172,7 @@ textarea {
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(252, 255, 253, 0.9);
 }
 
 .feedback-banner.success {
@@ -191,7 +196,7 @@ textarea {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(20, 26, 20, 0.34);
+  background: rgba(15, 32, 48, 0.36);
   z-index: 90;
 }
 
@@ -199,7 +204,7 @@ textarea {
   width: min(100%, 420px);
   padding: 24px;
   border-radius: 20px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--panel-strong);
   box-shadow: var(--shadow);
 }
@@ -216,7 +221,7 @@ textarea {
 .value {
   font-size: clamp(2rem, 3vw, 2.6rem);
   font-weight: 700;
-  color: var(--accent);
+  color: var(--navy);
 }
 
 .form {
@@ -247,16 +252,17 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  color: var(--text);
 }
 
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
   outline: none;
-  border-color: rgba(12, 107, 79, 0.42);
-  box-shadow: 0 0 0 4px rgba(12, 107, 79, 0.12);
+  border-color: rgba(18, 49, 75, 0.3);
+  box-shadow: 0 0 0 4px rgba(18, 49, 75, 0.1);
   transform: translateY(-1px);
 }
 
@@ -264,17 +270,17 @@ textarea {
   border: 0;
   border-radius: 999px;
   padding: 12px 16px;
-  background: linear-gradient(135deg, var(--accent), #17936c);
+  background: linear-gradient(135deg, var(--navy), var(--accent));
   color: #fff;
   cursor: pointer;
   font-weight: 700;
-  box-shadow: 0 10px 24px rgba(12, 107, 79, 0.22);
+  box-shadow: 0 10px 24px rgba(18, 49, 75, 0.2);
   transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
 }
 
 .button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(12, 107, 79, 0.28);
+  box-shadow: 0 14px 28px rgba(18, 49, 75, 0.24);
 }
 
 .button:disabled {
@@ -283,8 +289,8 @@ textarea {
 }
 
 .secondary {
-  background: linear-gradient(135deg, #7b6547, #9a7d58);
-  box-shadow: 0 10px 24px rgba(90, 69, 43, 0.18);
+  background: linear-gradient(135deg, #456279, var(--navy-soft));
+  box-shadow: 0 10px 24px rgba(18, 49, 75, 0.18);
 }
 
 .button.danger {
@@ -310,7 +316,7 @@ textarea {
   border-radius: 18px;
   padding: 16px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(250, 244, 231, 0.92));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 247, 243, 0.96));
   position: relative;
   overflow: hidden;
 }
@@ -324,7 +330,7 @@ textarea {
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(216, 138, 29, 0.12), transparent 68%);
+  background: radial-gradient(circle, rgba(18, 49, 75, 0.08), transparent 68%);
 }
 
 .action-row {
@@ -353,8 +359,8 @@ textarea {
   min-width: 92px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(12, 107, 79, 0.1);
-  color: var(--accent);
+  background: rgba(18, 49, 75, 0.08);
+  color: var(--navy);
   font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -372,7 +378,7 @@ textarea {
 
 .management-console {
   background:
-    linear-gradient(140deg, rgba(255, 251, 241, 0.95), rgba(242, 233, 210, 0.95)),
+    linear-gradient(140deg, rgba(255, 255, 255, 0.96), rgba(236, 245, 240, 0.94)),
     var(--panel);
 }
 
@@ -396,7 +402,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .live-map-layout {
@@ -417,17 +423,17 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 24px;
   background:
-    radial-gradient(circle at 20% 20%, rgba(12, 107, 79, 0.16), transparent 18%),
-    radial-gradient(circle at 80% 24%, rgba(216, 138, 29, 0.18), transparent 16%),
-    linear-gradient(160deg, rgba(255, 250, 240, 0.95), rgba(237, 228, 205, 0.98));
+    radial-gradient(circle at 20% 20%, rgba(18, 49, 75, 0.14), transparent 18%),
+    radial-gradient(circle at 80% 24%, rgba(10, 143, 77, 0.12), transparent 16%),
+    linear-gradient(160deg, rgba(250, 253, 251, 0.98), rgba(230, 239, 235, 0.98));
 }
 
 .live-map-grid {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(rgba(95, 103, 88, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(95, 103, 88, 0.08) 1px, transparent 1px);
+    linear-gradient(rgba(29, 68, 100, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(29, 68, 100, 0.08) 1px, transparent 1px);
   background-size: 52px 52px;
   mask-image: radial-gradient(circle at center, #000 58%, transparent 100%);
 }
@@ -511,7 +517,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.88);
   text-align: left;
   cursor: pointer;
 }
@@ -534,8 +540,8 @@ textarea {
   height: 104px;
   border-radius: 28px;
   object-fit: cover;
-  border: 3px solid rgba(0, 104, 55, 0.18);
-  box-shadow: 0 20px 36px rgba(0, 48, 24, 0.14);
+  border: 3px solid rgba(18, 49, 75, 0.12);
+  box-shadow: 0 20px 36px rgba(18, 49, 75, 0.12);
 }
 
 .candidate-portrait.fallback,
@@ -543,7 +549,7 @@ textarea {
 .campaign-material-preview.fallback {
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, rgba(0, 104, 55, 0.92), rgba(247, 247, 244, 0.95));
+  background: linear-gradient(135deg, var(--navy), rgba(10, 143, 77, 0.9));
   color: #fff;
   font-weight: 700;
 }
@@ -570,8 +576,8 @@ textarea {
 }
 
 .status-badge.live {
-  background: rgba(0, 104, 55, 0.12);
-  color: #075c35;
+  background: rgba(10, 143, 77, 0.12);
+  color: #0a6a43;
 }
 
 .status-badge.draft {
@@ -611,7 +617,7 @@ textarea {
   padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .candidate-grid {
@@ -628,7 +634,7 @@ textarea {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  background: linear-gradient(135deg, rgba(0, 104, 55, 0.16), rgba(255, 255, 255, 0.92));
+  background: linear-gradient(135deg, rgba(18, 49, 75, 0.12), rgba(255, 255, 255, 0.94));
 }
 
 .candidate-card-body {
@@ -655,7 +661,7 @@ textarea {
   min-height: 220px;
   border-radius: 18px;
   object-fit: cover;
-  background: rgba(0, 104, 55, 0.06);
+  background: rgba(18, 49, 75, 0.05);
 }
 
 .candidate-material-copy {
@@ -677,9 +683,9 @@ textarea {
   padding: 18px;
   border-radius: 22px;
   background:
-    linear-gradient(135deg, rgba(0, 104, 55, 0.2), rgba(255, 255, 255, 0.9)),
-    repeating-linear-gradient(135deg, rgba(0, 104, 55, 0.08) 0 12px, rgba(255, 255, 255, 0.08) 12px 24px);
-  border: 1px solid rgba(0, 104, 55, 0.14);
+    linear-gradient(135deg, rgba(18, 49, 75, 0.14), rgba(255, 255, 255, 0.94)),
+    repeating-linear-gradient(135deg, rgba(10, 143, 77, 0.06) 0 12px, rgba(255, 255, 255, 0.08) 12px 24px);
+  border: 1px solid rgba(18, 49, 75, 0.12);
 }
 
 .hero-callout strong {
@@ -702,9 +708,9 @@ textarea {
   gap: 0;
   overflow: hidden;
   border-radius: 22px;
-  border: 1px solid rgba(0, 104, 55, 0.12);
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 20px 40px rgba(0, 40, 20, 0.08);
+  border: 1px solid rgba(18, 49, 75, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 20px 40px rgba(18, 49, 75, 0.08);
 }
 
 .campaign-event-cover {
@@ -712,8 +718,8 @@ textarea {
   aspect-ratio: 16 / 9;
   object-fit: cover;
   background:
-    linear-gradient(135deg, rgba(0, 104, 55, 0.24), rgba(255, 255, 255, 0.94)),
-    radial-gradient(circle at top right, rgba(0, 104, 55, 0.18), transparent 55%);
+    linear-gradient(135deg, rgba(18, 49, 75, 0.18), rgba(255, 255, 255, 0.94)),
+    radial-gradient(circle at top right, rgba(10, 143, 77, 0.14), transparent 55%);
 }
 
 .campaign-event-copy {
@@ -723,14 +729,14 @@ textarea {
 }
 
 .candidate-card {
-  border: 1px solid rgba(0, 104, 55, 0.12);
-  box-shadow: 0 18px 38px rgba(0, 40, 20, 0.08);
+  border: 1px solid rgba(18, 49, 75, 0.1);
+  box-shadow: 0 18px 38px rgba(18, 49, 75, 0.08);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
 .candidate-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 26px 46px rgba(0, 40, 20, 0.12);
+  box-shadow: 0 26px 46px rgba(18, 49, 75, 0.12);
 }
 
 .candidate-discovery-hero,
@@ -751,7 +757,7 @@ textarea {
   width: 220px;
   height: 220px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(0, 104, 55, 0.14), transparent 68%);
+  background: radial-gradient(circle, rgba(18, 49, 75, 0.1), transparent 68%);
   pointer-events: none;
 }
 
