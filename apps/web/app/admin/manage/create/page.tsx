@@ -10,6 +10,7 @@ import type {
   CandidateListItem,
   FederalConstituencyItem,
   LgaItem,
+  PollingUnitItem,
   PoliticalPartyItem,
   SenatorialDistrictItem,
   StateConstituencyItem,
@@ -27,6 +28,7 @@ import {
   fetchCurrentUser,
   fetchFederalConstituencies,
   fetchLgas,
+  fetchPollingUnits,
   fetchPoliticalParties,
   fetchSenatorialDistricts,
   fetchStates,
@@ -85,6 +87,7 @@ export default function AdminManageCreatePage() {
   const [federalConstituencies, setFederalConstituencies] = useState<FederalConstituencyItem[]>([]);
   const [lgas, setLgas] = useState<LgaItem[]>([]);
   const [wards, setWards] = useState<WardItem[]>([]);
+  const [pollingUnits, setPollingUnits] = useState<PollingUnitItem[]>([]);
   const [stateConstituencies, setStateConstituencies] = useState<StateConstituencyItem[]>([]);
   const [mode, setMode] = useState<PageMode>("create");
   const [role, setRole] = useState<ManagedRole>("ADMIN");
@@ -135,28 +138,32 @@ export default function AdminManageCreatePage() {
     return CANDIDATE_OFFICE_TYPES.filter((office) => adminLevelRank[user.adminProfile!.adminLevel] >= candidateOfficeRank[office]);
   }, [user]);
 
-  async function refreshLookups(token: string, stateId?: string, lgaId?: string, senatorialDistrictId?: string) {
+  async function refreshLookups(token: string, stateId?: string, lgaId?: string, senatorialDistrictId?: string, wardId?: string) {
     if (!stateId) {
       setDistricts([]);
       setFederalConstituencies([]);
       setLgas([]);
       setWards([]);
+      setPollingUnits([]);
       setStateConstituencies([]);
       return;
     }
 
-    const [nextDistricts, nextFederal, nextLgas, nextStateConstituencies] = await Promise.all([
+    const [nextDistricts, nextFederal, nextLgas, nextStateConstituencies, nextWards, nextPollingUnits] = await Promise.all([
       fetchSenatorialDistricts(token, stateId),
       fetchFederalConstituencies(token, stateId, senatorialDistrictId || undefined),
       fetchLgas(token, stateId),
       fetchStateConstituencies(token, stateId, lgaId || undefined),
+      lgaId ? fetchWards(token, stateId, lgaId) : Promise.resolve([]),
+      lgaId && wardId ? fetchPollingUnits(token, stateId, lgaId, wardId) : Promise.resolve([]),
     ]);
 
     setDistricts(nextDistricts);
     setFederalConstituencies(nextFederal);
     setLgas(nextLgas);
     setStateConstituencies(nextStateConstituencies);
-    setWards(lgaId ? await fetchWards(token, stateId, lgaId) : []);
+    setWards(nextWards);
+    setPollingUnits(nextPollingUnits);
   }
 
   async function hydrate(token: string) {
@@ -203,7 +210,7 @@ export default function AdminManageCreatePage() {
       setCandidateForm((current) => ({ ...current, stateId: locatorStateId, lgaId: locatorLgaId, wardId: locatorWardId }));
       setAgentForm((current) => ({ ...current, stateId: locatorStateId, lgaId: locatorLgaId, wardId: locatorWardId }));
       if (locatorStateId) {
-        await refreshLookups(token, locatorStateId, locatorLgaId || undefined);
+        await refreshLookups(token, locatorStateId, locatorLgaId || undefined, undefined, locatorWardId || undefined);
       }
     }
 
@@ -227,7 +234,13 @@ export default function AdminManageCreatePage() {
           wardId: target.territory.wardId || "",
           stateConstituencyId: target.territory.stateConstituencyId || "",
         });
-        await refreshLookups(token, target.territory.stateId || undefined, target.territory.lgaId || undefined, target.territory.senatorialDistrictId || undefined);
+        await refreshLookups(
+          token,
+          target.territory.stateId || undefined,
+          target.territory.lgaId || undefined,
+          target.territory.senatorialDistrictId || undefined,
+          target.territory.wardId || undefined,
+        );
       }
     }
 
@@ -247,7 +260,13 @@ export default function AdminManageCreatePage() {
           wardId: target.territory.wardId || "",
           stateConstituencyId: target.territory.stateConstituencyId || "",
         });
-        await refreshLookups(token, target.territory.stateId || undefined, target.territory.lgaId || undefined, target.territory.senatorialDistrictId || undefined);
+        await refreshLookups(
+          token,
+          target.territory.stateId || undefined,
+          target.territory.lgaId || undefined,
+          target.territory.senatorialDistrictId || undefined,
+          target.territory.wardId || undefined,
+        );
       }
     }
 
@@ -269,7 +288,13 @@ export default function AdminManageCreatePage() {
           wardId: target.territory.wardId || "",
           stateConstituencyId: target.territory.stateConstituencyId || "",
         });
-        await refreshLookups(token, target.territory.stateId || undefined, target.territory.lgaId || undefined, target.territory.senatorialDistrictId || undefined);
+        await refreshLookups(
+          token,
+          target.territory.stateId || undefined,
+          target.territory.lgaId || undefined,
+          target.territory.senatorialDistrictId || undefined,
+          target.territory.wardId || undefined,
+        );
       }
     }
   }
@@ -333,6 +358,13 @@ export default function AdminManageCreatePage() {
       }
 
       if (role === "AGENT") {
+        if (!agentForm.politicalPartyId) {
+          throw new Error("Each agent must be linked to a political party.");
+        }
+        if (!agentForm.pollingUnitId) {
+          throw new Error("Each agent must be assigned to a polling unit.");
+        }
+
         const result: { message: string } = mode === "create"
           ? await createAgent(token, agentForm)
           : await updateAgent(token, selectedUserId, {
@@ -537,15 +569,43 @@ export default function AdminManageCreatePage() {
 
           <label className="field">
             <span>Ward</span>
-            <select value={role === "ADMIN" ? adminForm.wardId : role === "CANDIDATE" ? candidateForm.wardId : agentForm.wardId} onChange={(event) => {
-              if (role === "ADMIN") { setAdminForm({ ...adminForm, wardId: event.target.value }); }
-              if (role === "CANDIDATE") { setCandidateForm({ ...candidateForm, wardId: event.target.value }); }
-              if (role === "AGENT") { setAgentForm({ ...agentForm, wardId: event.target.value }); }
+            <select value={role === "ADMIN" ? adminForm.wardId : role === "CANDIDATE" ? candidateForm.wardId : agentForm.wardId} onChange={async (event) => {
+              const value = event.target.value;
+              const token = localStorage.getItem("picsNigeriaAdminToken");
+              const currentStateId = role === "ADMIN" ? adminForm.stateId : role === "CANDIDATE" ? candidateForm.stateId : agentForm.stateId;
+              const currentLgaId = role === "ADMIN" ? adminForm.lgaId : role === "CANDIDATE" ? candidateForm.lgaId : agentForm.lgaId;
+              if (token && currentStateId && currentLgaId) {
+                await refreshLookups(
+                  token,
+                  currentStateId,
+                  currentLgaId,
+                  role === "ADMIN" ? adminForm.senatorialDistrictId : role === "CANDIDATE" ? candidateForm.senatorialDistrictId : agentForm.senatorialDistrictId,
+                  value || undefined,
+                );
+              } else {
+                setPollingUnits([]);
+              }
+              if (role === "ADMIN") { setAdminForm({ ...adminForm, wardId: value }); }
+              if (role === "CANDIDATE") { setCandidateForm({ ...candidateForm, wardId: value }); }
+              if (role === "AGENT") { setAgentForm({ ...agentForm, wardId: value, pollingUnitId: "" }); }
             }}>
               <option value="">Unspecified</option>
               {wards.filter((item) => !user.adminProfile?.wardId || item.id === user.adminProfile.wardId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
+
+          {role === "AGENT" ? (
+            <label className="field">
+              <span>Polling unit</span>
+              <select
+                value={agentForm.pollingUnitId}
+                onChange={(event) => setAgentForm({ ...agentForm, pollingUnitId: event.target.value })}
+              >
+                <option value="">Select polling unit</option>
+                {pollingUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          ) : null}
 
           {role === "AGENT" ? (
             <label className="field">
@@ -563,6 +623,12 @@ export default function AdminManageCreatePage() {
             </button>
             <Link className="button secondary" href="/admin/manage/users">Back to user list</Link>
           </div>
+          {role === "AGENT" && agentForm.wardId && pollingUnits.length === 0 ? (
+            <p className="muted">No polling units are loaded for this ward yet. Load or sync polling units before creating agents in this territory.</p>
+          ) : null}
+          {role === "AGENT" ? (
+            <p className="muted">Each agent must be assigned to a single polling unit.</p>
+          ) : null}
         </div>
       </section>
     </main>

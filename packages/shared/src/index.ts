@@ -583,12 +583,23 @@ export type PollingUnitCoverageSummary = {
   pollingUnitsWithoutActivity: number;
 };
 
+export type ReferenceDataReadinessSummary = {
+  loadedStates: number;
+  loadedLgas: number;
+  loadedWards: number;
+  loadedPollingUnits: number;
+  loadedWardsWithoutPollingUnits: number;
+};
+
 export type WardCoverageInsight = {
   wardId: string;
   wardName: string;
   lgaId: string;
   lgaName: string;
   pollingUnitCount: number;
+  assignedAgentCount: number;
+  targetAgentCount: number;
+  remainingAgentCount: number;
   pollingUnitsWithoutAgents: number;
   pollingUnitsWithoutRecentActivity: number;
   openIncidentCount: number;
@@ -597,11 +608,15 @@ export type WardCoverageInsight = {
 export type PollingUnitCoverageInsight = {
   pollingUnitId: string;
   pollingUnitName: string;
+  stateId: string;
+  stateName: string;
   wardId: string;
   wardName: string;
   lgaId: string;
   lgaName: string;
   assignedAgentCount: number;
+  targetAgentCount: number;
+  remainingAgentCount: number;
   recentActivityCount: number;
   openIncidentCount: number;
   hasAssignedAgent: boolean;
@@ -609,14 +624,39 @@ export type PollingUnitCoverageInsight = {
   requiresAttention: boolean;
 };
 
+export type AgentPollingUnitGapItem = {
+  userId: string;
+  name: string;
+  email: string;
+  politicalPartyId: string | null;
+  territory: TerritorySummary;
+};
+
+export type StateCoverageTargetItem = {
+  stateId: string;
+  stateName: string;
+  targetAgentsPerPollingUnit: number;
+  pollingUnitCount: number;
+  assignedAgentCount: number;
+  targetAgentCount: number;
+  remainingAgentCount: number;
+};
+
 export type CoverageInsights = {
   summary: PollingUnitCoverageSummary & {
     wardsInScope: number;
     weakCoveragePollingUnits: number;
     pollingUnitsWithoutAssignedAgents: number;
+    agentsWithoutPollingUnitAssignments: number;
+    assignedAgentsInScope: number;
+    targetAgentsInScope: number;
+    remainingAgentsToTarget: number;
   };
+  referenceData: ReferenceDataReadinessSummary;
+  stateTargets: StateCoverageTargetItem[];
   wards: WardCoverageInsight[];
   pollingUnits: PollingUnitCoverageInsight[];
+  agentsWithoutPollingUnitAssignments: AgentPollingUnitGapItem[];
 };
 
 export type AdminMapSummary = {

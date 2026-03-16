@@ -1062,6 +1062,7 @@ model State {
   id                    String               @id
   name                  String               @unique
   geoPoliticalZoneId    String?
+  agentsPerPollingUnitTarget Int?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id], onDelete: Cascade)

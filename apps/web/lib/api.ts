@@ -315,6 +315,19 @@ export async function fetchAdminCoverageInsights(token: string): Promise<Coverag
   return payload.insights;
 }
 
+export async function updateStateAgentTarget(token: string, stateId: string, agentsPerPollingUnitTarget: number): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/admin/states/${stateId}/agent-target`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ agentsPerPollingUnitTarget }),
+  });
+
+  return readJson<{ message: string }>(response);
+}
+
 export async function fetchAdminMapSummary(token: string): Promise<AdminMapSummary> {
   const response = await fetch(`${API_BASE_URL}/admin/map-summary`, {
     headers: { Authorization: `Bearer ${token}` },

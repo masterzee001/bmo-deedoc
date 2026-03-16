@@ -280,6 +280,10 @@ const electionDayReportStatusSchema = z.object({
   reviewNote: z.string().trim().max(1000).optional(),
 });
 
+const stateAgentTargetSchema = z.object({
+  agentsPerPollingUnitTarget: z.number().int().min(1).max(20),
+});
+
 const redemptionReviewSchema = z.object({
   note: z.string().trim().max(500).optional(),
 });
@@ -1088,6 +1092,63 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
+function canSetStateAgentTarget(actor: Express.Request["authUser"], stateId: string) {
+  if (!actor) {
+    return false;
+  }
+
+  if (isSuperAdmin(actor)) {
+    return true;
+  }
+
+  if (!isAdminUser(actor) || !actor.adminProfile) {
+    return false;
+  }
+
+  if (actor.adminProfile.adminLevel !== AdminLevel.NATIONAL && actor.adminProfile.adminLevel !== AdminLevel.STATE) {
+    return false;
+  }
+
+  return isWithinAdminScope(actor, { stateId });
+}
+
+function getStateReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma.StateWhereInput {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
+    return {};
+  }
+
+  return {
+    geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId || undefined,
+    id: actor.adminProfile.stateId || undefined,
+  };
+}
+
+function getLgaReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma.LGAWhereInput {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
+    return {};
+  }
+
+  return {
+    state: actor.adminProfile.geoPoliticalZoneId
+      ? { geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId }
+      : undefined,
+    stateId: actor.adminProfile.stateId || undefined,
+    id: actor.adminProfile.lgaId || undefined,
+  };
+}
+
+function getWardReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma.WardWhereInput {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
+    return {};
+  }
+
+  return {
+    stateId: actor.adminProfile.stateId || undefined,
+    lgaId: actor.adminProfile.lgaId || undefined,
+    id: actor.adminProfile.wardId || undefined,
+  };
+}
+
 async function canViewAuditLog(
   actor: NonNullable<Express.Request["authUser"]>,
   log: {
@@ -1593,6 +1654,55 @@ router.get("/states", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
   });
 
   return response.json({ states });
+});
+
+router.patch("/states/:stateId/agent-target", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const stateId = readRouteId(response, request.params.stateId, "state id");
+  if (!stateId) {
+    return;
+  }
+
+  const parsed = stateAgentTargetSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid state agent target payload.", errors: parsed.error.flatten() });
+  }
+
+  if (!canSetStateAgentTarget(request.authUser, stateId)) {
+    return response.status(403).json({ message: "You do not have permission to update this state staffing target." });
+  }
+
+  const state = await prisma.state.findUnique({
+    where: { id: stateId },
+    select: { id: true, name: true, agentsPerPollingUnitTarget: true },
+  });
+
+  if (!state) {
+    return response.status(404).json({ message: "State not found." });
+  }
+
+  const updatedState = await prisma.state.update({
+    where: { id: stateId },
+    data: { agentsPerPollingUnitTarget: parsed.data.agentsPerPollingUnitTarget },
+    select: { id: true, name: true, agentsPerPollingUnitTarget: true },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId: request.authUser!.id,
+    action: "STATE_AGENT_TARGET_UPDATED",
+    targetType: "State",
+    targetId: updatedState.id,
+    territory: { stateId: updatedState.id },
+    metadata: {
+      previousAgentsPerPollingUnitTarget: state.agentsPerPollingUnitTarget ?? 1,
+      nextAgentsPerPollingUnitTarget: updatedState.agentsPerPollingUnitTarget ?? 1,
+      stateName: updatedState.name,
+    },
+  });
+
+  return response.json({
+    message: "State staffing target updated successfully.",
+    state: updatedState,
+  });
 });
 
 router.get("/senatorial-districts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
@@ -2342,6 +2452,10 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     return response.status(400).json({ message: "Agent accounts must be linked to a political party." });
   }
 
+  if (!scopedPayload.pollingUnitId) {
+    return response.status(400).json({ message: "Agent accounts must be assigned to a polling unit." });
+  }
+
   const actorPartyId = requireActorPartyForManagement(request.authUser);
   if (request.authUser?.role === UserRole.ADMIN && !actorPartyId) {
     return response.status(403).json({ message: "Your admin account is not linked to a political party." });
@@ -2793,6 +2907,10 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
 
   if (!scopedPayload.politicalPartyId) {
     return response.status(400).json({ message: "Agent accounts must be linked to a political party." });
+  }
+
+  if (!scopedPayload.pollingUnitId) {
+    return response.status(400).json({ message: "Agent accounts must be assigned to a polling unit." });
   }
 
   const actorPartyId = requireActorPartyForManagement(request.authUser);
@@ -4628,12 +4746,15 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
 router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const pollingUnitScope = getPollingUnitScopeFilter(request.authUser);
-  const [pollingUnits, agents, recentActivities, incidents] = await Promise.all([
+  const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
+  const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
     prisma.pollingUnit.findMany({
       where: pollingUnitScope,
       select: {
         id: true,
         name: true,
+        stateId: true,
+        state: { select: { name: true, agentsPerPollingUnitTarget: true } },
         wardId: true,
         ward: { select: { name: true } },
         lgaId: true,
@@ -4643,7 +4764,7 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     }),
     prisma.agentProfile.findMany({
       where: {
-        ...toScopeFilter(getAgentScopeFilter(request.authUser)),
+        ...agentScope,
         pollingUnitId: { not: null },
       },
       select: { pollingUnitId: true },
@@ -4663,6 +4784,52 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
         status: { in: [IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS] },
       },
       select: { pollingUnitId: true },
+    }),
+    prisma.user.findMany({
+      where: {
+        role: UserRole.AGENT,
+        agentProfile: {
+          is: {
+            ...agentScope,
+            pollingUnitId: null,
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        agentProfile: {
+          select: {
+            politicalPartyId: true,
+            geoPoliticalZoneId: true,
+            stateId: true,
+            senatorialDistrictId: true,
+            federalConstituencyId: true,
+            lgaId: true,
+            wardId: true,
+            stateConstituencyId: true,
+            pollingUnitId: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    prisma.state.count({
+      where: getStateReferenceScopeFilter(request.authUser),
+    }),
+    prisma.lGA.count({
+      where: getLgaReferenceScopeFilter(request.authUser),
+    }),
+    prisma.ward.count({
+      where: getWardReferenceScopeFilter(request.authUser),
+    }),
+    prisma.ward.count({
+      where: {
+        ...getWardReferenceScopeFilter(request.authUser),
+        pollingUnits: { none: {} },
+      },
     }),
   ]);
 
@@ -4690,26 +4857,59 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     openIncidentsByPollingUnit.set(item.pollingUnitId, (openIncidentsByPollingUnit.get(item.pollingUnitId) || 0) + 1);
   }
 
+  const stateTargetMap = new Map<string, {
+    stateId: string;
+    stateName: string;
+    targetAgentsPerPollingUnit: number;
+    pollingUnitCount: number;
+    assignedAgentCount: number;
+    targetAgentCount: number;
+    remainingAgentCount: number;
+  }>();
+
   const pollingUnitInsights = pollingUnits.map((unit) => {
     const assignedAgentCount = assignedCountByPollingUnit.get(unit.id) || 0;
     const recentActivityCount = recentActivityByPollingUnit.get(unit.id) || 0;
     const openIncidentCount = openIncidentsByPollingUnit.get(unit.id) || 0;
+    const targetAgentsPerPollingUnit = unit.state.agentsPerPollingUnitTarget || 1;
+    const targetAgentCount = targetAgentsPerPollingUnit;
     const hasAssignedAgent = assignedAgentCount > 0;
     const hasRecentActivity = recentActivityCount > 0;
+    const remainingAgentCount = Math.max(targetAgentCount - assignedAgentCount, 0);
+
+    const stateCurrent = stateTargetMap.get(unit.stateId) || {
+      stateId: unit.stateId,
+      stateName: unit.state.name,
+      targetAgentsPerPollingUnit,
+      pollingUnitCount: 0,
+      assignedAgentCount: 0,
+      targetAgentCount: 0,
+      remainingAgentCount: 0,
+    };
+
+    stateCurrent.pollingUnitCount += 1;
+    stateCurrent.assignedAgentCount += assignedAgentCount;
+    stateCurrent.targetAgentCount += targetAgentCount;
+    stateCurrent.remainingAgentCount += remainingAgentCount;
+    stateTargetMap.set(unit.stateId, stateCurrent);
 
     return {
       pollingUnitId: unit.id,
       pollingUnitName: unit.name,
+      stateId: unit.stateId,
+      stateName: unit.state.name,
       wardId: unit.wardId,
       wardName: unit.ward.name,
       lgaId: unit.lgaId,
       lgaName: unit.lga.name,
       assignedAgentCount,
+      targetAgentCount,
+      remainingAgentCount,
       recentActivityCount,
       openIncidentCount,
       hasAssignedAgent,
       hasRecentActivity,
-      requiresAttention: !hasAssignedAgent || !hasRecentActivity || openIncidentCount > 0,
+      requiresAttention: assignedAgentCount < targetAgentCount || !hasRecentActivity || openIncidentCount > 0,
     };
   });
 
@@ -4719,6 +4919,9 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     lgaId: string;
     lgaName: string;
     pollingUnitCount: number;
+    assignedAgentCount: number;
+    targetAgentCount: number;
+    remainingAgentCount: number;
     pollingUnitsWithoutAgents: number;
     pollingUnitsWithoutRecentActivity: number;
     openIncidentCount: number;
@@ -4731,12 +4934,18 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
       lgaId: item.lgaId,
       lgaName: item.lgaName,
       pollingUnitCount: 0,
+      assignedAgentCount: 0,
+      targetAgentCount: 0,
+      remainingAgentCount: 0,
       pollingUnitsWithoutAgents: 0,
       pollingUnitsWithoutRecentActivity: 0,
       openIncidentCount: 0,
     };
 
     current.pollingUnitCount += 1;
+    current.assignedAgentCount += item.assignedAgentCount;
+    current.targetAgentCount += item.targetAgentCount;
+    current.remainingAgentCount += item.remainingAgentCount;
     if (!item.hasAssignedAgent) {
       current.pollingUnitsWithoutAgents += 1;
     }
@@ -4749,11 +4958,15 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
 
   const weakCoveragePollingUnits = pollingUnitInsights.filter((item) => item.requiresAttention).length;
   const pollingUnitsWithoutAssignedAgents = pollingUnitInsights.filter((item) => !item.hasAssignedAgent).length;
+  const assignedAgentsInScope = pollingUnitInsights.reduce((sum, item) => sum + item.assignedAgentCount, 0);
+  const targetAgentsInScope = pollingUnitInsights.reduce((sum, item) => sum + item.targetAgentCount, 0);
+  const remainingAgentsToTarget = Math.max(targetAgentsInScope - assignedAgentsInScope, 0);
   const wards = Array.from(wardMap.values()).sort((left, right) => {
     const leftRisk = left.pollingUnitsWithoutRecentActivity + left.pollingUnitsWithoutAgents + left.openIncidentCount;
     const rightRisk = right.pollingUnitsWithoutRecentActivity + right.pollingUnitsWithoutAgents + right.openIncidentCount;
     return rightRisk - leftRisk;
   });
+  const stateTargets = Array.from(stateTargetMap.values()).sort((left, right) => left.stateName.localeCompare(right.stateName));
 
   return response.json({
     insights: serializeCoverageInsights({
@@ -4766,13 +4979,34 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
         wardsInScope: wards.length,
         weakCoveragePollingUnits,
         pollingUnitsWithoutAssignedAgents,
+        agentsWithoutPollingUnitAssignments: agentsWithoutPollingUnitAssignments.length,
+        assignedAgentsInScope,
+        targetAgentsInScope,
+        remainingAgentsToTarget,
       },
+      referenceData: {
+        loadedStates,
+        loadedLgas,
+        loadedWards,
+        loadedPollingUnits: pollingUnits.length,
+        loadedWardsWithoutPollingUnits,
+      },
+      stateTargets,
       wards,
       pollingUnits: pollingUnitInsights.sort((left, right) => {
         const leftRisk = Number(left.requiresAttention) * 10 + left.openIncidentCount;
         const rightRisk = Number(right.requiresAttention) * 10 + right.openIncidentCount;
         return rightRisk - leftRisk;
       }),
+      agentsWithoutPollingUnitAssignments: agentsWithoutPollingUnitAssignments
+        .filter((item) => item.agentProfile)
+        .map((item) => ({
+          userId: item.id,
+          name: item.name,
+          email: item.email,
+          politicalPartyId: item.agentProfile!.politicalPartyId || null,
+          territory: serializeTerritory(item.agentProfile!),
+        })),
     }),
   });
 });

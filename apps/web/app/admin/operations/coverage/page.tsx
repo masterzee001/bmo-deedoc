@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { AuthUserProfile, CoverageInsights } from "@pics-nigeria/shared";
-import { ApiError, fetchAdminCoverageInsights, fetchCurrentUser } from "../../../../lib/api";
+import { ApiError, fetchAdminCoverageInsights, fetchCurrentUser, updateStateAgentTarget } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
 
@@ -12,6 +12,9 @@ export default function AdminCoveragePage() {
   const [insights, setInsights] = useState<CoverageInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [savingStateId, setSavingStateId] = useState("");
+  const [stateTargetInputs, setStateTargetInputs] = useState<Record<string, string>>({});
 
   const unitsWithoutAgents = useMemo(
     () => insights?.pollingUnits.filter((unit) => !unit.hasAssignedAgent) || [],
@@ -33,6 +36,28 @@ export default function AdminCoveragePage() {
     () => insights?.wards.filter((ward) => ward.pollingUnitsWithoutRecentActivity > 0).slice(0, 8) || [],
     [insights],
   );
+  const agentAssignmentGaps = insights?.agentsWithoutPollingUnitAssignments || [];
+  const canSetTargets = user?.role === "SUPER_ADMIN" || user?.adminProfile?.adminLevel === "NATIONAL" || user?.adminProfile?.adminLevel === "STATE";
+
+  function canEditStateTarget(stateId: string) {
+    if (!user) {
+      return false;
+    }
+
+    if (user.role === "SUPER_ADMIN") {
+      return true;
+    }
+
+    if (user.adminProfile?.adminLevel === "NATIONAL") {
+      return true;
+    }
+
+    if (user.adminProfile?.adminLevel === "STATE") {
+      return user.adminProfile.stateId === stateId;
+    }
+
+    return false;
+  }
 
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
@@ -49,10 +74,49 @@ export default function AdminCoveragePage() {
 
         setUser(currentUser);
         setInsights(nextInsights);
+        setStateTargetInputs(
+          Object.fromEntries(
+            nextInsights.stateTargets.map((item) => [item.stateId, String(item.targetAgentsPerPollingUnit)]),
+          ),
+        );
       })
       .catch((caughtError) => setError(caughtError instanceof Error ? caughtError.message : "Could not load coverage insights."))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleStateTargetSave(stateId: string) {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token || !insights) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    const rawValue = stateTargetInputs[stateId];
+    const parsedValue = Number(rawValue);
+    if (!Number.isInteger(parsedValue) || parsedValue < 1) {
+      setError("Agents per polling unit must be at least 1.");
+      return;
+    }
+
+    try {
+      setSavingStateId(stateId);
+      setError("");
+      setMessage("");
+      const result = await updateStateAgentTarget(token, stateId, parsedValue);
+      const nextInsights = await fetchAdminCoverageInsights(token);
+      setInsights(nextInsights);
+      setStateTargetInputs(
+        Object.fromEntries(
+          nextInsights.stateTargets.map((item) => [item.stateId, String(item.targetAgentsPerPollingUnit)]),
+        ),
+      );
+      setMessage(result.message);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update the state staffing target.");
+    } finally {
+      setSavingStateId("");
+    }
+  }
 
   if (loading) {
     return (
@@ -95,6 +159,7 @@ export default function AdminCoveragePage() {
 
       <AdminNav />
       {error ? <p className="error">{error}</p> : null}
+      {message ? <p className="muted">{message}</p> : null}
 
       <section className="grid stats">
         <article className="panel card">
@@ -121,6 +186,127 @@ export default function AdminCoveragePage() {
           <h2>Open incident pressure</h2>
           <div className="value">{insights.summary.pollingUnitsWithIncidents}</div>
         </article>
+        <article className="panel card">
+          <h2>Agents missing polling unit</h2>
+          <div className="value">{insights.summary.agentsWithoutPollingUnitAssignments}</div>
+        </article>
+        <article className="panel card">
+          <h2>Loaded wards without polling units</h2>
+          <div className="value">{insights.referenceData.loadedWardsWithoutPollingUnits}</div>
+        </article>
+        <article className="panel card">
+          <h2>Assigned agents</h2>
+          <div className="value">{insights.summary.assignedAgentsInScope}</div>
+        </article>
+        <article className="panel card">
+          <h2>Target agents</h2>
+          <div className="value">{insights.summary.targetAgentsInScope}</div>
+        </article>
+        <article className="panel card">
+          <h2>Agents left to target</h2>
+          <div className="value">{insights.summary.remainingAgentsToTarget}</div>
+        </article>
+      </section>
+
+      <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>Reference readiness</h2>
+              <p className="muted">This shows how much territory reference data is currently loaded inside your visible scope.</p>
+            </div>
+            <span className="status-pill">{insights.referenceData.loadedPollingUnits} polling units</span>
+          </div>
+          <div className="reward-list">
+            <article className="reward-item">
+              <strong>States loaded</strong>
+              <p className="muted">{insights.referenceData.loadedStates}</p>
+            </article>
+            <article className="reward-item">
+              <strong>LGAs loaded</strong>
+              <p className="muted">{insights.referenceData.loadedLgas}</p>
+            </article>
+            <article className="reward-item">
+              <strong>Wards loaded</strong>
+              <p className="muted">{insights.referenceData.loadedWards}</p>
+            </article>
+            <article className="reward-item">
+              <strong>Wards without polling units</strong>
+              <p className="muted">{insights.referenceData.loadedWardsWithoutPollingUnits}</p>
+            </article>
+          </div>
+        </section>
+
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>State staffing targets</h2>
+              <p className="muted">Target staffing is calculated per state. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
+            </div>
+            <span className="status-pill">{insights.stateTargets.length} states</span>
+          </div>
+          {insights.stateTargets.length === 0 ? (
+            <p className="muted">No state staffing data is available in the current scope.</p>
+          ) : (
+            <div className="reward-list">
+              {insights.stateTargets.map((stateTarget) => (
+                <article key={stateTarget.stateId} className="reward-item">
+                  <strong>{stateTarget.stateName}</strong>
+                  <p className="muted">
+                    Polling units: {stateTarget.pollingUnitCount} | Current agents: {stateTarget.assignedAgentCount} | Target agents: {stateTarget.targetAgentCount}
+                  </p>
+                  <p className="muted">Agents left to target: {stateTarget.remainingAgentCount}</p>
+                  {canSetTargets && canEditStateTarget(stateTarget.stateId) ? (
+                    <div className="action-row" style={{ marginTop: 12 }}>
+                      <input
+                        type="number"
+                        min={1}
+                        value={stateTargetInputs[stateTarget.stateId] || ""}
+                        onChange={(event) => setStateTargetInputs((current) => ({ ...current, [stateTarget.stateId]: event.target.value }))}
+                        style={{ maxWidth: 120 }}
+                      />
+                      <button
+                        className="button secondary"
+                        type="button"
+                        disabled={savingStateId === stateTarget.stateId}
+                        onClick={() => void handleStateTargetSave(stateTarget.stateId)}
+                      >
+                        {savingStateId === stateTarget.stateId ? "Saving..." : "Set agents per PU"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="muted">Configured target: {stateTarget.targetAgentsPerPollingUnit} agent(s) per polling unit.</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel card">
+          <div className="section-head">
+            <div>
+              <h2>Agent assignment integrity</h2>
+              <p className="muted">Agents should not be onboarded without a polling unit. This queue highlights any assignment gaps in scope.</p>
+            </div>
+            <span className="status-pill">{agentAssignmentGaps.length} agents</span>
+          </div>
+          {agentAssignmentGaps.length === 0 ? (
+            <p className="muted">All visible agents are currently linked to polling units.</p>
+          ) : (
+            <div className="reward-list">
+              {agentAssignmentGaps.map((agent) => (
+                <article key={agent.userId} className="reward-item">
+                  <strong>{agent.name}</strong>
+                  <p>{agent.email}</p>
+                  <p className="muted">
+                    State: {agent.territory.stateId || "Not set"} | LGA: {agent.territory.lgaId || "Not set"} | Ward: {agent.territory.wardId || "Not set"}
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       </section>
 
       <section className="grid" style={{ marginTop: 24, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
@@ -141,9 +327,9 @@ export default function AdminCoveragePage() {
                   <strong>{ward.wardName}</strong>
                   <p>{ward.lgaName}</p>
                   <p className="muted">
-                    {ward.pollingUnitCount} polling units | {ward.pollingUnitsWithoutAgents} without agents | {ward.pollingUnitsWithoutRecentActivity} without recent activity
+                    {ward.pollingUnitCount} polling units | {ward.assignedAgentCount} current agents | {ward.targetAgentCount} target agents
                   </p>
-                  <p className="muted">{ward.openIncidentCount} open incidents</p>
+                  <p className="muted">{ward.remainingAgentCount} left to target | {ward.openIncidentCount} open incidents</p>
                 </article>
               ))}
             </div>
@@ -167,12 +353,12 @@ export default function AdminCoveragePage() {
               {insights.pollingUnits.filter((unit) => unit.requiresAttention).slice(0, 16).map((unit) => (
                 <article key={unit.pollingUnitId} className="reward-item">
                   <strong>{unit.pollingUnitName}</strong>
-                  <p>{unit.wardName} | {unit.lgaName}</p>
+                  <p>{unit.wardName} | {unit.lgaName} | {unit.stateName}</p>
                   <p className="muted">
-                    Agents: {unit.assignedAgentCount} | Recent signals: {unit.recentActivityCount} | Open incidents: {unit.openIncidentCount}
+                    Agents: {unit.assignedAgentCount} of {unit.targetAgentCount} target | Recent signals: {unit.recentActivityCount} | Open incidents: {unit.openIncidentCount}
                   </p>
                   <p className="muted">
-                    {unit.hasAssignedAgent ? "Assigned" : "No assigned agent"} | {unit.hasRecentActivity ? "Recent activity present" : "No recent activity"}
+                    {unit.remainingAgentCount} left to target | {unit.hasRecentActivity ? "Recent activity present" : "No recent activity"}
                   </p>
                 </article>
               ))}

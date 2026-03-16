@@ -565,8 +565,11 @@ export function serializePollingUnitCoverageInsight(summary: PollingUnitCoverage
 export function serializeCoverageInsights(summary: CoverageInsights): CoverageInsights {
   return {
     summary: summary.summary,
+    referenceData: summary.referenceData,
+    stateTargets: summary.stateTargets,
     wards: summary.wards.map(serializeWardCoverageInsight),
     pollingUnits: summary.pollingUnits.map(serializePollingUnitCoverageInsight),
+    agentsWithoutPollingUnitAssignments: summary.agentsWithoutPollingUnitAssignments,
   };
 }
 
