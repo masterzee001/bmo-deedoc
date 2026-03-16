@@ -195,7 +195,9 @@ router.get("/territories/polling-units", async (request, response) => {
     return response.status(400).json({ message: "stateId, lgaId, and wardId are required." });
   }
 
-  let pollingUnits = await prisma.pollingUnit.findMany({
+  await syncPollingUnitsForWard(prisma, parsed.data.stateId, parsed.data.lgaId, parsed.data.wardId);
+
+  const pollingUnits = await prisma.pollingUnit.findMany({
     where: {
       stateId: parsed.data.stateId,
       lgaId: parsed.data.lgaId,
@@ -204,19 +206,6 @@ router.get("/territories/polling-units", async (request, response) => {
     orderBy: { name: "asc" },
     select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
   });
-
-  if (pollingUnits.length === 0) {
-    await syncPollingUnitsForWard(prisma, parsed.data.stateId, parsed.data.lgaId, parsed.data.wardId);
-    pollingUnits = await prisma.pollingUnit.findMany({
-      where: {
-        stateId: parsed.data.stateId,
-        lgaId: parsed.data.lgaId,
-        wardId: parsed.data.wardId,
-      },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
-    });
-  }
 
   return response.json({ pollingUnits });
 });

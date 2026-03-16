@@ -1112,6 +1112,85 @@ function canSetStateAgentTarget(actor: Express.Request["authUser"], stateId: str
   return isWithinAdminScope(actor, { stateId });
 }
 
+const adminLevelSpecificity: Record<AdminLevel, number> = {
+  WARD: 0,
+  LGA: 1,
+  STATE_CONSTITUENCY: 2,
+  FEDERAL_CONSTITUENCY: 3,
+  SENATORIAL: 4,
+  STATE: 5,
+  GEO_POLITICAL_ZONE: 6,
+  NATIONAL: 7,
+};
+
+async function resolveTerritoryAdminUserId(input: {
+  politicalPartyId: string;
+  geoPoliticalZoneId?: string;
+  stateId: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  lgaId: string;
+  wardId: string;
+  stateConstituencyId?: string;
+  pollingUnitId: string;
+}) {
+  const admins = await prisma.user.findMany({
+    where: {
+      role: UserRole.ADMIN,
+      isActive: true,
+      adminProfile: {
+        is: {
+          politicalPartyId: input.politicalPartyId,
+        },
+      },
+    },
+    include: { adminProfile: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const matchingAdmins = admins.filter((admin) => {
+    const profile = admin.adminProfile;
+    if (!profile) {
+      return false;
+    }
+
+    if (profile.geoPoliticalZoneId && profile.geoPoliticalZoneId !== input.geoPoliticalZoneId) {
+      return false;
+    }
+    if (profile.stateId && profile.stateId !== input.stateId) {
+      return false;
+    }
+    if (profile.senatorialDistrictId && profile.senatorialDistrictId !== input.senatorialDistrictId) {
+      return false;
+    }
+    if (profile.federalConstituencyId && profile.federalConstituencyId !== input.federalConstituencyId) {
+      return false;
+    }
+    if (profile.stateConstituencyId && profile.stateConstituencyId !== input.stateConstituencyId) {
+      return false;
+    }
+    if (profile.lgaId && profile.lgaId !== input.lgaId) {
+      return false;
+    }
+    if (profile.wardId && profile.wardId !== input.wardId) {
+      return false;
+    }
+    if (profile.pollingUnitId && profile.pollingUnitId !== input.pollingUnitId) {
+      return false;
+    }
+
+    return true;
+  });
+
+  matchingAdmins.sort((left, right) => {
+    const leftRank = adminLevelSpecificity[left.adminProfile!.adminLevel];
+    const rightRank = adminLevelSpecificity[right.adminProfile!.adminLevel];
+    return leftRank - rightRank;
+  });
+
+  return matchingAdmins[0]?.id || null;
+}
+
 function getStateReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma.StateWhereInput {
   if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
     return {};
@@ -1861,7 +1940,11 @@ router.get("/polling-units", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), a
     return response.status(403).json({ message: lgaScopeError });
   }
 
-  let pollingUnits = await prisma.pollingUnit.findMany({
+  if (parsed.data.stateId && parsed.data.wardId) {
+    await syncPollingUnitsForWard(prisma, parsed.data.stateId, parsed.data.lgaId, parsed.data.wardId);
+  }
+
+  const pollingUnits = await prisma.pollingUnit.findMany({
     where: {
       stateId: parsed.data.stateId,
       lgaId: parsed.data.lgaId,
@@ -1870,19 +1953,6 @@ router.get("/polling-units", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), a
     orderBy: { name: "asc" },
     select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
   });
-
-  if (pollingUnits.length === 0 && parsed.data.stateId && parsed.data.wardId) {
-    await syncPollingUnitsForWard(prisma, parsed.data.stateId, parsed.data.lgaId, parsed.data.wardId);
-    pollingUnits = await prisma.pollingUnit.findMany({
-      where: {
-        stateId: parsed.data.stateId,
-        lgaId: parsed.data.lgaId,
-        wardId: parsed.data.wardId,
-      },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, stateId: true, lgaId: true, wardId: true },
-    });
-  }
 
   return response.json({ pollingUnits });
 });
@@ -2502,25 +2572,17 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
     return response.status(403).json({ message: "You cannot create an agent in this territory." });
   }
 
-  if (scopedPayload.assignedAdminUserId) {
-    const assignedAdmin = await prisma.user.findUnique({
-      where: { id: scopedPayload.assignedAdminUserId },
-      include: { adminProfile: true },
-    });
-
-    if (!assignedAdmin?.adminProfile) {
-      return response.status(400).json({ message: "Assigned admin does not exist." });
-    }
-
-    const assignedAdminAuth = await getAuthUserProfile(assignedAdmin.id);
-    if (!assignedAdminAuth || !canCreateAgentInScope(assignedAdminAuth, agentTerritory)) {
-      return response.status(400).json({ message: "Assigned admin cannot manage this agent territory." });
-    }
-
-    if (!isWithinActorParty(assignedAdminAuth, scopedPayload.politicalPartyId)) {
-      return response.status(400).json({ message: "Assigned admin must belong to the same political party as the agent." });
-    }
-  }
+  const assignedAdminUserId = await resolveTerritoryAdminUserId({
+    politicalPartyId: scopedPayload.politicalPartyId,
+    geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
+    stateId: scopedPayload.stateId,
+    senatorialDistrictId: scopedPayload.senatorialDistrictId || undefined,
+    federalConstituencyId: scopedPayload.federalConstituencyId || undefined,
+    lgaId: scopedPayload.lgaId,
+    wardId: scopedPayload.wardId,
+    stateConstituencyId: scopedPayload.stateConstituencyId || undefined,
+    pollingUnitId: scopedPayload.pollingUnitId,
+  });
 
   const email = normalizeEmail(scopedPayload.email);
   const existingUser = await prisma.user.findUnique({
@@ -2550,7 +2612,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
           wardId: scopedPayload.wardId,
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
-          assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
+          assignedAdminUserId,
         } as Prisma.AgentProfileUncheckedCreateWithoutUserInput,
       },
     },
@@ -2573,7 +2635,7 @@ router.post("/agents", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (
       pollingUnitId: scopedPayload.pollingUnitId || null,
     },
     metadata: {
-      assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
+      assignedAdminUserId,
     },
   });
 
@@ -2951,25 +3013,17 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     return response.status(403).json({ message: "You cannot update an agent in this territory." });
   }
 
-  if (scopedPayload.assignedAdminUserId) {
-    const assignedAdmin = await prisma.user.findUnique({
-      where: { id: scopedPayload.assignedAdminUserId },
-      include: { adminProfile: true },
-    });
-
-    if (!assignedAdmin?.adminProfile) {
-      return response.status(400).json({ message: "Assigned admin does not exist." });
-    }
-
-    const assignedAdminAuth = await getAuthUserProfile(assignedAdmin.id);
-    if (!assignedAdminAuth || !canCreateAgentInScope(assignedAdminAuth, agentTerritory)) {
-      return response.status(400).json({ message: "Assigned admin cannot manage this agent territory." });
-    }
-
-    if (!isWithinActorParty(assignedAdminAuth, scopedPayload.politicalPartyId)) {
-      return response.status(400).json({ message: "Assigned admin must belong to the same political party as the agent." });
-    }
-  }
+  const assignedAdminUserId = await resolveTerritoryAdminUserId({
+    politicalPartyId: scopedPayload.politicalPartyId,
+    geoPoliticalZoneId: state?.geoPoliticalZoneId || undefined,
+    stateId: scopedPayload.stateId,
+    senatorialDistrictId: scopedPayload.senatorialDistrictId || undefined,
+    federalConstituencyId: scopedPayload.federalConstituencyId || undefined,
+    lgaId: scopedPayload.lgaId,
+    wardId: scopedPayload.wardId,
+    stateConstituencyId: scopedPayload.stateConstituencyId || undefined,
+    pollingUnitId: scopedPayload.pollingUnitId,
+  });
 
   const targetUser = await prisma.user.findUnique({
     where: { id: userId },
@@ -3007,7 +3061,7 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
           wardId: scopedPayload.wardId,
           stateConstituencyId: scopedPayload.stateConstituencyId || null,
           pollingUnitId: scopedPayload.pollingUnitId || null,
-          assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
+          assignedAdminUserId,
         } as Prisma.AgentProfileUncheckedUpdateWithoutUserInput,
       },
     },
@@ -3030,7 +3084,7 @@ router.patch("/agents/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
       pollingUnitId: scopedPayload.pollingUnitId || null,
     },
     metadata: {
-      assignedAdminUserId: scopedPayload.assignedAdminUserId || null,
+      assignedAdminUserId,
     },
   });
 

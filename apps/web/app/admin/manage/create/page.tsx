@@ -378,7 +378,6 @@ export default function AdminManageCreatePage() {
             wardId: agentForm.wardId,
             stateConstituencyId: agentForm.stateConstituencyId,
             pollingUnitId: agentForm.pollingUnitId,
-            assignedAdminUserId: agentForm.assignedAdminUserId,
           });
         setMessage(result.message);
       }
@@ -607,16 +606,6 @@ export default function AdminManageCreatePage() {
             </label>
           ) : null}
 
-          {role === "AGENT" ? (
-            <label className="field">
-              <span>Assigned admin</span>
-              <select value={agentForm.assignedAdminUserId} onChange={(event) => setAgentForm({ ...agentForm, assignedAdminUserId: event.target.value })}>
-                <option value="">Unassigned</option>
-                {admins.map((item) => <option key={item.userId} value={item.userId}>{item.name}</option>)}
-              </select>
-            </label>
-          ) : null}
-
           <div className="action-row">
             <button className="button" type="button" disabled={saving} onClick={() => void handleSave()}>
               {saving ? "Saving..." : mode === "create" ? `Create ${role}` : `Save ${role}`}
@@ -627,7 +616,7 @@ export default function AdminManageCreatePage() {
             <p className="muted">No polling units are loaded for this ward yet. Load or sync polling units before creating agents in this territory.</p>
           ) : null}
           {role === "AGENT" ? (
-            <p className="muted">Each agent must be assigned to a single polling unit.</p>
+            <p className="muted">Each agent is assigned to a single polling unit and is linked automatically to the admin responsible for that territory.</p>
           ) : null}
         </div>
       </section>
