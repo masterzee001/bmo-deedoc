@@ -158,33 +158,27 @@ export default function AdminDashboardPage() {
           <div className="reward-list">
             <article className="reward-item">
               <strong>Manage users</strong>
-              <p>Open role-aware user lists with territory filters and lifecycle actions.</p>
-              <Link href="/admin/manage/users">Open user list</Link>
+              <p>Use the navigation above to open role-aware user lists with territory filters and lifecycle actions.</p>
             </article>
             <article className="reward-item">
               <strong>Review incidents</strong>
-              <p>See flagged reports, escalation state, and open governance issues inside your scope.</p>
-              <Link href="/admin/incidents">Open incident review</Link>
+              <p>Use the navigation above to review flagged reports, escalation state, and open governance issues inside your scope.</p>
             </article>
             <article className="reward-item">
               <strong>Coverage intelligence</strong>
-              <p>Identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
-              <Link href="/admin/operations/coverage">Open coverage view</Link>
+              <p>Use the navigation above to identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
             </article>
             <article className="reward-item">
               <strong>Select territory</strong>
-              <p>Drill into state, LGA, and ward views before running management tasks.</p>
-              <Link href="/admin/manage/territory">Select territory</Link>
+              <p>Use the navigation above to drill into state, LGA, and ward views before running management tasks.</p>
             </article>
             <article className="reward-item">
               <strong>Send communications</strong>
-              <p>Preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
-              <Link href="/admin/communications">Open communications</Link>
+              <p>Use the navigation above to preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
             </article>
             <article className="reward-item">
               <strong>Account and exports</strong>
-              <p>Profile changes, password updates, and protected exports stay isolated from operations.</p>
-              <Link href="/admin/account">Open account settings</Link>
+              <p>Use the navigation above for profile changes, password updates, and protected exports.</p>
             </article>
           </div>
         </section>
