@@ -256,7 +256,27 @@ function pickPrimaryLga(
   return availableLgas[0] || null;
 }
 
+function resolveMembershipLgas(
+  lgaNames: string[],
+  availableLgas: Array<{ id: string; name: string }>,
+) {
+  const normalizedMembershipNames = lgaNames.map((name) => normalizeName(name));
+  const matched = availableLgas.filter((lga) => {
+    const normalizedLga = normalizeName(lga.name);
+    return normalizedMembershipNames.some(
+      (candidate) =>
+        candidate === normalizedLga ||
+        candidate.includes(normalizedLga) ||
+        normalizedLga.includes(candidate),
+    );
+  });
+
+  const uniqueMatched = new Map(matched.map((lga) => [lga.id, lga]));
+  return Array.from(uniqueMatched.values());
+}
+
 export async function ensureNationalConstituencyReference(prisma: PrismaClient) {
+  const prismaAny = prisma as any;
   const workbook = readWorkbook();
   const senateByStateId = new Map<string, Array<{ id: string; lgaNames: string[] }>>();
 
@@ -270,6 +290,12 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     for (const lgaName of lgaNames) {
       await ensureLga(prisma, state.id, lgaName);
     }
+    const availableLgas = await prisma.lGA.findMany({
+      where: { stateId: state.id },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
+    const memberLgas = resolveMembershipLgas(lgaNames, availableLgas);
 
     const existing = await prisma.senatorialDistrict.findFirst({
       where: {
@@ -283,13 +309,25 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     });
 
     if (existing) {
-      await prisma.senatorialDistrict.update({
+      const district = await prisma.senatorialDistrict.update({
         where: { id: existing.id },
         data: { name: row.name, stateId: state.id },
       });
+      await prismaAny.senatorialDistrictLga.deleteMany({
+        where: { senatorialDistrictId: district.id },
+      });
+      if (memberLgas.length > 0) {
+        await prismaAny.senatorialDistrictLga.createMany({
+          data: memberLgas.map((lga) => ({
+            senatorialDistrictId: district.id,
+            lgaId: lga.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
       senateByStateId.set(state.id, [
         ...(senateByStateId.get(state.id) || []),
-        { id: existing.id, lgaNames },
+        { id: district.id, lgaNames },
       ]);
       continue;
     }
@@ -301,6 +339,15 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
         stateId: state.id,
       },
     });
+    if (memberLgas.length > 0) {
+      await prismaAny.senatorialDistrictLga.createMany({
+        data: memberLgas.map((lga) => ({
+          senatorialDistrictId: created.id,
+          lgaId: lga.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
     senateByStateId.set(state.id, [
       ...(senateByStateId.get(state.id) || []),
       { id: created.id, lgaNames },
@@ -317,6 +364,12 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     for (const lgaName of federalLgaNames) {
       await ensureLga(prisma, state.id, lgaName);
     }
+    const availableLgas = await prisma.lGA.findMany({
+      where: { stateId: state.id },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    });
+    const memberLgas = resolveMembershipLgas(federalLgaNames, availableLgas);
 
     const senateOptions = senateByStateId.get(state.id) || [];
     const matchedDistrict = senateOptions
@@ -342,7 +395,7 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     });
 
     if (existing) {
-      await prisma.federalConstituency.update({
+      const constituency = await prisma.federalConstituency.update({
         where: { id: existing.id },
         data: {
           name: row.name,
@@ -350,10 +403,22 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
           senatorialDistrictId: matchedDistrict.id,
         },
       });
+      await prismaAny.federalConstituencyLga.deleteMany({
+        where: { federalConstituencyId: constituency.id },
+      });
+      if (memberLgas.length > 0) {
+        await prismaAny.federalConstituencyLga.createMany({
+          data: memberLgas.map((lga) => ({
+            federalConstituencyId: constituency.id,
+            lgaId: lga.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
       continue;
     }
 
-    await prisma.federalConstituency.create({
+    const created = await prisma.federalConstituency.create({
       data: {
         id: toId("fed", row.code),
         name: row.name,
@@ -361,6 +426,15 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
         senatorialDistrictId: matchedDistrict.id,
       },
     });
+    if (memberLgas.length > 0) {
+      await prismaAny.federalConstituencyLga.createMany({
+        data: memberLgas.map((lga) => ({
+          federalConstituencyId: created.id,
+          lgaId: lga.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   for (const row of workbook.stateAssembly) {
@@ -387,6 +461,7 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
           select: { id: true, name: true },
         })
       : stateLgas;
+    const memberLgas = resolveMembershipLgas(compositionLgaNames, refreshedStateLgas);
 
     const primaryLga = pickPrimaryLga(row.name, row.composition, refreshedStateLgas);
     if (!primaryLga) {
@@ -405,7 +480,7 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     });
 
     if (existing) {
-      await prisma.stateConstituency.update({
+      const constituency = await prisma.stateConstituency.update({
         where: { id: existing.id },
         data: {
           name: row.name,
@@ -413,6 +488,18 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
           lgaId: primaryLga.id,
         },
       });
+      await prismaAny.stateConstituencyLga.deleteMany({
+        where: { stateConstituencyId: constituency.id },
+      });
+      if (memberLgas.length > 0) {
+        await prismaAny.stateConstituencyLga.createMany({
+          data: memberLgas.map((lga) => ({
+            stateConstituencyId: constituency.id,
+            lgaId: lga.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
       continue;
     }
 
@@ -434,7 +521,7 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
       suffix += 1;
     }
 
-    await prisma.stateConstituency.create({
+    const created = await prisma.stateConstituency.create({
       data: {
         id: nextId,
         name: row.name,
@@ -442,5 +529,14 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
         lgaId: primaryLga.id,
       },
     });
+    if (memberLgas.length > 0) {
+      await prismaAny.stateConstituencyLga.createMany({
+        data: memberLgas.map((lga) => ({
+          stateConstituencyId: created.id,
+          lgaId: lga.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
 }

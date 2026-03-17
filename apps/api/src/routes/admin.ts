@@ -1127,61 +1127,160 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
-async function getCoveragePollingUnitScope(actor: Express.Request["authUser"]): Promise<{
-  where: Prisma.PollingUnitWhereInput;
-  scopeWarning: string | null;
-}> {
+async function getScopedLgaIdsForReference(actor: Express.Request["authUser"]) {
   if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
-    return { where: {}, scopeWarning: null };
+    return { lgaIds: null as string[] | null, scopeWarning: null as string | null };
   }
 
   const scope = actor.adminProfile;
+
   if (scope.pollingUnitId) {
-    return { where: { id: scope.pollingUnitId }, scopeWarning: null };
+    const pollingUnit = await prisma.pollingUnit.findUnique({
+      where: { id: scope.pollingUnitId },
+      select: { lgaId: true },
+    });
+    return { lgaIds: pollingUnit?.lgaId ? [pollingUnit.lgaId] : [], scopeWarning: null };
   }
 
   if (scope.wardId) {
-    return { where: { wardId: scope.wardId }, scopeWarning: null };
+    const ward = await prisma.ward.findUnique({
+      where: { id: scope.wardId },
+      select: { lgaId: true },
+    });
+    return { lgaIds: ward?.lgaId ? [ward.lgaId] : [], scopeWarning: null };
   }
 
   if (scope.lgaId) {
-    return { where: { lgaId: scope.lgaId }, scopeWarning: null };
+    return { lgaIds: [scope.lgaId], scopeWarning: null };
   }
 
   if (scope.stateConstituencyId) {
+    const memberships = await prisma.stateConstituencyLga.findMany({
+      where: { stateConstituencyId: scope.stateConstituencyId },
+      select: { lgaId: true },
+    });
+    if (memberships.length > 0) {
+      return { lgaIds: memberships.map((item) => item.lgaId), scopeWarning: null };
+    }
+
     const constituency = await prisma.stateConstituency.findUnique({
       where: { id: scope.stateConstituencyId },
       select: { lgaId: true },
     });
-
-    if (constituency?.lgaId) {
-      return { where: { lgaId: constituency.lgaId }, scopeWarning: null };
-    }
+    return {
+      lgaIds: constituency?.lgaId ? [constituency.lgaId] : [],
+      scopeWarning: constituency?.lgaId ? null : "State constituency reference membership is missing. Run the reference bootstrap to restore exact coverage counts.",
+    };
   }
 
-  if (scope.stateId && (scope.senatorialDistrictId || scope.federalConstituencyId)) {
+  if (scope.federalConstituencyId) {
+    const memberships = await prisma.federalConstituencyLga.findMany({
+      where: { federalConstituencyId: scope.federalConstituencyId },
+      select: { lgaId: true },
+    });
+    return memberships.length > 0
+      ? { lgaIds: memberships.map((item) => item.lgaId), scopeWarning: null }
+      : {
+          lgaIds: [],
+          scopeWarning: "Federal constituency reference membership is missing. Run the reference bootstrap to restore exact coverage counts.",
+        };
+  }
+
+  if (scope.senatorialDistrictId) {
+    const memberships = await prisma.senatorialDistrictLga.findMany({
+      where: { senatorialDistrictId: scope.senatorialDistrictId },
+      select: { lgaId: true },
+    });
+    return memberships.length > 0
+      ? { lgaIds: memberships.map((item) => item.lgaId), scopeWarning: null }
+      : {
+          lgaIds: [],
+          scopeWarning: "Senatorial district reference membership is missing. Run the reference bootstrap to restore exact coverage counts.",
+        };
+  }
+
+  return { lgaIds: null, scopeWarning: null };
+}
+
+async function getAuthoritativeReferenceScope(actor: Express.Request["authUser"]) {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
     return {
-      where: { stateId: scope.stateId },
-      scopeWarning: "Polling-unit reference totals for this admin level currently fall back to state boundaries because constituency-level polling-unit mapping is not yet available in the reference dataset.",
+      stateWhere: {} as Prisma.StateWhereInput,
+      lgaWhere: {} as Prisma.LGAWhereInput,
+      wardWhere: {} as Prisma.WardWhereInput,
+      pollingUnitWhere: {} as Prisma.PollingUnitWhereInput,
+      scopeWarning: null as string | null,
+    };
+  }
+
+  const scope = actor.adminProfile;
+  const { lgaIds, scopeWarning } = await getScopedLgaIdsForReference(actor);
+
+  if (scope.pollingUnitId) {
+    return {
+      stateWhere: { id: scope.stateId || undefined },
+      lgaWhere: lgaIds?.length ? { id: { in: lgaIds } } : { id: "__no_scope__" },
+      wardWhere: { id: scope.wardId || "__no_scope__" },
+      pollingUnitWhere: { id: scope.pollingUnitId },
+      scopeWarning,
+    };
+  }
+
+  if (scope.wardId) {
+    return {
+      stateWhere: { id: scope.stateId || undefined },
+      lgaWhere: lgaIds?.length ? { id: { in: lgaIds } } : { id: "__no_scope__" },
+      wardWhere: { id: scope.wardId },
+      pollingUnitWhere: { wardId: scope.wardId },
+      scopeWarning,
+    };
+  }
+
+  if (lgaIds) {
+    return {
+      stateWhere: { id: scope.stateId || undefined },
+      lgaWhere: lgaIds.length ? { id: { in: lgaIds } } : { id: "__no_scope__" },
+      wardWhere: lgaIds.length ? { lgaId: { in: lgaIds } } : { id: "__no_scope__" },
+      pollingUnitWhere: lgaIds.length ? { lgaId: { in: lgaIds } } : { id: "__no_scope__" },
+      scopeWarning,
     };
   }
 
   if (scope.stateId) {
-    return { where: { stateId: scope.stateId }, scopeWarning: null };
+    return {
+      stateWhere: { id: scope.stateId },
+      lgaWhere: { stateId: scope.stateId },
+      wardWhere: { stateId: scope.stateId },
+      pollingUnitWhere: { stateId: scope.stateId },
+      scopeWarning,
+    };
   }
 
   if (scope.geoPoliticalZoneId) {
     return {
-      where: {
-        state: {
-          geoPoliticalZoneId: scope.geoPoliticalZoneId,
-        },
-      },
-      scopeWarning: null,
+      stateWhere: { geoPoliticalZoneId: scope.geoPoliticalZoneId },
+      lgaWhere: { state: { geoPoliticalZoneId: scope.geoPoliticalZoneId } },
+      wardWhere: { state: { geoPoliticalZoneId: scope.geoPoliticalZoneId } },
+      pollingUnitWhere: { state: { geoPoliticalZoneId: scope.geoPoliticalZoneId } },
+      scopeWarning,
     };
   }
 
-  return { where: {}, scopeWarning: null };
+  return {
+    stateWhere: {} as Prisma.StateWhereInput,
+    lgaWhere: {} as Prisma.LGAWhereInput,
+    wardWhere: {} as Prisma.WardWhereInput,
+    pollingUnitWhere: {} as Prisma.PollingUnitWhereInput,
+    scopeWarning,
+  };
+}
+
+async function getCoveragePollingUnitScope(actor: Express.Request["authUser"]): Promise<{
+  where: Prisma.PollingUnitWhereInput;
+  scopeWarning: string | null;
+}> {
+  const scope = await getAuthoritativeReferenceScope(actor);
+  return { where: scope.pollingUnitWhere, scopeWarning: scope.scopeWarning };
 }
 
 function getAdminPartyScopedAgentProfileFilter(actor: Express.Request["authUser"]): Prisma.AgentProfileWhereInput {
@@ -1438,26 +1537,23 @@ function getWardReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma
 }
 
 async function buildReferenceCompletenessReport(actor: Express.Request["authUser"]) {
-  const stateScope = getStateReferenceScopeFilter(actor);
-  const lgaScope = getLgaReferenceScopeFilter(actor);
-  const wardScope = getWardReferenceScopeFilter(actor);
-  const { where: pollingUnitScope } = await getCoveragePollingUnitScope(actor);
+  const { stateWhere, lgaWhere, wardWhere, pollingUnitWhere } = await getAuthoritativeReferenceScope(actor);
   const states = await prisma.state.findMany({
-    where: stateScope,
+    where: stateWhere,
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
   const [lgas, wards, pollingUnits] = await Promise.all([
     prisma.lGA.findMany({
-      where: lgaScope,
+      where: lgaWhere,
       select: { id: true, stateId: true },
     }),
     prisma.ward.findMany({
-      where: wardScope,
+      where: wardWhere,
       select: { id: true, stateId: true, lgaId: true },
     }),
     prisma.pollingUnit.findMany({
-      where: pollingUnitScope,
+      where: pollingUnitWhere,
       select: { id: true, stateId: true, wardId: true },
     }),
   ]);
@@ -1484,15 +1580,6 @@ async function buildReferenceCompletenessReport(actor: Express.Request["authUser
     scopedPollingUnitsByState.set(pollingUnit.stateId, current);
   }
 
-  const hasSubStateScope = Boolean(
-    actor?.adminProfile?.senatorialDistrictId ||
-      actor?.adminProfile?.federalConstituencyId ||
-      actor?.adminProfile?.stateConstituencyId ||
-      actor?.adminProfile?.lgaId ||
-      actor?.adminProfile?.wardId ||
-      actor?.adminProfile?.pollingUnitId,
-  );
-
   const summary = {
     expectedStates: actor && isSuperAdmin(actor) ? NIGERIA_EXPECTED_STATE_TOTAL : states.length,
     loadedStates: states.length,
@@ -1510,7 +1597,7 @@ async function buildReferenceCompletenessReport(actor: Express.Request["authUser
     const stateWards = scopedWardsByState.get(state.id) || [];
     const statePollingUnits = scopedPollingUnitsByState.get(state.id) || [];
     const expectedLgas =
-      actor && !isSuperAdmin(actor) && hasSubStateScope
+      actor && !isSuperAdmin(actor) && actor.adminProfile
         ? stateLgas.length
         : (NIGERIA_STATE_EXPECTED_LGA_COUNTS[state.id] ?? stateLgas.length);
     const loadedLgas = stateLgas.length;
@@ -5184,20 +5271,20 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
 
 router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const { where: pollingUnitScope, scopeWarning } = await getCoveragePollingUnitScope(request.authUser);
+  const { stateWhere, lgaWhere, wardWhere, pollingUnitWhere, scopeWarning } = await getAuthoritativeReferenceScope(request.authUser);
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [statesInScope, lgasInScope, wardsInScope, pollingUnits, agents, recentActivities, incidents] = await Promise.all([
     prisma.state.count({
-      where: getStateReferenceScopeFilter(request.authUser),
+      where: stateWhere,
     }),
     prisma.lGA.count({
-      where: getLgaReferenceScopeFilter(request.authUser),
+      where: lgaWhere,
     }),
     prisma.ward.count({
-      where: getWardReferenceScopeFilter(request.authUser),
+      where: wardWhere,
     }),
     prisma.pollingUnit.findMany({
-      where: pollingUnitScope,
+      where: pollingUnitWhere,
       select: { id: true },
     }),
     prisma.agentProfile.findMany({
@@ -5249,12 +5336,12 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
 
 router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const { where: pollingUnitScope, scopeWarning } = await getCoveragePollingUnitScope(request.authUser);
+  const { stateWhere, lgaWhere, wardWhere, pollingUnitWhere, scopeWarning } = await getAuthoritativeReferenceScope(request.authUser);
   const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
   const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
     prisma.pollingUnit.findMany({
-      where: pollingUnitScope,
+      where: pollingUnitWhere,
       select: {
         id: true,
         name: true,
@@ -5326,17 +5413,17 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
       take: 50,
     }),
     prisma.state.count({
-      where: getStateReferenceScopeFilter(request.authUser),
+      where: stateWhere,
     }),
     prisma.lGA.count({
-      where: getLgaReferenceScopeFilter(request.authUser),
+      where: lgaWhere,
     }),
     prisma.ward.count({
-      where: getWardReferenceScopeFilter(request.authUser),
+      where: wardWhere,
     }),
     prisma.ward.count({
       where: {
-        ...getWardReferenceScopeFilter(request.authUser),
+        ...wardWhere,
         pollingUnits: { none: {} },
       },
     }),

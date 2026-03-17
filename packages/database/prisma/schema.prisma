@@ -1100,6 +1100,7 @@ model SenatorialDistrict {
   updatedAt             DateTime             @updatedAt
   state                 State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
   federalConstituencies FederalConstituency[]
+  lgaMemberships        SenatorialDistrictLga[]
   adminProfiles         AdminProfile[]
   candidateProfiles     CandidateProfile[]
   agentProfiles         AgentProfile[]
@@ -1127,6 +1128,7 @@ model FederalConstituency {
   updatedAt            DateTime             @updatedAt
   state                State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
   senatorialDistrict   SenatorialDistrict   @relation(fields: [senatorialDistrictId], references: [id], onDelete: Cascade)
+  lgaMemberships       FederalConstituencyLga[]
   adminProfiles        AdminProfile[]
   candidateProfiles    CandidateProfile[]
   agentProfiles        AgentProfile[]
@@ -1151,6 +1153,9 @@ model LGA {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   state               State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  senatorialDistrictMemberships SenatorialDistrictLga[]
+  federalConstituencyMemberships FederalConstituencyLga[]
+  stateConstituencyMemberships StateConstituencyLga[]
   stateConstituencies StateConstituency[]
   wards               Ward[]
   pollingUnits        PollingUnit[]
@@ -1212,6 +1217,7 @@ model StateConstituency {
   updatedAt         DateTime           @updatedAt
   state             State              @relation(fields: [stateId], references: [id], onDelete: Cascade)
   lga               LGA                @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  lgaMemberships    StateConstituencyLga[]
   adminProfiles     AdminProfile[]
   candidateProfiles CandidateProfile[]
   agentProfiles     AgentProfile[]
@@ -1259,4 +1265,37 @@ model PollingUnit {
   @@index([stateId])
   @@index([lgaId])
   @@index([wardId])
+}
+
+model SenatorialDistrictLga {
+  senatorialDistrictId String
+  lgaId                String
+  createdAt            DateTime           @default(now())
+  senatorialDistrict   SenatorialDistrict @relation(fields: [senatorialDistrictId], references: [id], onDelete: Cascade)
+  lga                  LGA                @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+
+  @@id([senatorialDistrictId, lgaId])
+  @@index([lgaId])
+}
+
+model FederalConstituencyLga {
+  federalConstituencyId String
+  lgaId                 String
+  createdAt             DateTime            @default(now())
+  federalConstituency   FederalConstituency @relation(fields: [federalConstituencyId], references: [id], onDelete: Cascade)
+  lga                   LGA                 @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+
+  @@id([federalConstituencyId, lgaId])
+  @@index([lgaId])
+}
+
+model StateConstituencyLga {
+  stateConstituencyId String
+  lgaId               String
+  createdAt           DateTime          @default(now())
+  stateConstituency   StateConstituency @relation(fields: [stateConstituencyId], references: [id], onDelete: Cascade)
+  lga                 LGA               @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+
+  @@id([stateConstituencyId, lgaId])
+  @@index([lgaId])
 }
