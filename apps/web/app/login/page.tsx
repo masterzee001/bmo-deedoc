@@ -45,10 +45,17 @@ export default function LoginPage() {
         <p>
           Need your polling unit? <Link href="/polling-units">Find polling unit location</Link>
         </p>
-        <p>
-          <Link href="/admin/login">Admin login</Link> | <Link href="/candidate/login">Candidate login</Link> |{" "}
-          <Link href="/agent/login">Agent login</Link>
-        </p>
+        <div className="starter-nav-actions">
+          <Link className="link-button" href="/admin/login">
+            Admin login
+          </Link>
+          <Link className="link-button" href="/candidate/login">
+            Candidate login
+          </Link>
+          <Link className="link-button" href="/agent/login">
+            Agent login
+          </Link>
+        </div>
       </section>
 
       <section className="panel card" style={{ maxWidth: 520 }}>

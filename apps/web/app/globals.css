@@ -293,6 +293,39 @@ textarea {
   box-shadow: 0 10px 24px rgba(18, 49, 75, 0.18);
 }
 
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, var(--flag-green), var(--accent));
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(12, 107, 79, 0.2);
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.link-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(12, 107, 79, 0.24);
+}
+
+.link-button.secondary {
+  background: rgba(12, 107, 79, 0.08);
+  color: var(--accent);
+  border: 1px solid rgba(12, 107, 79, 0.16);
+  box-shadow: none;
+}
+
+.starter-nav-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .button.danger {
   background: linear-gradient(135deg, var(--danger), #c94b4b);
   box-shadow: 0 10px 24px rgba(161, 40, 40, 0.22);
