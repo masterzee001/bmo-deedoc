@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, GeoPoliticalZoneItem, PoliticalPartyItem } from "@pics-nigeria/shared";
+import type { AuthUserProfile, GeoPoliticalZoneItem, PoliticalPartyItem, ReferenceCompletenessReport } from "@pics-nigeria/shared";
 import {
   ApiError,
   createGeoPoliticalZone,
   createPoliticalParty,
   deleteGeoPoliticalZone,
   deletePoliticalParty,
+  fetchAdminReferenceCompleteness,
   fetchCurrentUser,
   fetchGeoPoliticalZones,
   fetchPoliticalParties,
@@ -16,6 +17,7 @@ import {
   updatePoliticalParty,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { FeedbackBanner } from "../../../components/feedback-banner";
 
 function formatDependencyCounts(dependencyCounts?: Record<string, number>) {
   if (!dependencyCounts) {
@@ -30,6 +32,7 @@ export default function AdminReferencePage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [zones, setZones] = useState<GeoPoliticalZoneItem[]>([]);
   const [parties, setParties] = useState<PoliticalPartyItem[]>([]);
+  const [completeness, setCompleteness] = useState<ReferenceCompletenessReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -58,10 +61,11 @@ export default function AdminReferencePage() {
   });
 
   async function loadReferenceData(token: string) {
-    const [currentUser, nextZones, nextParties] = await Promise.all([
+    const [currentUser, nextZones, nextParties, referenceCompleteness] = await Promise.all([
       fetchCurrentUser(token),
       fetchGeoPoliticalZones(token),
       fetchPoliticalParties(token),
+      fetchAdminReferenceCompleteness(token),
     ]);
 
     if (currentUser.role !== "ADMIN" && currentUser.role !== "SUPER_ADMIN") {
@@ -71,6 +75,7 @@ export default function AdminReferencePage() {
     setUser(currentUser);
     setZones(nextZones);
     setParties(nextParties);
+    setCompleteness(referenceCompleteness);
   }
 
   useEffect(() => {
@@ -261,8 +266,70 @@ export default function AdminReferencePage() {
 
       <AdminNav />
 
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      <FeedbackBanner tone="error" message={error} />
+      <FeedbackBanner tone="success" message={message} />
+
+      {completeness ? (
+        <>
+          <section className="grid stats" style={{ marginTop: 24 }}>
+            <article className="panel card">
+              <h2>States</h2>
+              <div className="value">{completeness.summary.loadedStates}</div>
+              <p className="muted">Expected in scope: {completeness.summary.expectedStates}</p>
+            </article>
+            <article className="panel card">
+              <h2>LGAs</h2>
+              <div className="value">{completeness.summary.loadedLgas}</div>
+              <p className="muted">Expected in scope: {completeness.summary.expectedLgas}</p>
+            </article>
+            <article className="panel card">
+              <h2>Wards</h2>
+              <div className="value">{completeness.summary.loadedWards}</div>
+              <p className="muted">Wards without polling units: {completeness.summary.wardsWithoutPollingUnits}</p>
+            </article>
+            <article className="panel card">
+              <h2>Polling units</h2>
+              <div className="value">{completeness.summary.loadedPollingUnits}</div>
+              <p className="muted">LGAs without wards: {completeness.summary.lgasWithoutWards}</p>
+            </article>
+          </section>
+
+          <section className="panel card" style={{ marginTop: 24 }}>
+            <div className="section-head">
+              <div>
+                <h2>Reference completeness</h2>
+                <p className="muted">
+                  This is a read-only readiness view for national reference coverage. Full polling-unit bootstrap is now a controlled manual ops task.
+                </p>
+              </div>
+              <p className="muted" style={{ maxWidth: 420 }}>
+                Manual command: <code>{completeness.manualBootstrapCommand}</code>
+              </p>
+            </div>
+
+            <div className="reward-list" style={{ marginTop: 16 }}>
+              {completeness.states.map((state) => (
+                <article key={state.stateId} className="reward-item">
+                  <div className="section-head compact">
+                    <div>
+                      <strong>{state.stateName}</strong>
+                      <p className="muted">
+                        LGAs {state.loadedLgas}/{state.expectedLgas} | Wards {state.loadedWards} | Polling units {state.loadedPollingUnits}
+                      </p>
+                    </div>
+                    <span className={`status-pill ${state.isComplete ? "active" : "inactive"}`}>
+                      {state.isComplete ? "Ready" : "Incomplete"}
+                    </span>
+                  </div>
+                  <p className="muted">
+                    Missing LGAs: {state.missingLgas} | LGAs without wards: {state.lgasWithoutWards} | Wards without polling units: {state.wardsWithoutPollingUnits}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </section>
+        </>
+      ) : null}
 
       <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
         <section className="panel card">

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile } from "@pics-nigeria/shared";
-import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
+import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, logoutCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 
 export default function AdminAccountPage() {
@@ -131,6 +131,20 @@ export default function AdminAccountPage() {
     }
   }
 
+  async function handleLogout() {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (token) {
+      try {
+        await logoutCurrentUser(token);
+      } catch {
+        // Best effort.
+      }
+    }
+
+    localStorage.removeItem("picsNigeriaAdminToken");
+    window.location.href = "/admin/login";
+  }
+
   if (loading) {
     return (
       <main className="shell">
@@ -159,6 +173,11 @@ export default function AdminAccountPage() {
         <p className="eyebrow">Admin account</p>
         <h1>{user.name}</h1>
         <p>Update your profile, password, and sensitive export tools from one place.</p>
+        <div className="action-row" style={{ marginTop: 12 }}>
+          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+            Sign out
+          </button>
+        </div>
       </section>
 
       <AdminNav />

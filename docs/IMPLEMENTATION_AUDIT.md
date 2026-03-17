@@ -141,6 +141,18 @@ This note captures the current production-safe implementation before additional 
 - General media attachments currently store metadata and URL references, not binary blobs.
 - There is no confirmed dedicated secure upload flow yet for election-day report photos.
 
+### Reference-data and completeness operations
+- National state reference bootstrap already exists.
+- National polling-unit bootstrap now exists as a controlled manual operations script rather than a deploy-time startup dependency.
+- Coverage and polling-unit finder flows can work from authoritative reference tables once that manual bootstrap has been run.
+- A dedicated reference-completeness verifier is now the safer operational gap to maintain, rather than forcing heavy remote sync during deploy.
+
+### Agent location and session controls
+- Agent login already supports GPS-consent enforcement and one active session per device through a stored session nonce.
+- Backend session middleware already invalidates older agent tokens when a newer session is created.
+- Agent live tracking already uses device geolocation rather than typed location input.
+- A safer next extension point is explicit session revocation and periodic client revalidation, not a rewrite of the activity model.
+
 ### Feedback, toasts, and modal utilities
 - Frontend currently uses:
   - inline `error` and `message` state
@@ -205,6 +217,7 @@ This note captures the current production-safe implementation before additional 
 - Existing reward balance calculations until ledger review is fully understood.
 - Current live management routes and dashboards unless changes remain additive and scoped.
 - Existing migrations and bootstrap flows should not be rewritten or squashed.
+- The full national polling-unit bootstrap should not be moved back into deploy startup because it is externally dependent and can cause production timeouts.
 
 ## Requested Features That Need No Schema Change
 - Phase 1 documentation upgrade.
@@ -216,6 +229,8 @@ This note captures the current production-safe implementation before additional 
   `BroadcastMessage` already contains territory scope and audience fields.
 - Parts of Phase 7 field intelligence:
   available data already exists for summaries and scoped operational visibility.
+- Reference completeness verification and readiness reporting:
+  this can be added safely with a read-only report and a manual verifier script without changing schema.
 
 ## Requested Features That May Need Minimal Additive Schema Change
 - Richer audit visibility by territory or party:
@@ -228,6 +243,8 @@ This note captures the current production-safe implementation before additional 
   likely needs a new additive report model rather than overloading `Incident` or `Feedback`.
 - Election-day evidence uploads:
   likely needs additive report-linked media handling or a safe extension of current media attachment patterns.
+- Richer agent session governance:
+  current session nonce fields already exist, so logout and revoke-session controls need no further schema change.
 
 ## Safe Recommendations For Later Phases
 - Prefer extending `AuditLog` usage and read filtering over creating a second logging system.

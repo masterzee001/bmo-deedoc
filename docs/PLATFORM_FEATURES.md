@@ -33,6 +33,8 @@ The platform is designed for live political operations, so authority is always c
   registration, candidate discovery, consent-based communication, referrals, engagement tasks, and rewards.
 - `Reporting and oversight`
   live activity views, map summaries, scoped notifications, incident monitoring, operational queues, audit-friendly workflows, communication previews, and coverage intelligence.
+- `Reference readiness`
+  authoritative territory inventory counts, manual national polling-unit bootstrap, and completeness verification for operational trust.
 
 ## Candidate Discovery And Public Profile
 Current capability:
@@ -345,6 +347,8 @@ Agent-facing capabilities include:
 - capture field observations
 - operate from assigned territory and polling-unit context
 - support election-period field execution
+- maintain device-GPS availability during active sessions
+- operate one active device session at a time for tighter field accountability
 
 Admin and candidate oversight capabilities include:
 - track live agent activity inside authorized scope
@@ -364,6 +368,9 @@ Capabilities include:
 - map-based operational summary
 - incident and agent-location review inside authorized scope
 - direct transition from tracking into task assignment for visible agents
+- device-based GPS capture instead of typed location claims
+- forced re-authentication when a newer device session replaces the current one
+- session loss when GPS access is no longer available during active agent use
 
 Tracking visibility always respects:
 - admin level
@@ -488,17 +495,35 @@ Current capability:
   - wards with weak coverage pressure
   - polling units without assigned agents
   - polling units without recent activity
-  - polling units carrying open incident pressure
+- polling units carrying open incident pressure
 - the coverage view now also separates actionable follow-up into:
   - agent assignment gaps
   - activity follow-up queues
   - incident-pressure queues
 - the coverage view remains practical and operational rather than becoming a heavy analytics system
+- coverage summaries are intended to reflect authoritative reference data already loaded into the platform rather than ad hoc request-time territory discovery
 
 Operational result:
 - admins can quickly identify blind spots in field deployment
 - ward and LGA follow-up can be prioritized from one focused page
 - weak territories can be actioned through the existing user-management and tasking workflows
+
+## Reference Data Readiness
+Operational trust depends on reliable territory reference counts.
+
+Current capability:
+- admins can review reference completeness from the reference-data area
+- reference completeness highlights:
+  - expected versus loaded LGAs by state
+  - loaded wards
+  - loaded polling units
+  - LGAs without wards
+  - wards without polling units
+- full national polling-unit bootstrap is handled as a controlled manual operations task, not a deploy-time startup dependency
+
+Operational result:
+- admins can see whether coverage totals are based on complete reference coverage or an incomplete dataset
+- operations teams can run a separate completeness verifier before major onboarding or election-period use
 
 ## Governance And Safety Controls
 The platform is designed for deployed-system safety.

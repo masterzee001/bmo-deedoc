@@ -9,9 +9,12 @@ import {
   deleteManagedUser,
   fetchCurrentUser,
   fetchManagedUsers,
+  revokeAgentSession,
   setUserActivation,
 } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
+import { ConfirmDialog } from "../../../../components/confirm-dialog";
+import { FeedbackBanner } from "../../../../components/feedback-banner";
 import {
   describeTerritory,
   getManagedRoleLabel,
@@ -30,6 +33,15 @@ export default function AdminManageUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [confirmState, setConfirmState] = useState<
+    | null
+    | {
+        kind: "toggle" | "delete" | "revoke-session";
+        item: ManagedUserItem;
+        nextIsActive?: boolean;
+      }
+  >(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   async function loadPage(token: string, nextLocator: { stateId: string; lgaId: string; wardId: string; role: string; search: string }) {
     const [currentUser, users] = await Promise.all([
@@ -86,13 +98,6 @@ export default function AdminManageUsersPage() {
       return;
     }
 
-    const confirmed = window.confirm(
-      nextIsActive ? "Reactivate this account?" : "Deactivate this account? The user will lose access until reactivated.",
-    );
-    if (!confirmed) {
-      return;
-    }
-
     try {
       setError("");
       setMessage("");
@@ -111,13 +116,6 @@ export default function AdminManageUsersPage() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete ${item.name}'s account? This is permanent and only succeeds when no operational records still depend on it.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
     try {
       setError("");
       setMessage("");
@@ -126,6 +124,44 @@ export default function AdminManageUsersPage() {
       await loadPage(token, locator);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not delete the account.");
+    }
+  }
+
+  async function handleRevokeAgentSession(item: ManagedUserItem) {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (!token) {
+      setError("Authentication is required.");
+      return;
+    }
+
+    try {
+      setError("");
+      setMessage("");
+      const result = await revokeAgentSession(token, item.userId);
+      setMessage(result.message);
+      await loadPage(token, locator);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not revoke the agent session.");
+    }
+  }
+
+  async function handleConfirmAction() {
+    if (!confirmState) {
+      return;
+    }
+
+    setConfirmBusy(true);
+    try {
+      if (confirmState.kind === "toggle" && typeof confirmState.nextIsActive === "boolean") {
+        await handleToggleUser(confirmState.item.userId, confirmState.nextIsActive);
+      } else if (confirmState.kind === "delete") {
+        await handleDeleteUser(confirmState.item);
+      } else if (confirmState.kind === "revoke-session") {
+        await handleRevokeAgentSession(confirmState.item);
+      }
+      setConfirmState(null);
+    } finally {
+      setConfirmBusy(false);
     }
   }
 
@@ -161,8 +197,8 @@ export default function AdminManageUsersPage() {
 
       <AdminNav />
 
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      <FeedbackBanner tone="error" message={error} />
+      <FeedbackBanner tone="success" message={message} />
 
       <section className="grid stats">
         <article className="panel card">
@@ -239,12 +275,21 @@ export default function AdminManageUsersPage() {
                   <button
                     className="button secondary"
                     type="button"
-                    onClick={() => void handleToggleUser(item.userId, !item.isActive)}
+                    onClick={() => setConfirmState({ kind: "toggle", item, nextIsActive: !item.isActive })}
                   >
                     {item.isActive ? "Deactivate Account" : "Reactivate Account"}
                   </button>
+                  {item.role === "AGENT" ? (
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => setConfirmState({ kind: "revoke-session", item })}
+                    >
+                      Revoke Session
+                    </button>
+                  ) : null}
                   {!item.isActive ? (
-                    <button className="button danger" type="button" onClick={() => void handleDeleteUser(item)}>
+                    <button className="button danger" type="button" onClick={() => setConfirmState({ kind: "delete", item })}>
                       Delete Account
                     </button>
                   ) : null}
@@ -254,6 +299,40 @@ export default function AdminManageUsersPage() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={Boolean(confirmState)}
+        title={
+          confirmState?.kind === "delete"
+            ? "Delete account"
+            : confirmState?.kind === "revoke-session"
+              ? "Revoke agent session"
+              : confirmState?.nextIsActive
+                ? "Reactivate account"
+                : "Deactivate account"
+        }
+        description={
+          confirmState?.kind === "delete"
+            ? `Delete ${confirmState.item.name}'s account? This is permanent and only succeeds when no operational records still depend on it.`
+            : confirmState?.kind === "revoke-session"
+              ? `Revoke the active device session for ${confirmState.item.name}? The agent will need to sign in again on any device.`
+              : confirmState?.nextIsActive
+                ? `Reactivate ${confirmState?.item.name}'s account?`
+                : `Deactivate ${confirmState?.item.name}'s account? The user will lose access until reactivated.`
+        }
+        confirmLabel={
+          confirmState?.kind === "delete"
+            ? "Delete Account"
+            : confirmState?.kind === "revoke-session"
+              ? "Revoke Session"
+              : confirmState?.nextIsActive
+                ? "Reactivate Account"
+                : "Deactivate Account"
+        }
+        onCancel={() => !confirmBusy && setConfirmState(null)}
+        onConfirm={() => void handleConfirmAction()}
+        busy={confirmBusy}
+      />
     </main>
   );
 }

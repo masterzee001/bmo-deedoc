@@ -37,6 +37,7 @@ import {
   fetchPublicPollingUnits,
   fetchPublicStates,
   fetchPublicWards,
+  logoutCurrentUser,
   markAllNotificationsRead,
   uploadCandidateImage,
   updateCandidatePost,
@@ -605,6 +606,10 @@ export default function CandidateDashboardPage() {
   }
 
   function handleLogout() {
+    const token = localStorage.getItem("picsNigeriaCandidateToken");
+    if (token) {
+      void logoutCurrentUser(token).catch(() => undefined);
+    }
     localStorage.removeItem("picsNigeriaCandidateToken");
     window.location.href = "/candidate/login";
   }

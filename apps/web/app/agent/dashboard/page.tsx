@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile, FieldTaskItem, NotificationItem } from "@pics-nigeria/shared";
 import {
   ApiError,
@@ -11,12 +12,15 @@ import {
   fetchAgentTasks,
   fetchCurrentUser,
   fetchNotifications,
+  logoutCurrentUser,
   updateAgentTask,
 } from "../../../lib/api";
+import { AGENT_TRACKING_EVENT_NAME } from "../../../components/agent-session-tracker";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
 
 export default function AgentDashboardPage() {
+  const router = useRouter();
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [activities, setActivities] = useState<AgentActivityItem[]>([]);
   const [tasks, setTasks] = useState<FieldTaskItem[]>([]);
@@ -26,9 +30,8 @@ export default function AgentDashboardPage() {
   const [gpsGateError, setGpsGateError] = useState("");
   const [activityMessage, setActivityMessage] = useState("");
   const [incidentMessage, setIncidentMessage] = useState("");
-  const [trackingActive, setTrackingActive] = useState(false);
   const [locationPending, setLocationPending] = useState(false);
-  const [trackerStatus, setTrackerStatus] = useState("");
+  const [trackerStatus, setTrackerStatus] = useState("Live tracking starts automatically while you are signed in.");
   const [lastPingAt, setLastPingAt] = useState("");
   const [incidentForm, setIncidentForm] = useState({
     type: "OTHER",
@@ -39,9 +42,6 @@ export default function AgentDashboardPage() {
     latitude: "",
     longitude: "",
   });
-  const trackerWatchId = useRef<number | null>(null);
-  const lastTrackerSendAt = useRef(0);
-
   async function loadAgentDashboard(token: string) {
     const [currentUser, recentActivities, taskItems, notificationItems] = await Promise.all([
       fetchCurrentUser(token),
@@ -111,14 +111,6 @@ export default function AgentDashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (trackerWatchId.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
-        navigator.geolocation.clearWatch(trackerWatchId.current);
-      }
-    };
-  }, []);
-
   function readCurrentPosition() {
     return new Promise<GeolocationPosition>((resolve, reject) => {
       if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -132,6 +124,20 @@ export default function AgentDashboardPage() {
         timeout: 20_000,
       });
     });
+  }
+
+  async function forceLogout(reason?: string) {
+    const token = localStorage.getItem("picsNigeriaAgentToken");
+    if (token) {
+      try {
+        await logoutCurrentUser(token);
+      } catch {
+        // Best effort. The session may already be invalidated.
+      }
+    }
+
+    localStorage.removeItem("picsNigeriaAgentToken");
+    router.replace(reason ? `/agent/login?reason=${encodeURIComponent(reason)}` : "/agent/login");
   }
 
   async function sendDeviceLocation(path: "check-in" | "check-out" | "location", options?: { refreshDashboard?: boolean }) {
@@ -161,10 +167,7 @@ export default function AgentDashboardPage() {
               ? "Check-in recorded."
               : "Check-out recorded.";
 
-      if (path === "location") {
-        setTrackerStatus(message);
-        setLastPingAt(new Date().toISOString());
-      } else {
+      if (path !== "location") {
         setActivityMessage(message);
       }
 
@@ -173,9 +176,7 @@ export default function AgentDashboardPage() {
       }
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : "Location access failed.";
-      if (path === "location") {
-        setTrackerStatus(message);
-      } else {
+      if (path !== "location") {
         setError(message);
       }
     } finally {
@@ -188,70 +189,26 @@ export default function AgentDashboardPage() {
     void sendDeviceLocation(path, { refreshDashboard: true });
   }
 
-  async function handleStartTracking() {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setError("Device GPS is not available on this browser.");
+  async function handleSignOut() {
+    await forceLogout();
+  }
+
+  useEffect(() => {
+    function handleTrackingEvent(event: Event) {
+      const customEvent = event as CustomEvent<{ active: boolean; status: string; lastPingAt?: string | null }>;
+      setTrackerStatus(customEvent.detail.status);
+      if (customEvent.detail.lastPingAt) {
+        setLastPingAt(customEvent.detail.lastPingAt);
+      }
+    }
+
+    if (typeof window === "undefined") {
       return;
     }
 
-    const token = localStorage.getItem("picsNigeriaAgentToken");
-    if (!token) {
-      setError("Authentication is required.");
-      return;
-    }
-
-    if (trackerWatchId.current !== null) {
-      navigator.geolocation.clearWatch(trackerWatchId.current);
-      trackerWatchId.current = null;
-    }
-
-    setError("");
-    setTrackerStatus("Live tracking is starting. Allow GPS access on your device.");
-    setTrackingActive(true);
-    lastTrackerSendAt.current = 0;
-
-    trackerWatchId.current = navigator.geolocation.watchPosition(
-      async (position) => {
-        const now = Date.now();
-        if (now - lastTrackerSendAt.current < 30_000) {
-          return;
-        }
-
-        lastTrackerSendAt.current = now;
-        try {
-          const result = (await createAgentActivity(token, "location", {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : undefined,
-          })) as { message?: string };
-          setTrackerStatus(typeof result?.message === "string" ? result.message : "Live location synced.");
-          setLastPingAt(new Date().toISOString());
-        } catch (caughtError) {
-          setTrackerStatus(caughtError instanceof Error ? caughtError.message : "Live tracking failed.");
-        }
-      },
-      (geoError) => {
-        trackerWatchId.current = null;
-        setTrackingActive(false);
-        setTrackerStatus(geoError.message || "Live tracking permission was denied.");
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 20_000,
-      },
-    );
-  }
-
-  function handleStopTracking() {
-    if (trackerWatchId.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.clearWatch(trackerWatchId.current);
-      trackerWatchId.current = null;
-    }
-
-    setTrackingActive(false);
-    setTrackerStatus("Live tracking is paused.");
-  }
+    window.addEventListener(AGENT_TRACKING_EVENT_NAME, handleTrackingEvent as EventListener);
+    return () => window.removeEventListener(AGENT_TRACKING_EVENT_NAME, handleTrackingEvent as EventListener);
+  }, []);
 
   async function handleIncidentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -328,11 +285,14 @@ export default function AgentDashboardPage() {
           {user.agentProfile?.wardId}
         </p>
         <p className="muted">Polling unit: {user.agentProfile?.pollingUnitId || "Not assigned"}</p>
-        <p style={{ marginTop: 12 }}>
+        <div className="action-row" style={{ marginTop: 12 }}>
           <Link href="/agent/election-report" className="button">
             Submit Election Report
           </Link>
-        </p>
+          <button className="button secondary" type="button" onClick={() => void handleSignOut()}>
+            Sign out
+          </button>
+        </div>
       </section>
 
       <section className="grid stats">
@@ -363,18 +323,7 @@ export default function AgentDashboardPage() {
 
         <section className="panel card">
           <h2>Live Tracking</h2>
-          <p className="muted">Use device GPS and network position to send live polling-unit field location to the admin tracker map.</p>
-          <div className="action-row">
-            <button className="button" type="button" onClick={() => void handleStartTracking()} disabled={trackingActive || locationPending}>
-              {trackingActive ? "Tracking live" : "Start live tracking"}
-            </button>
-            <button className="button secondary" type="button" onClick={handleStopTracking} disabled={!trackingActive}>
-              Stop tracking
-            </button>
-            <button className="button secondary" type="button" onClick={() => void sendDeviceLocation("location")} disabled={locationPending}>
-              {locationPending ? "Syncing..." : "Send location now"}
-            </button>
-          </div>
+          <p className="muted">Device GPS tracking runs automatically for your session and stops only when you sign out.</p>
           {trackerStatus ? <p className="muted">{trackerStatus}</p> : null}
           {lastPingAt ? <p className="muted">Last live ping: {new Date(lastPingAt).toLocaleString()}</p> : null}
         </section>

@@ -19,7 +19,12 @@ import {
   UserRole,
 } from "@prisma/client";
 import { z } from "zod";
-import { normalizeEmail } from "@pics-nigeria/shared";
+import {
+  NIGERIA_EXPECTED_LGA_TOTAL,
+  NIGERIA_EXPECTED_STATE_TOTAL,
+  NIGERIA_STATE_EXPECTED_LGA_COUNTS,
+  normalizeEmail,
+} from "@pics-nigeria/shared";
 import { getAuthUserProfile } from "../auth/profile";
 import { hashPassword } from "../auth/password";
 import { createAuditLog } from "../lib/audit";
@@ -1426,6 +1431,92 @@ function getWardReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma
   };
 }
 
+async function buildReferenceCompletenessReport(actor: Express.Request["authUser"]) {
+  const states = await prisma.state.findMany({
+    where: getStateReferenceScopeFilter(actor),
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      lgas: {
+        select: {
+          id: true,
+          wards: {
+            select: {
+              id: true,
+              pollingUnits: {
+                select: { id: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const summary = {
+    expectedStates: actor && isSuperAdmin(actor) ? NIGERIA_EXPECTED_STATE_TOTAL : states.length,
+    loadedStates: states.length,
+    expectedLgas: 0,
+    loadedLgas: 0,
+    loadedWards: 0,
+    loadedPollingUnits: 0,
+    statesWithMissingLgas: 0,
+    lgasWithoutWards: 0,
+    wardsWithoutPollingUnits: 0,
+  };
+
+  const stateItems = states.map((state) => {
+    const expectedLgas = NIGERIA_STATE_EXPECTED_LGA_COUNTS[state.id] ?? 0;
+    const loadedLgas = state.lgas.length;
+    const loadedWards = state.lgas.reduce((sum, lga) => sum + lga.wards.length, 0);
+    const loadedPollingUnits = state.lgas.reduce(
+      (sum, lga) =>
+        sum + lga.wards.reduce((wardSum, ward) => wardSum + ward.pollingUnits.length, 0),
+      0,
+    );
+    const lgasWithoutWards = state.lgas.filter((lga) => lga.wards.length === 0).length;
+    const wardsWithoutPollingUnits = state.lgas.reduce(
+      (sum, lga) => sum + lga.wards.filter((ward) => ward.pollingUnits.length === 0).length,
+      0,
+    );
+    const missingLgas = Math.max(expectedLgas - loadedLgas, 0);
+    const isComplete = missingLgas === 0 && lgasWithoutWards === 0 && wardsWithoutPollingUnits === 0;
+
+    summary.expectedLgas += expectedLgas;
+    summary.loadedLgas += loadedLgas;
+    summary.loadedWards += loadedWards;
+    summary.loadedPollingUnits += loadedPollingUnits;
+    summary.statesWithMissingLgas += missingLgas > 0 ? 1 : 0;
+    summary.lgasWithoutWards += lgasWithoutWards;
+    summary.wardsWithoutPollingUnits += wardsWithoutPollingUnits;
+
+    return {
+      stateId: state.id,
+      stateName: state.name,
+      expectedLgas,
+      loadedLgas,
+      missingLgas,
+      loadedWards,
+      lgasWithoutWards,
+      loadedPollingUnits,
+      wardsWithoutPollingUnits,
+      isComplete,
+    };
+  });
+
+  if (actor && isSuperAdmin(actor)) {
+    summary.expectedLgas = NIGERIA_EXPECTED_LGA_TOTAL;
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    manualBootstrapCommand: "npm run bootstrap:polling-units:national --workspace @pics-nigeria/database",
+    summary,
+    states: stateItems,
+  };
+}
+
 async function canViewAuditLog(
   actor: NonNullable<Express.Request["authUser"]>,
   log: {
@@ -1999,6 +2090,11 @@ router.patch("/states/:stateId/agent-target", requireAuth, requireRole("ADMIN", 
     message: "State staffing target updated successfully.",
     state: updatedState,
   });
+});
+
+router.get("/reference-completeness", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const report = await buildReferenceCompletenessReport(request.authUser);
+  return response.json({ report });
 });
 
 router.get("/senatorial-districts", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
@@ -3362,6 +3458,50 @@ router.patch("/users/:userId/deactivation", requireAuth, requireRole("ADMIN", "S
     message: parsed.data.isActive ? "User reactivated successfully." : "User deactivated successfully.",
     user: await getAuthUserProfile(updatedUser.id),
   });
+});
+
+router.post("/agents/:agentUserId/revoke-session", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {
+  const agentUserId = readRouteId(response, request.params.agentUserId, "agent user id");
+  if (!agentUserId) {
+    return;
+  }
+
+  const targetUser = await prisma.user.findUnique({
+    where: { id: agentUserId },
+    include: {
+      agentProfile: true,
+    },
+  });
+
+  if (!targetUser || targetUser.role !== UserRole.AGENT || !targetUser.agentProfile) {
+    return response.status(404).json({ message: "Agent account not found." });
+  }
+
+  const targetAuth = await getAuthUserProfile(targetUser.id);
+  if (
+    !request.authUser ||
+    !targetAuth ||
+    !canManageUser(request.authUser, targetAuth) ||
+    !isWithinActorParty(request.authUser, targetUser.agentProfile.politicalPartyId)
+  ) {
+    return response.status(403).json({ message: "You cannot revoke this agent session." });
+  }
+
+  await prisma.agentProfile.update({
+    where: { userId: targetUser.id },
+    data: { activeSessionNonce: null },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId: request.authUser.id,
+    action: "AGENT_SESSION_REVOKED",
+    targetType: "User",
+    targetId: targetUser.id,
+    politicalPartyId: targetUser.agentProfile.politicalPartyId || null,
+    territory: targetUser.agentProfile,
+  });
+
+  return response.json({ message: "Agent session revoked successfully." });
 });
 
 router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (request, response) => {

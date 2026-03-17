@@ -25,6 +25,7 @@ import {
   fetchVoterRewardLedger,
   fetchVoterRedemptions,
   fetchVoterRewards,
+  logoutCurrentUser,
   rsvpToCampaignEvent,
 } from "../../lib/api";
 
@@ -168,6 +169,20 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleLogout() {
+    const token = localStorage.getItem("picsNigeriaToken");
+    if (token) {
+      try {
+        await logoutCurrentUser(token);
+      } catch {
+        // Best effort.
+      }
+    }
+
+    localStorage.removeItem("picsNigeriaToken");
+    window.location.href = "/login";
+  }
+
   if (loading) {
     return (
       <main className="shell">
@@ -203,9 +218,14 @@ export default function DashboardPage() {
             Your referral code is <strong>{user.voterProfile?.referralCode}</strong>.
           </p>
         </div>
-        <div className="hero-callout">
-          <strong>{events.length}</strong>
-          <span>live events in your territory</span>
+        <div className="action-row">
+          <div className="hero-callout">
+            <strong>{events.length}</strong>
+            <span>live events in your territory</span>
+          </div>
+          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+            Sign out
+          </button>
         </div>
       </section>
 

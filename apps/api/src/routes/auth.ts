@@ -118,6 +118,17 @@ router.get("/me", requireAuth, async (request, response) => {
   return response.json({ user: request.authUser });
 });
 
+router.post("/logout", requireAuth, async (request, response) => {
+  if (request.authUser?.role === UserRole.AGENT) {
+    await prisma.agentProfile.updateMany({
+      where: { userId: request.authUser.id },
+      data: { activeSessionNonce: null },
+    });
+  }
+
+  return response.json({ message: "Signed out successfully." });
+});
+
 router.patch("/me", requireAuth, async (request, response) => {
   const parsed = updateProfileSchema.safeParse(request.body);
   if (!parsed.success) {

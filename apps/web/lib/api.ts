@@ -36,6 +36,7 @@ import type {
   RewardLedgerItem,
   RewardRedemptionItem,
   RewardsSummary,
+  ReferenceCompletenessReport,
   SenatorialDistrictItem,
   StateItem,
   StateConstituencyItem,
@@ -168,6 +169,15 @@ export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> 
 
   const payload = await readJson<{ user: AuthUserProfile }>(response);
   return payload.user;
+}
+
+export async function logoutCurrentUser(token: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string }>(response);
 }
 
 export async function updateCurrentUserProfile(
@@ -317,6 +327,16 @@ export async function fetchAdminCoverageInsights(token: string): Promise<Coverag
 
   const payload = await readJson<{ insights: CoverageInsights }>(response);
   return payload.insights;
+}
+
+export async function fetchAdminReferenceCompleteness(token: string): Promise<ReferenceCompletenessReport> {
+  const response = await fetch(`${API_BASE_URL}/admin/reference-completeness`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ report: ReferenceCompletenessReport }>(response);
+  return payload.report;
 }
 
 export async function updateStateAgentTarget(token: string, stateId: string, agentsPerPollingUnitTarget: number): Promise<{ message: string }> {
@@ -1202,6 +1222,18 @@ export async function deleteManagedUser(
   });
 
   return readJson<{ message: string; dependencyCounts?: Record<string, number> }>(response);
+}
+
+export async function revokeAgentSession(
+  token: string,
+  userId: string,
+): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/admin/agents/${userId}/revoke-session`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return readJson<{ message: string }>(response);
 }
 
 export async function fetchCandidateVoters(token: string): Promise<CandidateVoterItem[]> {

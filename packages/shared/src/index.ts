@@ -93,6 +93,14 @@ export const NOTIFICATION_TYPES = [
   "SYSTEM",
 ] as const;
 
+export {
+  NIGERIA_EXPECTED_LGA_TOTAL,
+  NIGERIA_EXPECTED_STATE_TOTAL,
+  NIGERIA_GEO_POLITICAL_ZONES,
+  NIGERIA_STATE_EXPECTED_LGA_COUNTS,
+  NIGERIA_STATE_REFERENCE,
+} from "./nigeria-reference-data";
+
 export const FIELD_TASK_STATUSES = [
   "TODO",
   "IN_PROGRESS",
@@ -591,6 +599,36 @@ export type ReferenceDataReadinessSummary = {
   loadedWards: number;
   loadedPollingUnits: number;
   loadedWardsWithoutPollingUnits: number;
+};
+
+export type ReferenceCompletenessStateItem = {
+  stateId: string;
+  stateName: string;
+  expectedLgas: number;
+  loadedLgas: number;
+  missingLgas: number;
+  loadedWards: number;
+  lgasWithoutWards: number;
+  loadedPollingUnits: number;
+  wardsWithoutPollingUnits: number;
+  isComplete: boolean;
+};
+
+export type ReferenceCompletenessReport = {
+  generatedAt: string;
+  manualBootstrapCommand: string;
+  summary: {
+    expectedStates: number;
+    loadedStates: number;
+    expectedLgas: number;
+    loadedLgas: number;
+    loadedWards: number;
+    loadedPollingUnits: number;
+    statesWithMissingLgas: number;
+    lgasWithoutWards: number;
+    wardsWithoutPollingUnits: number;
+  };
+  states: ReferenceCompletenessStateItem[];
 };
 
 export type WardCoverageInsight = {

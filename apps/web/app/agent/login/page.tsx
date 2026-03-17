@@ -12,6 +12,14 @@ export default function AgentLoginPage() {
   const [gpsConsent, setGpsConsent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const sessionReason =
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("reason") || "";
+  const sessionNotice =
+    sessionReason === "gps-required"
+      ? "Device GPS must stay turned on to use the agent dashboard."
+      : sessionReason === "session-ended"
+        ? "Your previous agent session ended. Sign in again to continue."
+        : "";
 
   function verifyGpsAccess() {
     return new Promise<void>((resolve, reject) => {
@@ -88,7 +96,8 @@ export default function AgentLoginPage() {
               <span>I agree that PICS Nigeria may use this device GPS for agent attendance, live field tracking, and operational transparency while I am signed in.</span>
             </label>
           </label>
-          <p className="muted">GPS must be turned on before agent access is granted.</p>
+          <p className="muted">GPS must be turned on before agent access is granted and remain available during the session.</p>
+          {sessionNotice ? <p className="muted">{sessionNotice}</p> : null}
           {error ? <p className="error">{error}</p> : null}
           <button className="button" type="submit" disabled={loading || !gpsConsent}>
             {loading ? "Signing in..." : "Sign in"}

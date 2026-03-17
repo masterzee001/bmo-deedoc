@@ -14,6 +14,7 @@
     "bootstrap:reference-data": "tsx scripts/bootstrap-reference-data.ts",
     "bootstrap:polling-units:national": "tsx scripts/bootstrap-national-polling-units.ts",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
+    "verify:reference-completeness": "tsx scripts/verify-reference-completeness.ts",
     "verify:production": "tsx scripts/verify-production-readiness.ts",
     "seed": "tsx prisma/seed.ts",
     "seed:credentials": "tsx scripts/print-seeded-credentials.ts",

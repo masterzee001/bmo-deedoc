@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type {
   AdminMapSummary,
   AgentActivitySummary,
@@ -30,9 +31,11 @@ import {
   fetchStateConstituencies,
   fetchStates,
   fetchWards,
+  logoutCurrentUser,
 } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import { RasterLiveMap } from "../../../../components/raster-live-map";
 
 type Marker = {
   id: string;
@@ -40,9 +43,8 @@ type Marker = {
   label: string;
   detail: string;
   timestamp: string | null;
-  x: number;
-  y: number;
-  tone: "safe" | "alert";
+  latitude: number;
+  longitude: number;
 };
 
 function buildLiveMapMarkers(mapSummary: AdminMapSummary): Marker[] {
@@ -56,7 +58,6 @@ function buildLiveMapMarkers(mapSummary: AdminMapSummary): Marker[] {
       timestamp: incident.createdAt,
       latitude: incident.latitude as number,
       longitude: incident.longitude as number,
-      tone: "alert" as const,
     }));
 
   const agents = mapSummary.activeAgents
@@ -69,36 +70,13 @@ function buildLiveMapMarkers(mapSummary: AdminMapSummary): Marker[] {
       timestamp: agent.latestActivityAt,
       latitude: agent.latestLatitude as number,
       longitude: agent.latestLongitude as number,
-      tone: "safe" as const,
     }));
 
-  const source = [...incidents, ...agents];
-  if (source.length === 0) {
-    return [];
-  }
-
-  const latitudes = source.map((item) => item.latitude);
-  const longitudes = source.map((item) => item.longitude);
-  const minLatitude = Math.min(...latitudes);
-  const maxLatitude = Math.max(...latitudes);
-  const minLongitude = Math.min(...longitudes);
-  const maxLongitude = Math.max(...longitudes);
-  const latitudeSpan = Math.max(maxLatitude - minLatitude, 0.08);
-  const longitudeSpan = Math.max(maxLongitude - minLongitude, 0.08);
-
-  return source.map((item) => ({
-    id: item.id,
-    kind: item.kind,
-    label: item.label,
-    detail: item.detail,
-    timestamp: item.timestamp,
-    tone: item.tone,
-    x: 10 + ((item.longitude - minLongitude) / longitudeSpan) * 80,
-    y: 12 + (1 - (item.latitude - minLatitude) / latitudeSpan) * 76,
-  }));
+  return [...incidents, ...agents];
 }
 
 export default function AdminLiveOperationsPage() {
+  const router = useRouter();
   const [user, setUser] = useState<AuthUserProfile | null>(null);
   const [mapSummary, setMapSummary] = useState<AdminMapSummary | null>(null);
   const [activity, setActivity] = useState<AgentActivitySummary[]>([]);
@@ -320,6 +298,20 @@ export default function AdminLiveOperationsPage() {
     });
   }, [agents, bulkForm]);
 
+  async function handleLogout() {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (token) {
+      try {
+        await logoutCurrentUser(token);
+      } catch {
+        // Best effort.
+      }
+    }
+
+    localStorage.removeItem("picsNigeriaAdminToken");
+    router.replace("/admin/login");
+  }
+
   async function handleSingleTaskSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const token = localStorage.getItem("picsNigeriaAdminToken");
@@ -427,6 +419,11 @@ export default function AdminLiveOperationsPage() {
         <p>Current authority: {describeTerritory(user.adminProfile || {
           geoPoliticalZoneId: null, stateId: null, senatorialDistrictId: null, federalConstituencyId: null, lgaId: null, wardId: null, stateConstituencyId: null, pollingUnitId: null,
         })}</p>
+        <div className="action-row" style={{ marginTop: 12 }}>
+          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+            Sign out
+          </button>
+        </div>
       </section>
 
       <AdminNav />
@@ -499,26 +496,10 @@ export default function AdminLiveOperationsPage() {
               </select>
             </label>
           </div>
-          <div className="live-map-stage">
-            <div className="live-map-grid" />
-            {visibleMarkers.length === 0 ? (
-              <div className="live-map-empty">
-                <strong>No live coordinates available for the current filter.</strong>
-              </div>
-            ) : (
-              visibleMarkers.map((marker) => (
-                <button
-                  key={marker.id}
-                  type="button"
-                  className={`map-marker ${marker.kind}`}
-                  style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
-                  title={`${marker.label} | ${marker.detail}`}
-                >
-                  <span className="map-marker-pulse" />
-                </button>
-              ))
-            )}
-          </div>
+          <RasterLiveMap
+            points={visibleMarkers}
+            emptyMessage="No live coordinates available for the current filter."
+          />
           <div className="live-map-legend">
             <span><span className="legend-dot agent" /> Agents</span>
             <span><span className="legend-dot incident" /> Incidents</span>

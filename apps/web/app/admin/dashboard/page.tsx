@@ -19,6 +19,7 @@ import {
   fetchAdminSummary,
   fetchCurrentUser,
   fetchNotifications,
+  logoutCurrentUser,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
@@ -53,6 +54,20 @@ export default function AdminDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  async function handleLogout() {
+    const token = localStorage.getItem("picsNigeriaAdminToken");
+    if (token) {
+      try {
+        await logoutCurrentUser(token);
+      } catch {
+        // Best effort.
+      }
+    }
+
+    localStorage.removeItem("picsNigeriaAdminToken");
+    window.location.href = "/admin/login";
+  }
 
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
@@ -107,6 +122,11 @@ export default function AdminDashboardPage() {
         <p className="muted">
           The overview shows only operational signals and next actions. Management, territory filtering, and account workflows now live on dedicated pages.
         </p>
+        <div className="action-row" style={{ marginTop: 12 }}>
+          <button className="button secondary" type="button" onClick={() => void handleLogout()}>
+            Sign out
+          </button>
+        </div>
       </section>
 
       <AdminNav />
