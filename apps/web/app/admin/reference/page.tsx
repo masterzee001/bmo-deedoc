@@ -17,6 +17,7 @@ import {
   updatePoliticalParty,
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 
 function formatDependencyCounts(dependencyCounts?: Record<string, number>) {
@@ -59,6 +60,8 @@ export default function AdminReferencePage() {
     isApprovedByInec: false,
     inecSourceUrl: "",
   });
+  const [pendingDelete, setPendingDelete] = useState<{ kind: "zone" | "party"; id: string; name: string } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function loadReferenceData(token: string) {
     const [currentUser, nextZones, nextParties, referenceCompleteness] = await Promise.all([
@@ -139,6 +142,7 @@ export default function AdminReferencePage() {
     }
 
     try {
+      setDeleteBusy(true);
       setError("");
       await deleteGeoPoliticalZone(token, zoneId);
       setZones(await fetchGeoPoliticalZones(token));
@@ -151,6 +155,9 @@ export default function AdminReferencePage() {
       }
 
       setError(caughtError instanceof Error ? caughtError.message : "Could not delete geo-political zone.");
+    } finally {
+      setDeleteBusy(false);
+      setPendingDelete(null);
     }
   }
 
@@ -217,6 +224,7 @@ export default function AdminReferencePage() {
     }
 
     try {
+      setDeleteBusy(true);
       setError("");
       await deletePoliticalParty(token, partyId);
       setParties(await fetchPoliticalParties(token));
@@ -229,6 +237,9 @@ export default function AdminReferencePage() {
       }
 
       setError(caughtError instanceof Error ? caughtError.message : "Could not delete political party.");
+    } finally {
+      setDeleteBusy(false);
+      setPendingDelete(null);
     }
   }
 
@@ -369,7 +380,13 @@ export default function AdminReferencePage() {
                 ) : isSuperAdmin ? (
                   <div className="action-row">
                     <button className="button secondary" type="button" onClick={() => { setEditingZoneId(zone.id); setZoneEditForm({ name: zone.name }); }}>Edit</button>
-                    <button className="button danger" type="button" onClick={() => void handleDeleteZone(zone.id)}>Delete</button>
+                     <button
+                       className="button danger"
+                       type="button"
+                       onClick={() => setPendingDelete({ kind: "zone", id: zone.id, name: zone.name })}
+                     >
+                       Delete
+                     </button>
                   </div>
                 ) : null}
               </article>
@@ -480,7 +497,13 @@ export default function AdminReferencePage() {
                     >
                       Edit
                     </button>
-                    <button className="button danger" type="button" onClick={() => void handleDeleteParty(party.id)}>Delete</button>
+                     <button
+                       className="button danger"
+                       type="button"
+                       onClick={() => setPendingDelete({ kind: "party", id: party.id, name: party.name })}
+                     >
+                       Delete
+                     </button>
                   </div>
                 ) : null}
               </article>
@@ -488,6 +511,31 @@ export default function AdminReferencePage() {
           </div>
         </section>
       </section>
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title={pendingDelete?.kind === "zone" ? "Delete geo-political zone" : "Delete political party"}
+        description={
+          pendingDelete
+            ? `Delete ${pendingDelete.name}? This action is destructive and will be blocked if dependent records still exist.`
+            : ""
+        }
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) {
+            return;
+          }
+
+          if (pendingDelete.kind === "zone") {
+            void handleDeleteZone(pendingDelete.id);
+            return;
+          }
+
+          void handleDeleteParty(pendingDelete.id);
+        }}
+        busy={deleteBusy}
+      />
     </main>
   );
 }

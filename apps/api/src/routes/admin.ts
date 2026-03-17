@@ -1117,6 +1117,9 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   }
 
   return {
+    state: actor.adminProfile.geoPoliticalZoneId
+      ? { geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId }
+      : undefined,
     stateId: actor.adminProfile.stateId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     wardId: actor.adminProfile.wardId || undefined,
@@ -1425,6 +1428,9 @@ function getWardReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma
   }
 
   return {
+    state: actor.adminProfile.geoPoliticalZoneId
+      ? { geoPoliticalZoneId: actor.adminProfile.geoPoliticalZoneId }
+      : undefined,
     stateId: actor.adminProfile.stateId || undefined,
     lgaId: actor.adminProfile.lgaId || undefined,
     id: actor.adminProfile.wardId || undefined,
@@ -1432,27 +1438,60 @@ function getWardReferenceScopeFilter(actor: Express.Request["authUser"]): Prisma
 }
 
 async function buildReferenceCompletenessReport(actor: Express.Request["authUser"]) {
+  const stateScope = getStateReferenceScopeFilter(actor);
+  const lgaScope = getLgaReferenceScopeFilter(actor);
+  const wardScope = getWardReferenceScopeFilter(actor);
+  const { where: pollingUnitScope } = await getCoveragePollingUnitScope(actor);
   const states = await prisma.state.findMany({
-    where: getStateReferenceScopeFilter(actor),
+    where: stateScope,
     orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      lgas: {
-        select: {
-          id: true,
-          wards: {
-            select: {
-              id: true,
-              pollingUnits: {
-                select: { id: true },
-              },
-            },
-          },
-        },
-      },
-    },
+    select: { id: true, name: true },
   });
+  const [lgas, wards, pollingUnits] = await Promise.all([
+    prisma.lGA.findMany({
+      where: lgaScope,
+      select: { id: true, stateId: true },
+    }),
+    prisma.ward.findMany({
+      where: wardScope,
+      select: { id: true, stateId: true, lgaId: true },
+    }),
+    prisma.pollingUnit.findMany({
+      where: pollingUnitScope,
+      select: { id: true, stateId: true, wardId: true },
+    }),
+  ]);
+
+  const scopedLgasByState = new Map<string, Array<{ id: string; stateId: string }>>();
+  const scopedWardsByState = new Map<string, Array<{ id: string; stateId: string; lgaId: string }>>();
+  const scopedPollingUnitsByState = new Map<string, Array<{ id: string; stateId: string; wardId: string }>>();
+
+  for (const lga of lgas) {
+    const current = scopedLgasByState.get(lga.stateId) || [];
+    current.push(lga);
+    scopedLgasByState.set(lga.stateId, current);
+  }
+
+  for (const ward of wards) {
+    const current = scopedWardsByState.get(ward.stateId) || [];
+    current.push(ward);
+    scopedWardsByState.set(ward.stateId, current);
+  }
+
+  for (const pollingUnit of pollingUnits) {
+    const current = scopedPollingUnitsByState.get(pollingUnit.stateId) || [];
+    current.push(pollingUnit);
+    scopedPollingUnitsByState.set(pollingUnit.stateId, current);
+  }
+
+  const hasSubStateScope = Boolean(
+    actor?.adminProfile?.senatorialDistrictId ||
+      actor?.adminProfile?.federalConstituencyId ||
+      actor?.adminProfile?.stateConstituencyId ||
+      actor?.adminProfile?.lgaId ||
+      actor?.adminProfile?.wardId ||
+      actor?.adminProfile?.pollingUnitId,
+  );
 
   const summary = {
     expectedStates: actor && isSuperAdmin(actor) ? NIGERIA_EXPECTED_STATE_TOTAL : states.length,
@@ -1467,19 +1506,20 @@ async function buildReferenceCompletenessReport(actor: Express.Request["authUser
   };
 
   const stateItems = states.map((state) => {
-    const expectedLgas = NIGERIA_STATE_EXPECTED_LGA_COUNTS[state.id] ?? 0;
-    const loadedLgas = state.lgas.length;
-    const loadedWards = state.lgas.reduce((sum, lga) => sum + lga.wards.length, 0);
-    const loadedPollingUnits = state.lgas.reduce(
-      (sum, lga) =>
-        sum + lga.wards.reduce((wardSum, ward) => wardSum + ward.pollingUnits.length, 0),
-      0,
-    );
-    const lgasWithoutWards = state.lgas.filter((lga) => lga.wards.length === 0).length;
-    const wardsWithoutPollingUnits = state.lgas.reduce(
-      (sum, lga) => sum + lga.wards.filter((ward) => ward.pollingUnits.length === 0).length,
-      0,
-    );
+    const stateLgas = scopedLgasByState.get(state.id) || [];
+    const stateWards = scopedWardsByState.get(state.id) || [];
+    const statePollingUnits = scopedPollingUnitsByState.get(state.id) || [];
+    const expectedLgas =
+      actor && !isSuperAdmin(actor) && hasSubStateScope
+        ? stateLgas.length
+        : (NIGERIA_STATE_EXPECTED_LGA_COUNTS[state.id] ?? stateLgas.length);
+    const loadedLgas = stateLgas.length;
+    const loadedWards = stateWards.length;
+    const loadedPollingUnits = statePollingUnits.length;
+    const lgasWithoutWards = stateLgas.filter((lga) => !stateWards.some((ward) => ward.lgaId === lga.id)).length;
+    const wardsWithoutPollingUnits = stateWards.filter(
+      (ward) => !statePollingUnits.some((pollingUnit) => pollingUnit.wardId === ward.id),
+    ).length;
     const missingLgas = Math.max(expectedLgas - loadedLgas, 0);
     const isComplete = missingLgas === 0 && lgasWithoutWards === 0 && wardsWithoutPollingUnits === 0;
 

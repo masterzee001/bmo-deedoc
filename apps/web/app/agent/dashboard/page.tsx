@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import type { AuthUserProfile, FieldTaskItem, NotificationItem } from "@pics-nigeria/shared";
+import {
+  INCIDENT_SEVERITIES,
+  INCIDENT_TYPES,
+  type AuthUserProfile,
+  type FieldTaskItem,
+  type NotificationItem,
+} from "@pics-nigeria/shared";
 import {
   ApiError,
   createAgentActivity,
@@ -331,11 +337,17 @@ export default function AgentDashboardPage() {
 
       <section className="panel card" style={{ marginTop: 24 }}>
         <h2>Quick Incident Submission</h2>
-        <form className="form" onSubmit={handleIncidentSubmit}>
-          <label className="field">
-            <span>Type</span>
-            <input value={incidentForm.type} onChange={(event) => setIncidentForm({ ...incidentForm, type: event.target.value })} />
-          </label>
+          <form className="form" onSubmit={handleIncidentSubmit}>
+            <label className="field">
+              <span>Type</span>
+              <select value={incidentForm.type} onChange={(event) => setIncidentForm({ ...incidentForm, type: event.target.value })}>
+                {INCIDENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type.replaceAll("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </label>
           <label className="field">
             <span>Title</span>
             <input value={incidentForm.title} onChange={(event) => setIncidentForm({ ...incidentForm, title: event.target.value })} required />
@@ -344,14 +356,24 @@ export default function AgentDashboardPage() {
             <span>Description</span>
             <input value={incidentForm.description} onChange={(event) => setIncidentForm({ ...incidentForm, description: event.target.value })} required />
           </label>
-          <label className="field">
-            <span>Severity</span>
-            <input value={incidentForm.severity} onChange={(event) => setIncidentForm({ ...incidentForm, severity: event.target.value })} />
-          </label>
-          <label className="field">
-            <span>Polling Unit Id</span>
-            <input value={incidentForm.pollingUnitId} onChange={(event) => setIncidentForm({ ...incidentForm, pollingUnitId: event.target.value })} />
-          </label>
+            <label className="field">
+              <span>Severity</span>
+              <select value={incidentForm.severity} onChange={(event) => setIncidentForm({ ...incidentForm, severity: event.target.value })}>
+                {INCIDENT_SEVERITIES.map((severity) => (
+                  <option key={severity} value={severity}>
+                    {severity}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Polling Unit</span>
+              <input
+                value={incidentForm.pollingUnitId}
+                onChange={(event) => setIncidentForm({ ...incidentForm, pollingUnitId: event.target.value })}
+                placeholder={user.agentProfile?.pollingUnitId || "Assigned polling unit will be used"}
+              />
+            </label>
           <button className="button" type="submit">Submit incident</button>
         </form>
         {incidentMessage ? <p className="muted">{incidentMessage}</p> : null}

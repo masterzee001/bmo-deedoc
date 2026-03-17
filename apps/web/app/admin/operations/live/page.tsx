@@ -35,6 +35,9 @@ import {
 } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory } from "../../../../components/admin-management-utils";
+import { ConfirmDialog } from "../../../../components/confirm-dialog";
+import { FeedbackBanner } from "../../../../components/feedback-banner";
+import { GoogleLiveMap } from "../../../../components/google-live-map";
 import { RasterLiveMap } from "../../../../components/raster-live-map";
 
 type Marker = {
@@ -92,6 +95,8 @@ export default function AdminLiveOperationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [trackingFilter, setTrackingFilter] = useState({
     stateId: "",
     lgaId: "",
@@ -343,20 +348,15 @@ export default function AdminLiveOperationsPage() {
     }
   }
 
-  async function handleBulkTaskSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitBulkTaskAssignment() {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
       setError("Authentication is required.");
       return;
     }
 
-    const confirmed = window.confirm("Assign this task to the selected agent target group?");
-    if (!confirmed) {
-      return;
-    }
-
     try {
+      setBulkSubmitting(true);
       setError("");
       const result = await createAdminBulkTasks(token, {
         title: bulkForm.title,
@@ -386,7 +386,15 @@ export default function AdminLiveOperationsPage() {
       await loadPage(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Could not assign bulk tasks.");
+    } finally {
+      setBulkSubmitting(false);
+      setBulkConfirmOpen(false);
     }
+  }
+
+  function handleBulkTaskSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBulkConfirmOpen(true);
   }
 
   if (loading) {
@@ -427,8 +435,8 @@ export default function AdminLiveOperationsPage() {
       </section>
 
       <AdminNav />
-      {error ? <p className="error">{error}</p> : null}
-      {message ? <p className="muted">{message}</p> : null}
+      <FeedbackBanner tone="error" message={error} />
+      <FeedbackBanner tone="success" message={message} />
 
       <section className="live-map-layout">
         <section className="panel card live-map-frame">
@@ -496,9 +504,15 @@ export default function AdminLiveOperationsPage() {
               </select>
             </label>
           </div>
-          <RasterLiveMap
+          <GoogleLiveMap
             points={visibleMarkers}
             emptyMessage="No live coordinates available for the current filter."
+            fallback={
+              <RasterLiveMap
+                points={visibleMarkers}
+                emptyMessage="No live coordinates available for the current filter."
+              />
+            }
           />
           <div className="live-map-legend">
             <span><span className="legend-dot agent" /> Agents</span>
@@ -696,6 +710,16 @@ export default function AdminLiveOperationsPage() {
           </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={bulkConfirmOpen}
+        title="Assign bulk task"
+        description={`Assign this task to ${bulkForm.selectedAgentIds.length || filteredAgents.length} agent${bulkForm.selectedAgentIds.length === 1 || (!bulkForm.selectedAgentIds.length && filteredAgents.length === 1) ? "" : "s"} in the current scoped target?`}
+        confirmLabel="Assign task"
+        onCancel={() => setBulkConfirmOpen(false)}
+        onConfirm={() => void submitBulkTaskAssignment()}
+        busy={bulkSubmitting}
+      />
     </main>
   );
 }
