@@ -1127,6 +1127,12 @@ function getPollingUnitScopeFilter(actor: Express.Request["authUser"]) {
   };
 }
 
+const BOOTSTRAP_LGA_ID_PREFIX = "bootstrap-lga-";
+
+function getExpectedLgaTotalForStates(stateIds: string[]) {
+  return stateIds.reduce((sum, stateId) => sum + (NIGERIA_STATE_EXPECTED_LGA_COUNTS[stateId] ?? 0), 0);
+}
+
 async function getScopedLgaIdsForReference(actor: Express.Request["authUser"]) {
   if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
     return { lgaIds: null as string[] | null, scopeWarning: null as string | null };
@@ -1273,6 +1279,21 @@ async function getAuthoritativeReferenceScope(actor: Express.Request["authUser"]
     pollingUnitWhere: {} as Prisma.PollingUnitWhereInput,
     scopeWarning,
   };
+}
+
+function shouldUseExpectedStateLgaTotals(actor: Express.Request["authUser"]) {
+  if (!actor || isSuperAdmin(actor) || !actor.adminProfile) {
+    return true;
+  }
+
+  return !(
+    actor.adminProfile.senatorialDistrictId ||
+    actor.adminProfile.federalConstituencyId ||
+    actor.adminProfile.stateConstituencyId ||
+    actor.adminProfile.lgaId ||
+    actor.adminProfile.wardId ||
+    actor.adminProfile.pollingUnitId
+  );
 }
 
 async function getCoveragePollingUnitScope(actor: Express.Request["authUser"]): Promise<{
@@ -5273,12 +5294,28 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
   const recentActivitySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const { stateWhere, lgaWhere, wardWhere, pollingUnitWhere, scopeWarning } = await getAuthoritativeReferenceScope(request.authUser);
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
-  const [statesInScope, lgasInScope, wardsInScope, pollingUnits, agents, recentActivities, incidents] = await Promise.all([
+  const [statesInScope, statesInScopeList, realLgasInScope, wardsInScope, pollingUnits, agents, recentActivities, incidents] = await Promise.all([
     prisma.state.count({
       where: stateWhere,
     }),
-    prisma.lGA.count({
-      where: lgaWhere,
+    prisma.state.findMany({
+      where: stateWhere,
+      select: { id: true },
+    }),
+    prisma.lGA.findMany({
+      where: {
+        AND: [
+          lgaWhere,
+          {
+            id: {
+              not: {
+                startsWith: BOOTSTRAP_LGA_ID_PREFIX,
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true },
     }),
     prisma.ward.count({
       where: wardWhere,
@@ -5314,6 +5351,10 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
     }),
   ]);
 
+  const authoritativeLgasInScope = shouldUseExpectedStateLgaTotals(request.authUser)
+    ? getExpectedLgaTotalForStates(statesInScopeList.map((state) => state.id))
+    : realLgasInScope.length;
+
   const totalPollingUnitsInScope = pollingUnits.length;
   const assignedSet = new Set(agents.map((item) => item.pollingUnitId).filter(Boolean));
   const recentSet = new Set(recentActivities.map((item) => item.pollingUnitId).filter(Boolean));
@@ -5322,7 +5363,7 @@ router.get("/polling-unit-coverage", requireAuth, requireRole("ADMIN", "SUPER_AD
   return response.json({
     coverage: serializePollingUnitCoverageSummary({
       totalStatesInScope: statesInScope,
-      totalLgasInScope: lgasInScope,
+      totalLgasInScope: authoritativeLgasInScope,
       totalWardsInScope: wardsInScope,
       totalPollingUnitsInScope,
       pollingUnitsWithAssignedAgents: assignedSet.size,
@@ -5339,7 +5380,39 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
   const { stateWhere, lgaWhere, wardWhere, pollingUnitWhere, scopeWarning } = await getAuthoritativeReferenceScope(request.authUser);
   const agentScope = toScopeFilter(getAgentScopeFilter(request.authUser));
   const partyScopedAgentProfileFilter = getAdminPartyScopedAgentProfileFilter(request.authUser);
-  const [pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedLgas, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
+  const [statesInScope, realLgasInScope, syntheticBootstrapLgaCount, pollingUnits, agents, recentActivities, incidents, agentsWithoutPollingUnitAssignments, loadedStates, loadedWards, loadedWardsWithoutPollingUnits] = await Promise.all([
+    prisma.state.findMany({
+      where: stateWhere,
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.lGA.findMany({
+      where: {
+        AND: [
+          lgaWhere,
+          {
+            id: {
+              not: {
+                startsWith: BOOTSTRAP_LGA_ID_PREFIX,
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true, stateId: true },
+    }),
+    prisma.lGA.count({
+      where: {
+        AND: [
+          lgaWhere,
+          {
+            id: {
+              startsWith: BOOTSTRAP_LGA_ID_PREFIX,
+            },
+          },
+        ],
+      },
+    }),
     prisma.pollingUnit.findMany({
       where: pollingUnitWhere,
       select: {
@@ -5415,9 +5488,6 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
     prisma.state.count({
       where: stateWhere,
     }),
-    prisma.lGA.count({
-      where: lgaWhere,
-    }),
     prisma.ward.count({
       where: wardWhere,
     }),
@@ -5428,6 +5498,23 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
       },
     }),
   ]);
+
+  const authoritativeLgasInScope = shouldUseExpectedStateLgaTotals(request.authUser)
+    ? getExpectedLgaTotalForStates(statesInScope.map((state) => state.id))
+    : realLgasInScope.length;
+  const wardAndPollingUnitInventoryComplete =
+    syntheticBootstrapLgaCount === 0 &&
+    realLgasInScope.length >= authoritativeLgasInScope &&
+    loadedWardsWithoutPollingUnits === 0;
+  const inventoryWarning = wardAndPollingUnitInventoryComplete
+    ? null
+    : syntheticBootstrapLgaCount > 0
+      ? "Reference inventory is not yet authoritative for this scope because synthetic bootstrap LGAs are still present. Run the reference cleanup/backfill before relying on ward and polling-unit totals."
+      : loadedWardsWithoutPollingUnits > 0
+        ? "Ward and polling-unit totals are still incomplete in this scope. Run the full polling-unit bootstrap before relying on staffing totals."
+        : realLgasInScope.length < authoritativeLgasInScope
+          ? "Reference inventory is incomplete for this scope. Some LGAs do not yet have complete ward and polling-unit data loaded."
+          : null;
 
   const assignedCountByPollingUnit = new Map<string, number>();
   for (const item of agents) {
@@ -5564,13 +5651,13 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
   });
   const stateTargets = Array.from(stateTargetMap.values()).sort((left, right) => left.stateName.localeCompare(right.stateName));
 
-  return response.json({
-    insights: serializeCoverageInsights({
-      summary: {
-        totalStatesInScope: loadedStates,
-        totalLgasInScope: loadedLgas,
-        totalWardsInScope: loadedWards,
-        totalPollingUnitsInScope: pollingUnits.length,
+    return response.json({
+      insights: serializeCoverageInsights({
+        summary: {
+          totalStatesInScope: loadedStates,
+          totalLgasInScope: authoritativeLgasInScope,
+          totalWardsInScope: loadedWards,
+          totalPollingUnitsInScope: pollingUnits.length,
         pollingUnitsWithAssignedAgents: pollingUnitInsights.filter((item) => item.hasAssignedAgent).length,
         pollingUnitsWithRecentActivity: pollingUnitInsights.filter((item) => item.hasRecentActivity).length,
         pollingUnitsWithIncidents: pollingUnitInsights.filter((item) => item.openIncidentCount > 0).length,
@@ -5584,14 +5671,19 @@ router.get("/coverage-insights", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"
         remainingAgentsToTarget,
         scopeWarning,
       },
-      scopeWarning,
-      referenceData: {
-        loadedStates,
-        loadedLgas,
-        loadedWards,
-        loadedPollingUnits: pollingUnits.length,
-        loadedWardsWithoutPollingUnits,
-      },
+        scopeWarning,
+        referenceData: {
+          loadedStates,
+          loadedLgas: realLgasInScope.length,
+          loadedWards,
+          loadedPollingUnits: pollingUnits.length,
+          loadedWardsWithoutPollingUnits,
+          authoritativeStates: statesInScope.length,
+          authoritativeLgas: authoritativeLgasInScope,
+          syntheticBootstrapLgas: syntheticBootstrapLgaCount,
+          wardAndPollingUnitInventoryComplete,
+          inventoryWarning,
+        },
       stateTargets,
       wards,
       pollingUnits: pollingUnitInsights.sort((left, right) => {

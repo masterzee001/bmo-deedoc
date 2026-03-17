@@ -599,6 +599,11 @@ export type ReferenceDataReadinessSummary = {
   loadedWards: number;
   loadedPollingUnits: number;
   loadedWardsWithoutPollingUnits: number;
+  authoritativeStates: number;
+  authoritativeLgas: number;
+  syntheticBootstrapLgas: number;
+  wardAndPollingUnitInventoryComplete: boolean;
+  inventoryWarning: string | null;
 };
 
 export type ReferenceCompletenessStateItem = {

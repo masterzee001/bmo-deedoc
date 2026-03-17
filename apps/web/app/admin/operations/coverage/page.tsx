@@ -44,6 +44,7 @@ export default function AdminCoveragePage() {
   );
   const agentAssignmentGaps = insights?.agentsWithoutPollingUnitAssignments || [];
   const canSetTargets = user?.role === "SUPER_ADMIN" || user?.adminProfile?.adminLevel === "NATIONAL" || user?.adminProfile?.adminLevel === "STATE";
+  const inventoryComplete = insights?.referenceData.wardAndPollingUnitInventoryComplete ?? false;
 
   function canEditStateTarget(stateId: string) {
     if (!user) {
@@ -161,29 +162,30 @@ export default function AdminCoveragePage() {
           stateConstituencyId: null,
           pollingUnitId: null,
         })}</p>
-        <p className="muted">Coverage totals are restricted to your current authority and use the national reference dataset loaded for production. Agent counts use only the party-visible agents inside that territory.</p>
+        <p className="muted">Coverage totals are restricted to your current authority. State and LGA inventory is authoritative. Ward, polling-unit, and staffing totals remain provisional until the full polling-unit reference dataset is loaded for this scope.</p>
       </section>
 
       <AdminNav />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
       {insights.scopeWarning ? <p className="muted">{insights.scopeWarning}</p> : null}
+      {insights.referenceData.inventoryWarning ? <p className="error">{insights.referenceData.inventoryWarning}</p> : null}
 
       <section className="grid stats">
         <article className="panel card">
           <h2>States in scope</h2>
-          <div className="value">{insights.referenceData.loadedStates}</div>
+          <div className="value">{insights.referenceData.authoritativeStates}</div>
         </article>
         <article className="panel card">
           <h2>LGAs in scope</h2>
-          <div className="value">{insights.referenceData.loadedLgas}</div>
+          <div className="value">{insights.referenceData.authoritativeLgas}</div>
         </article>
         <article className="panel card">
-          <h2>Wards in scope</h2>
+          <h2>{inventoryComplete ? "Wards in scope" : "Loaded wards in scope"}</h2>
           <div className="value">{insights.referenceData.loadedWards}</div>
         </article>
         <article className="panel card">
-          <h2>Polling units in scope</h2>
+          <h2>{inventoryComplete ? "Polling units in scope" : "Loaded polling units in scope"}</h2>
           <div className="value">{insights.summary.totalPollingUnitsInScope}</div>
         </article>
         <article className="panel card">
@@ -219,11 +221,11 @@ export default function AdminCoveragePage() {
           <div className="value">{insights.summary.assignedAgentsInScope}</div>
         </article>
         <article className="panel card">
-          <h2>Target agents</h2>
+          <h2>{inventoryComplete ? "Target agents" : "Loaded target agents"}</h2>
           <div className="value">{insights.summary.targetAgentsInScope}</div>
         </article>
         <article className="panel card">
-          <h2>Agents left to target</h2>
+          <h2>{inventoryComplete ? "Agents left to target" : "Loaded agents left"}</h2>
           <div className="value">{insights.summary.remainingAgentsToTarget}</div>
         </article>
       </section>
@@ -233,30 +235,34 @@ export default function AdminCoveragePage() {
           <div className="section-head">
             <div>
               <h2>Territory inventory</h2>
-              <p className="muted">These are the reference counts the platform uses for staffing and coverage decisions in your visible territory.</p>
+              <p className="muted">These are the reference counts the platform uses for staffing and coverage decisions in your visible territory. State and LGA totals are authoritative. Ward and polling-unit totals only become authoritative after the full reference dataset is loaded.</p>
             </div>
-            <span className="status-pill">{insights.referenceData.loadedPollingUnits} polling units</span>
+            <span className="status-pill">{inventoryComplete ? "Authoritative" : "Provisional"}</span>
           </div>
           <div className="reward-list">
             <article className="reward-item">
               <strong>States in scope</strong>
-              <p className="muted">{insights.referenceData.loadedStates}</p>
+              <p className="muted">{insights.referenceData.authoritativeStates}</p>
             </article>
             <article className="reward-item">
               <strong>LGAs in scope</strong>
-              <p className="muted">{insights.referenceData.loadedLgas}</p>
+              <p className="muted">{insights.referenceData.authoritativeLgas}</p>
             </article>
             <article className="reward-item">
-              <strong>Wards in scope</strong>
+              <strong>{inventoryComplete ? "Wards in scope" : "Loaded wards in scope"}</strong>
               <p className="muted">{insights.referenceData.loadedWards}</p>
             </article>
             <article className="reward-item">
-              <strong>Polling units in scope</strong>
+              <strong>{inventoryComplete ? "Polling units in scope" : "Loaded polling units in scope"}</strong>
               <p className="muted">{insights.referenceData.loadedPollingUnits}</p>
             </article>
             <article className="reward-item">
               <strong>Wards without polling units</strong>
               <p className="muted">{insights.referenceData.loadedWardsWithoutPollingUnits}</p>
+            </article>
+            <article className="reward-item">
+              <strong>Synthetic bootstrap LGAs</strong>
+              <p className="muted">{insights.referenceData.syntheticBootstrapLgas}</p>
             </article>
           </div>
         </section>
@@ -265,9 +271,9 @@ export default function AdminCoveragePage() {
           <div className="section-head">
             <div>
               <h2>State staffing targets</h2>
-              <p className="muted">Target staffing is calculated only from polling units inside your visible territory. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
+              <p className="muted">Target staffing is calculated from polling units currently loaded inside your visible territory. If no state target is set, the platform defaults to 1 agent per polling unit.</p>
             </div>
-            <span className="status-pill">{insights.stateTargets.length} states</span>
+            <span className="status-pill">{inventoryComplete ? `${insights.stateTargets.length} states` : "Loaded reference only"}</span>
           </div>
           {insights.stateTargets.length === 0 ? (
             <p className="muted">No state staffing data is available in the current scope.</p>
