@@ -133,6 +133,10 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
+      if (!form.acceptTerms || !form.contactConsent || !form.confirmAdult) {
+        throw new Error("You must accept the terms and confirm eligibility before registering.");
+      }
+
       const result = await registerVoterUser({
         ...form,
         referredByCode: form.referredByCode.trim() || undefined,

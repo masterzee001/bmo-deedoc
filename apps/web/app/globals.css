@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
 :root {
   color-scheme: light;
   --flag-green: #0a8f4d;
@@ -914,5 +916,238 @@ textarea {
 
   .candidate-dashboard-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.starter-page {
+  min-height: 100vh;
+  background: hsl(140 10% 96%);
+  color: hsl(150 25% 10%);
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+}
+
+.starter-page__bar {
+  height: 6px;
+  background: hsl(153 60% 28%);
+}
+
+.starter-page__container {
+  width: min(100%, 32rem);
+  margin: 0 auto;
+  padding: 2rem 1.25rem 2.5rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.starter-page__brand {
+  display: grid;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.starter-page__brand h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: hsl(150 25% 10%);
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+}
+
+.starter-page__brand p {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+  color: hsl(150 10% 46%);
+}
+
+.starter-page__brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.starter-page__flag {
+  width: 2.25rem;
+  height: 1.5rem;
+  border-radius: 0.125rem;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(0, 60, 30, 0.08);
+}
+
+.starter-auth-card,
+.starter-access-card,
+.starter-polling-card {
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 60, 30, 0.06),
+    0 2px 4px rgba(0, 60, 30, 0.04),
+    0 12px 32px -8px rgba(0, 60, 30, 0.1);
+}
+
+.starter-auth-card {
+  padding: 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.starter-auth-card__header {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.starter-auth-card__header h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: hsl(150 25% 10%);
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+}
+
+.starter-auth-card__header p,
+.starter-access-card p,
+.starter-polling-card p,
+.starter-page__footer,
+.starter-form__meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: hsl(150 10% 46%);
+}
+
+.starter-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.starter-form__field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.starter-form__field span,
+.starter-access-card span,
+.starter-polling-card span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: hsl(150 25% 10%);
+}
+
+.starter-form__field input {
+  height: 3rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: hsl(140 12% 94%);
+  box-shadow: inset 0 0 0 1px hsl(140 15% 90%);
+  padding: 0 0.95rem;
+  color: hsl(150 25% 10%);
+  transition: box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.starter-form__field input::placeholder {
+  color: hsl(150 10% 46%);
+}
+
+.starter-form__field input:focus {
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px hsl(153 60% 28%);
+}
+
+.starter-form__submit {
+  height: 3rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: hsl(153 60% 28%);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  box-shadow: 0 1px 2px rgba(0, 60, 30, 0.12), 0 4px 12px -2px rgba(0, 60, 30, 0.1);
+}
+
+.starter-form__submit:hover,
+.starter-access-card:hover,
+.starter-polling-card:hover {
+  filter: brightness(0.98);
+}
+
+.starter-form__meta {
+  text-align: center;
+  padding-top: 0.25rem;
+}
+
+.starter-form__meta a {
+  color: hsl(153 60% 28%);
+  font-weight: 700;
+}
+
+.starter-access {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.starter-access__label {
+  margin: 0;
+  padding: 0 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: hsl(150 10% 46%);
+}
+
+.starter-access__list {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.starter-access-card,
+.starter-polling-card {
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.starter-access-card:hover,
+.starter-polling-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px rgba(0, 60, 30, 0.08),
+    0 4px 8px rgba(0, 60, 30, 0.06),
+    0 20px 40px -8px rgba(0, 60, 30, 0.14);
+}
+
+.starter-access-card__icon,
+.starter-polling-card__icon {
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: hsl(153 60% 28% / 0.1);
+  color: hsl(153 60% 28%);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.starter-polling-card {
+  background: hsl(148 20% 92%);
+}
+
+.starter-page__footer {
+  padding-top: 0.5rem;
+  text-align: center;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 640px) {
+  .starter-page__container {
+    padding-top: 1.75rem;
   }
 }
