@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { PublicAccessShell } from "../../../components/public-access-shell";
 import { loginUser } from "../../../lib/api";
 
 export default function CandidateLoginPage() {
@@ -35,33 +35,42 @@ export default function CandidateLoginPage() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <h1>PICS Nigeria Candidate Access</h1>
-        <p>Sign in to review your office profile, posts, and visible feedback.</p>
-        <p>
-          <Link href="/login">Voter login</Link> | <Link href="/admin/login">Admin login</Link> |{" "}
-          <Link href="/agent/login">Agent login</Link>
-        </p>
-      </section>
+    <PublicAccessShell
+      currentAccess="CANDIDATE"
+      brandSubtitle="Candidate Access"
+      authTitle="Candidate Sign In"
+      authDescription="Sign in to review your office profile, campaign content, voter visibility, and field operations."
+      footerNote="Candidate access keeps the landing-page structure while routing into campaign-specific tools."
+    >
+      <form className="starter-form" onSubmit={handleSubmit}>
+        <label className="starter-form__field">
+          <span>Email address</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="candidate@picsnigeria.ng"
+            required
+          />
+        </label>
 
-      <section className="panel card" style={{ maxWidth: 520 }}>
-        <h2>Candidate Login</h2>
-        <form className="form" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Email</span>
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-          </label>
-          <label className="field">
-            <span>Password</span>
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
-          </label>
-          {error ? <p className="error">{error}</p> : null}
-          <button className="button" type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
-      </section>
-    </main>
+        <label className="starter-form__field">
+          <span>Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Enter your password"
+            required
+          />
+        </label>
+
+        {error ? <p className="error">{error}</p> : null}
+
+        <button className="starter-form__submit" type="submit" disabled={loading}>
+          {loading ? "Signing in..." : "Sign in to candidate portal"}
+        </button>
+      </form>
+    </PublicAccessShell>
   );
 }

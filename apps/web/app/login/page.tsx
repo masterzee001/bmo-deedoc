@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { PublicAccessShell } from "../../components/public-access-shell";
 import { loginUser } from "../../lib/api";
 
 export default function LoginPage() {
@@ -21,7 +22,7 @@ export default function LoginPage() {
       const data = await loginUser(email, password);
 
       if (data.user.role !== "VOTER") {
-        setError("This starter login page is currently for voters only.");
+        setError("This login page is for voters only.");
         return;
       }
 
@@ -35,61 +36,47 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="shell">
-      <section className="panel hero">
-        <h1>PICS Nigeria Voter Access</h1>
-        <p>Sign in with your voter account to view your referral code and reward activity.</p>
-        <p>
-          New voter? <Link href="/register">Create your account</Link>
+    <PublicAccessShell
+      currentAccess="VOTER"
+      brandSubtitle="Voter Access Portal"
+      authTitle="Voter Sign In"
+      authDescription="Sign in with your voter account to view your referral code, reward activity, and civic updates."
+      footerNote="Use the same public access hub to register, sign in, or confirm your polling unit."
+    >
+      <form className="starter-form" onSubmit={handleSubmit}>
+        <label className="starter-form__field">
+          <span>Email address</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="ada@example.com"
+            required
+          />
+        </label>
+
+        <label className="starter-form__field">
+          <span>Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Enter your password"
+            required
+          />
+        </label>
+
+        {error ? <p className="error">{error}</p> : null}
+
+        <button className="starter-form__submit" type="submit" disabled={loading}>
+          {loading ? "Signing in..." : "Sign in to your account"}
+        </button>
+
+        <p className="starter-form__meta">
+          <Link href="/register">Create voter account</Link> {" | "}
+          <Link href="/polling-units">Find polling unit location</Link>
         </p>
-        <p>
-          Need your polling unit? <Link href="/polling-units">Find polling unit location</Link>
-        </p>
-        <div className="starter-nav-actions">
-          <Link className="link-button" href="/admin/login">
-            Admin login
-          </Link>
-          <Link className="link-button" href="/candidate/login">
-            Candidate login
-          </Link>
-          <Link className="link-button" href="/agent/login">
-            Agent login
-          </Link>
-        </div>
-      </section>
-
-      <section className="panel card" style={{ maxWidth: 520 }}>
-        <h2>Voter Login</h2>
-        <form className="form" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="ada@example.com"
-              required
-            />
-          </label>
-
-          <label className="field">
-            <span>Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Enter your password"
-              required
-            />
-          </label>
-
-          {error ? <p className="error">{error}</p> : null}
-
-          <button className="button" type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
-      </section>
-    </main>
+      </form>
+    </PublicAccessShell>
   );
 }
