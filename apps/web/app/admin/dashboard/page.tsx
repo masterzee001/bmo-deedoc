@@ -187,31 +187,56 @@ export default function AdminDashboardPage() {
         </section>
 
         <section className="panel card">
-          <h2>Priority Actions</h2>
+          <h2>Management Workflow</h2>
           <div className="reward-list">
             <article className="reward-item">
-              <strong>Manage users</strong>
-              <p>Use the navigation above to open role-aware user lists with territory filters and lifecycle actions.</p>
+              <strong>Start with management</strong>
+              <p>Open the management workspace first to keep user, territory, and creation actions inside one controlled workflow.</p>
+              <Link href="/admin/manage">Open management hub</Link>
             </article>
             <article className="reward-item">
-              <strong>Review incidents</strong>
-              <p>Use the navigation above to review flagged reports, escalation state, and open governance issues inside your scope.</p>
+              <strong>Select territory in workflow</strong>
+              <p>Choose state, LGA, and ward scope from the management flow before reviewing users or creating new accounts.</p>
+              <Link href="/admin/manage/territory">Open territory selector</Link>
+            </article>
+            <article className="reward-item">
+              <strong>Manage users</strong>
+              <p>Review scoped user lists, edit assignments, and control activation after narrowing the territory you are working in.</p>
+              <Link href="/admin/manage/users">Open user management</Link>
+            </article>
+            <article className="reward-item">
+              <strong>Create users</strong>
+              <p>Move from territory selection into role-aware creation for admins, candidates, and agents without leaving the management path.</p>
+              <Link href="/admin/manage/create">Open create workflow</Link>
+            </article>
+          </div>
+        </section>
+
+        <section className="panel card">
+          <h2>Monitoring Workflow</h2>
+          <div className="reward-list">
+            <article className="reward-item">
+              <strong>Live operations</strong>
+              <p>Monitor visible agents, map activity, and field movement inside your authorized territory.</p>
+              <Link href="/admin/operations/live">Open live ops</Link>
             </article>
             <article className="reward-item">
               <strong>Coverage intelligence</strong>
-              <p>Use the navigation above to identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
+              <p>Identify weak wards, polling units without agents, and areas with missing recent field signals.</p>
+              <Link href="/admin/operations/coverage">Open coverage</Link>
             </article>
             <article className="reward-item">
-              <strong>Select territory</strong>
-              <p>Use the navigation above to drill into state, LGA, and ward views before running management tasks.</p>
+              <strong>Incidents and election reports</strong>
+              <p>Review flagged incidents, escalation state, and election-day reports as part of the same monitoring surface.</p>
+              <div className="action-row" style={{ marginTop: 12 }}>
+                <Link href="/admin/incidents">Open incidents</Link>
+                <Link href="/admin/election-reports">Open election reports</Link>
+              </div>
             </article>
             <article className="reward-item">
               <strong>Send communications</strong>
-              <p>Use the navigation above to preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
-            </article>
-            <article className="reward-item">
-              <strong>Account and exports</strong>
-              <p>Use the navigation above for profile changes, password updates, and protected exports.</p>
+              <p>Preview recipient counts and send scoped broadcasts by role, territory, party, and workflow filter.</p>
+              <Link href="/admin/communications">Open communications</Link>
             </article>
           </div>
         </section>

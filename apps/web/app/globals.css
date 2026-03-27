@@ -609,6 +609,32 @@ textarea {
   cursor: pointer;
 }
 
+.admin-nav {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
+.admin-nav__group {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-nav__title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-nav__links {
+  margin: 0;
+  flex-wrap: wrap;
+}
+
 .candidate-hero,
 .candidate-profile-hero,
 .candidate-discovery-hero {
