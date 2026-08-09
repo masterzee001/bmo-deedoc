@@ -25,10 +25,27 @@ export const OGUN_IDENTITY_REQUIRED_COUNTS = {
 
 export const OGUN_REFERENCE_GATE_SCOPES = ["IDENTITY", "PROVENANCE", "GEODATA"] as const;
 
+export const OGUN_REFERENCE_LEVEL_STATUSES = [
+  "VERIFIED",
+  "PARTIAL",
+  "MISSING",
+  "BLOCKED",
+] as const;
+
+export const OGUN_REFERENCE_LEVEL_KEYS = [
+  "stateConstituencies",
+  "lgas",
+  "wards",
+  "pollingUnits",
+  "puGeodata",
+] as const;
+
 export type OgunReferenceImportKind = (typeof OGUN_REFERENCE_IMPORT_KINDS)[number];
 export type OgunReferenceImportStatus = (typeof OGUN_REFERENCE_IMPORT_STATUSES)[number];
 export type OgunReferenceTerritoryKind = (typeof OGUN_REFERENCE_TERRITORY_KINDS)[number];
 export type OgunReferenceGateScope = (typeof OGUN_REFERENCE_GATE_SCOPES)[number];
+export type OgunReferenceLevelStatus = (typeof OGUN_REFERENCE_LEVEL_STATUSES)[number];
+export type OgunReferenceLevelKey = (typeof OGUN_REFERENCE_LEVEL_KEYS)[number];
 
 export type OgunReferenceReleaseManifest = {
   contractVersion: typeof OGUN_REFERENCE_IMPORT_CONTRACT_VERSION;
@@ -71,4 +88,15 @@ export type OgunReferenceGateSummary = {
   provenanceComplete: boolean;
   geodataReady: boolean;
   blockers: OgunReferenceGateBlocker[];
+};
+
+export type OgunReferenceLevelSummary = {
+  key: OgunReferenceLevelKey;
+  label: "State Constituencies" | "LGAs" | "Wards" | "Polling Units" | "PU Geodata";
+  status: OgunReferenceLevelStatus;
+  expected: number | null;
+  loaded: number;
+  sourceRows: number | null;
+  verified: number;
+  blockers: string[];
 };

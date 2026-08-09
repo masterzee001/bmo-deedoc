@@ -2,6 +2,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import { OGUN_IDENTITY_REQUIRED_COUNTS, OGUN_STATE_ID } from "@pics-nigeria/shared";
+import { buildOgunReferenceLevelReport } from "./ogun-reference-level-report";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
@@ -96,6 +97,7 @@ async function main() {
       },
     }),
   ]);
+  const referenceLevelReport = await buildOgunReferenceLevelReport(prisma);
 
   const checkedCounts = [
     ["senatorial districts", districts.length, expected.senatorialDistricts],
@@ -229,6 +231,10 @@ async function main() {
   console.log(`applied_geodata_releases=${appliedGeodataReleases}`);
   console.log(`records_missing_source_or_release=${provenanceMissing.length}`);
   console.log(`polling_units_missing_geodata=${pollingUnitsMissingGeodata}`);
+  for (const level of referenceLevelReport) {
+    const metricKey = level.key.replace(/[A-Z]/g, (match) => `_${match.toLowerCase()}`);
+    console.log(`reference_level_${metricKey}=${level.status}`);
+  }
 
   for (const blocker of identityBlockers) {
     console.warn(`BLOCKER [IDENTITY] ${blocker}`);

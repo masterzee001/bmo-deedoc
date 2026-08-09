@@ -17,6 +17,18 @@
     {
       "name": "20260809030000_pre_election_verification_rewards_foundation",
       "sha256": "ec7ba2b82660b345f717733ce3619f63e67cf3dfccb168665be2b9cdfca927de"
+    },
+    {
+      "name": "20260809040000_pre_election_payout_assignment_cycle_integrity",
+      "sha256": "a414f833e34979f7284d903f37e14c313a8597620225b01bad25df5495bb6859"
+    },
+    {
+      "name": "20260809050000_evidence_closure_foundation",
+      "sha256": "45f8add01a396ac39b4c7551b2588f9197e095b458d92922f23d477936289450"
+    },
+    {
+      "name": "20260809060000_election_realtime_durable_messaging",
+      "sha256": "f096ecc0c7677ba2a5488c329b0a06436c8c956dc9bbca99e7f722d24252cb18"
     }
   ]
 }

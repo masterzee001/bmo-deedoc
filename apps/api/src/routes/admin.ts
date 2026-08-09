@@ -34,6 +34,8 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
+import { createElectionDayRealtimeEvent } from "../realtime/events";
+import { publishRealtimeEvent } from "../realtime/gateway";
 import {
   serializeAdminMapSummary,
   serializeAdminSummary,
@@ -4445,6 +4447,38 @@ router.patch("/election-day-reports/:reportId/status", requireAuth, requireRole(
 
     return nextReport;
   });
+
+  const reportTerritory = {
+    stateId: updatedReport.stateId,
+    senatorialDistrictId: updatedReport.senatorialDistrictId,
+    federalConstituencyId: updatedReport.federalConstituencyId,
+    stateConstituencyId: updatedReport.stateConstituencyId,
+    wardId: updatedReport.wardId,
+    pollingUnitId: updatedReport.pollingUnitId,
+  };
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.report.reviewed",
+      actorUserId: request.authUser!.id,
+      territory: reportTerritory,
+      idempotencyKey: `report-reviewed:${updatedReport.id}:${updatedReport.updatedAt.toISOString()}`,
+      payload: {
+        reportId: updatedReport.id,
+        status: updatedReport.status,
+        reviewedAt: updatedReport.reviewedAt?.toISOString() || null,
+        pollingUnitId: updatedReport.pollingUnitId,
+      },
+    }),
+  );
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.situation.updated",
+      actorUserId: request.authUser!.id,
+      territory: reportTerritory,
+      idempotencyKey: `situation:${updatedReport.id}:${updatedReport.updatedAt.toISOString()}`,
+      payload: { reason: "REPORT_REVIEWED", pollingUnitId: updatedReport.pollingUnitId },
+    }),
+  );
 
   return response.json({
     message: "Election-day report status updated successfully.",

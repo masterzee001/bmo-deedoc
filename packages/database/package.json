@@ -20,6 +20,8 @@
     "verify:reference-completeness": "tsx scripts/verify-reference-completeness.ts",
     "verify:reference:ogun": "tsx scripts/verify-ogun-reference.ts",
     "verify:reference:ogun:allow-incomplete": "tsx scripts/verify-ogun-reference.ts --allow-incomplete",
+    "report:reference:ogun": "tsx scripts/report-ogun-reference-levels.ts",
+    "verify:reference:ogun-contract": "tsx scripts/verify-ogun-reference-contract.ts",
     "verify:production": "tsx scripts/verify-production-readiness.ts",
     "migrate:phase1-identities": "tsx scripts/migrate-phase1-identities.ts",
     "seed": "tsx prisma/seed.ts",

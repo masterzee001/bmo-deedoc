@@ -29,6 +29,10 @@ dotenv.config({ path: path.join(appRoot, ".env"), override: true });
 
 const durationPattern = /^\d+(ms|s|m|h|d|w|y)$/;
 const sizePattern = /^\d+(b|kb|mb)$/i;
+const booleanString = z
+  .string()
+  .default("false")
+  .transform((value) => ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
 const insecureJwtSecrets = new Set([
   "change-me",
   "changeme",
@@ -54,8 +58,44 @@ const envSchema = z
     AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(15 * 60 * 1000),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
     REGISTRATION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
+    STORAGE_DRIVER: z.enum(["s3", "memory"]).default(process.env.NODE_ENV === "test" ? "memory" : "s3"),
+    STORAGE_ENDPOINT: z.string().default(""),
+    STORAGE_REGION: z.string().default("auto"),
+    STORAGE_BUCKET: z.string().default(""),
+    STORAGE_ACCESS_KEY: z.string().default(""),
+    STORAGE_SECRET_KEY: z.string().default(""),
+    STORAGE_FORCE_PATH_STYLE: z
+      .string()
+      .default("false")
+      .transform((value) => value.toLowerCase() === "true"),
+    REDIS_URL: z.string().url().or(z.literal("")).default(""),
+    REALTIME_ALLOWED_ORIGINS: z.string().default(""),
+    REALTIME_PATH: z.string().trim().min(1).default("/socket.io"),
+    REALTIME_CONNECTION_STATE_RECOVERY_MS: z.coerce.number().int().min(0).default(2 * 60 * 1000),
+    REALTIME_PRESENCE_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(90),
+    REALTIME_REDIS_REQUIRED: booleanString,
   })
   .superRefine((value, context) => {
+    if (value.STORAGE_DRIVER === "s3") {
+      for (const key of ["STORAGE_ENDPOINT", "STORAGE_REGION", "STORAGE_BUCKET", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"] as const) {
+        if (!value[key].trim()) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is required when STORAGE_DRIVER=s3.`,
+          });
+        }
+      }
+    }
+
+    if (value.NODE_ENV === "production" && value.STORAGE_DRIVER !== "s3") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["STORAGE_DRIVER"],
+        message: "Production evidence storage must use private S3-compatible object storage.",
+      });
+    }
+
     if (value.NODE_ENV !== "production") {
       return;
     }
@@ -87,6 +127,9 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   CORS_ALLOWED_ORIGINS: parsed.data.CORS_ALLOWED_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  REALTIME_ALLOWED_ORIGINS: parsed.data.REALTIME_ALLOWED_ORIGINS.split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
 };

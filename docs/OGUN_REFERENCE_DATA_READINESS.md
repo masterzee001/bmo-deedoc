@@ -11,7 +11,9 @@
 | `VERIFIED` | Present in the disposable database and reconciled with an approved checked-in project source. |
 | `PARTIAL` | Some source or database records exist, but loading, provenance, currentness, or required relationships are incomplete. |
 | `MISSING` | No usable records are loaded and no complete checked-in dataset exists. |
-| `NEEDS_AUTHORITATIVE_SOURCE` | A source must be approved or acquired before records may be loaded. |
+| `BLOCKED` | Records or release files are present but cannot be accepted because validation found duplicates, orphans, invalid relationships, missing provenance, cross-State links, or command/reference violations. |
+
+`NEEDS_AUTHORITATIVE_SOURCE` is no longer used as a level status. Missing source approval is recorded as a blocker note while the level itself remains `MISSING` unless partial checked-in source evidence exists.
 
 ## Source Inventory
 
@@ -33,10 +35,10 @@ The Lagos-only records in `packages/database/prisma/seed.ts` are test fixtures. 
 | Senatorial Districts | 3 | 3 | 3 | 3 | `VERIFIED` |
 | Federal Constituencies | 9 | 9 | 9 | 9 | `VERIFIED` |
 | State Constituencies | 26 | 26 valid rows | 0 | 0 | `PARTIAL` |
-| LGAs | 20 | Expected count only | 0 | 0 | `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE` |
-| Wards | No approved repository total | 0 | 0 | 0 | `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE` |
-| Polling Units | No approved repository total | 0 | 0 | 0 | `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE` |
-| Polling Unit geodata | No approved repository total | 0 | 0 | 0 | `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE` |
+| LGAs | 20 | Expected count only | 0 | 0 | `MISSING` |
+| Wards | No approved repository total | 0 | 0 | 0 | `MISSING` |
+| Polling Units | No approved repository total | 0 | 0 | 0 | `MISSING` |
+| Polling Unit geodata | No approved repository total | 0 | 0 | 0 | `MISSING` |
 
 The State Constituency sheet presents 27 rows to the generic parser because one numeric column-label row (`1`, `2`, `3`, `4`) appears under the Ogun section. The source contains 26 valid Ogun records with `SC/.../OG` codes. The invalid numeric header is excluded from the readiness count and does not load because it cannot resolve an LGA.
 
@@ -78,7 +80,8 @@ The State Constituency sheet presents 27 rows to the generic parser because one 
 - Expected count: 20.
 - Available database count: 0.
 - Verified count: 0.
-- Status: `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE`.
+- Status: `MISSING`.
+- Blocker: authoritative checked-in LGA source approval is required before import.
 - The project knows the expected count and constituency composition text contains LGA names, but composition text is not an approved identity dataset and must not mint LGA records.
 
 ## Wards
@@ -86,7 +89,8 @@ The State Constituency sheet presents 27 rows to the generic parser because one 
 - Available: no Ogun records.
 - Complete: no.
 - Authoritative checked-in source: no.
-- Status: `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE`.
+- Status: `MISSING`.
+- Blocker: authoritative checked-in Ward identity and relationship source approval is required before import.
 - State Constituency composition text contains historical Ward labels, but it is not a complete, versioned Ward identity dataset and does not provide stable Ward IDs.
 
 ## Polling Units
@@ -95,7 +99,8 @@ The State Constituency sheet presents 27 rows to the generic parser because one 
 - Complete: no.
 - Authoritative checked-in source: no.
 - Codes persisted by current model: no; current IDs may encode an external option ID, but there is no separate source-code/provenance field.
-- Status: `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE`.
+- Status: `MISSING`.
+- Blocker: authoritative checked-in Polling Unit identity and relationship source approval is required before import.
 
 ## Polling Unit Geodata
 
@@ -103,7 +108,8 @@ The State Constituency sheet presents 27 rows to the generic parser because one 
 - Accuracy/source available: no.
 - Geofence radius available: no.
 - Provenance and capture date available: no.
-- Status: `MISSING` / `NEEDS_AUTHORITATIVE_SOURCE`.
+- Status: `MISSING`.
+- Blocker: authoritative checked-in coordinate, accuracy, capture, source, and geofence-radius approval is required before import.
 
 Territory identity and GPS/geofence data are separate gates. Missing coordinates do not prevent the Platform Lead from designing Phase 1 roles, assignments, and territory contracts. Approved Polling Unit identity is required before Polling Unit assignments can be migrated deeply. Accurate coordinates, source, capture date, and geofence policy become mandatory before Election Day GPS/geofence implementation.
 
@@ -112,8 +118,8 @@ Territory identity and GPS/geofence data are separate gates. Missing coordinates
 | Relationship | Current result | Readiness |
 |---|---|---|
 | Ward -> LGA reference | Cannot validate; both Ogun datasets are absent. | `MISSING` |
-| Ward -> State Constituency | Phase 1 schema supports a nullable direct command-parent link; no approved Ogun mapping dataset is loaded. | `NEEDS_AUTHORITATIVE_SOURCE` |
-| State Constituency -> Federal Constituency, where approved | Phase 1 schema supports a nullable direct command-parent link; the workbook does not define it directly. Do not infer it from names. | `NEEDS_AUTHORITATIVE_SOURCE` |
+| Ward -> State Constituency | Phase 1 schema supports a nullable direct command-parent link; no approved Ogun mapping dataset is loaded. | `MISSING`; source approval blocker |
+| State Constituency -> Federal Constituency, where approved | Phase 1 schema supports a nullable direct command-parent link; the workbook does not define it directly. Do not infer it from names. | `MISSING`; source approval blocker |
 | Federal Constituency -> Senatorial District, where approved | All 9 loaded Federal records reference an Ogun Senatorial District; parent selection is composition-derived. | `PARTIAL` relationship assurance |
 | Polling Unit -> Ward | Cannot validate; both Ogun datasets are absent. | `MISSING` |
 | Ward/Polling Unit -> State | Schema supports State and LGA parents, but no Ogun records are loaded. | `MISSING` |
@@ -160,6 +166,10 @@ Implemented contract:
 - Polling Unit geodata is stored separately on `PollingUnit` with coordinates, accuracy, capture metadata, geofence radius, `geodataImportReleaseId`, and `geodataImportedAt`.
 - `npm run validate:reference:ogun-release --workspace @pics-nigeria/database -- --release-dir <path>` validates a checked-in release without writing.
 - `npm run import:reference:ogun --workspace @pics-nigeria/database -- --release-dir <path> --apply` applies a validated release transactionally. Without `--apply`, the script validates only.
+- `npm run report:reference:ogun --workspace @pics-nigeria/database` reports each required Sprint 2 level as `VERIFIED`, `PARTIAL`, `MISSING`, or `BLOCKED`.
+- `npm run verify:reference:ogun-contract --workspace @pics-nigeria/database` executes focused importer validation tests for duplicate, orphan, relationship, LGA-reference-only, and geodata duplicate failures.
+
+The importer fails closed before writes when it finds duplicate canonical IDs, duplicate source codes, duplicate command relationships, duplicate LGA memberships, unknown child records, unknown staged parents, conflicting command parents, unsupported relationship kinds, LGA command parents, missing required direct parents, or geodata rows that do not resolve to existing Ogun Polling Units. It does not infer missing electoral mappings from names, composition text, LGA membership, or ID prefixes.
 
 Identity release CSV contract:
 

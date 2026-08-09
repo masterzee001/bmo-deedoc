@@ -52,11 +52,16 @@ type PollingUnitGeodataRow = {
   geofenceRadiusMeters: number;
 };
 
-const prisma = new PrismaClient();
 const args = process.argv.slice(2);
 const releaseDirArg = readArg("--release-dir") || readArg("--dir");
 const apply = args.includes("--apply");
 const validateOnly = args.includes("--validate-only") || !apply;
+let prisma: PrismaClient | null = null;
+
+function getPrisma() {
+  prisma ??= new PrismaClient();
+  return prisma;
+}
 
 function readArg(name: string) {
   const index = args.indexOf(name);
@@ -187,7 +192,7 @@ function assertSha(filePath: string, expectedHash: string | undefined, label: st
   }
 }
 
-function validateManifest(releaseDir: string): ValidationResult<{ manifest: OgunReferenceReleaseManifest; manifestPath: string }> {
+export function validateManifest(releaseDir: string): ValidationResult<{ manifest: OgunReferenceReleaseManifest; manifestPath: string }> {
   const manifestPath = path.join(releaseDir, "manifest.json");
   const parsed = parseJson<OgunReferenceReleaseManifest>(manifestPath);
   const failures = [...parsed.failures];
@@ -247,7 +252,7 @@ function validateManifest(releaseDir: string): ValidationResult<{ manifest: Ogun
   return failures.length > 0 ? { value: null, failures } : { value: { manifest, manifestPath }, failures: [] };
 }
 
-function validateIdentityRelease(releaseDir: string, manifest: OgunReferenceReleaseManifest): ValidationResult<{
+export function validateIdentityRelease(releaseDir: string, manifest: OgunReferenceReleaseManifest): ValidationResult<{
   territories: TerritoryRow[];
   commandRelationships: CommandRelationshipRow[];
   lgaMemberships: LgaMembershipRow[];
@@ -331,39 +336,99 @@ function validateIdentityRelease(releaseDir: string, manifest: OgunReferenceRele
     childKind: requireText(row, "childKind"),
     childId: requireText(row, "childId"),
   }));
-  const relationshipKeys = new Set(
-    commandRelationships.map((row) => `${row.parentKind}:${row.parentId}->${row.childKind}:${row.childId}`),
-  );
+  const relationshipKeys = new Set<string>();
+  const relationshipsByChild = new Map<string, CommandRelationshipRow[]>();
+  const allowedCommandRelationships = new Set([
+    "FEDERAL_CONSTITUENCY->STATE_CONSTITUENCY",
+    "STATE_CONSTITUENCY->WARD",
+    "WARD->POLLING_UNIT",
+  ]);
+
+  commandRelationships.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const relationshipKey = `${row.parentKind}:${row.parentId}->${row.childKind}:${row.childId}`;
+    const relationshipKind = `${row.parentKind}->${row.childKind}`;
+    if (!row.parentKind || !row.parentId || !row.childKind || !row.childId) {
+      failures.push(`command-relationships.csv row ${rowNumber}: parentKind, parentId, childKind, and childId are required.`);
+    }
+    if (relationshipKeys.has(relationshipKey)) {
+      failures.push(`Duplicate command relationship: ${relationshipKey}.`);
+    }
+    relationshipKeys.add(relationshipKey);
+    if (!allowedCommandRelationships.has(relationshipKind)) {
+      failures.push(
+        `command-relationships.csv row ${rowNumber}: unsupported command relationship ${relationshipKind}; LGA is reference-only and cannot be a command parent.`,
+      );
+    }
+
+    const child = byId.get(row.childId);
+    if (!child) {
+      failures.push(`command-relationships.csv row ${rowNumber}: unknown child territory ${row.childId}.`);
+    } else if (child.kind !== row.childKind) {
+      failures.push(`command-relationships.csv row ${rowNumber}: child ${row.childId} is ${child.kind}, not ${row.childKind}.`);
+    }
+
+    const parent = byId.get(row.parentId);
+    if (parent && parent.kind !== row.parentKind) {
+      failures.push(`command-relationships.csv row ${rowNumber}: parent ${row.parentId} is ${parent.kind}, not ${row.parentKind}.`);
+    }
+    if ((row.parentKind === "STATE_CONSTITUENCY" || row.parentKind === "WARD") && !parent) {
+      failures.push(`command-relationships.csv row ${rowNumber}: unknown parent territory ${row.parentId}.`);
+    }
+
+    const childKey = `${row.childKind}:${row.childId}`;
+    relationshipsByChild.set(childKey, [...(relationshipsByChild.get(childKey) || []), row]);
+  });
+
+  function requireSingleCommandParent(territory: TerritoryRow, parentKind: string, parentId: string | null) {
+    const childKey = `${territory.kind}:${territory.canonicalId}`;
+    const relationships = relationshipsByChild.get(childKey) || [];
+    if (relationships.length !== 1) {
+      failures.push(`${territory.canonicalId} must have exactly one ${parentKind} command parent; found ${relationships.length}.`);
+      return;
+    }
+    const [relationship] = relationships;
+    if (relationship.parentKind !== parentKind || relationship.parentId !== parentId) {
+      failures.push(
+        `${territory.canonicalId} command parent mismatch: territory field=${parentKind}:${parentId || "missing"}, relationship=${relationship.parentKind}:${relationship.parentId}.`,
+      );
+    }
+  }
 
   for (const territory of territories) {
+    if (territory.kind === "LGA") {
+      if (territory.lgaId || territory.federalConstituencyId || territory.stateConstituencyId || territory.wardId) {
+        failures.push(`${territory.canonicalId} is an LGA reference record and must not carry command-parent fields.`);
+      }
+    }
     if (territory.kind === "STATE_CONSTITUENCY") {
-      if (!territory.lgaId || !byId.has(territory.lgaId)) {
+      if (!territory.lgaId || byId.get(territory.lgaId)?.kind !== "LGA") {
         failures.push(`${territory.canonicalId} requires an Ogun LGA primary reference.`);
       }
       if (!territory.federalConstituencyId) {
         failures.push(`${territory.canonicalId} requires a Federal Constituency command parent.`);
-      } else if (!relationshipKeys.has(`FEDERAL_CONSTITUENCY:${territory.federalConstituencyId}->STATE_CONSTITUENCY:${territory.canonicalId}`)) {
-        failures.push(`${territory.canonicalId} is missing its Federal Constituency command relationship row.`);
+      } else {
+        requireSingleCommandParent(territory, "FEDERAL_CONSTITUENCY", territory.federalConstituencyId);
       }
     }
     if (territory.kind === "WARD") {
-      if (!territory.lgaId || !byId.has(territory.lgaId)) {
+      if (!territory.lgaId || byId.get(territory.lgaId)?.kind !== "LGA") {
         failures.push(`${territory.canonicalId} requires an Ogun LGA reference.`);
       }
-      if (!territory.stateConstituencyId || !byId.has(territory.stateConstituencyId)) {
+      if (!territory.stateConstituencyId || byId.get(territory.stateConstituencyId)?.kind !== "STATE_CONSTITUENCY") {
         failures.push(`${territory.canonicalId} requires a staged State Constituency command parent.`);
-      } else if (!relationshipKeys.has(`STATE_CONSTITUENCY:${territory.stateConstituencyId}->WARD:${territory.canonicalId}`)) {
-        failures.push(`${territory.canonicalId} is missing its State Constituency command relationship row.`);
+      } else {
+        requireSingleCommandParent(territory, "STATE_CONSTITUENCY", territory.stateConstituencyId);
       }
     }
     if (territory.kind === "POLLING_UNIT") {
-      if (!territory.lgaId || !byId.has(territory.lgaId)) {
+      if (!territory.lgaId || byId.get(territory.lgaId)?.kind !== "LGA") {
         failures.push(`${territory.canonicalId} requires an Ogun LGA reference.`);
       }
-      if (!territory.wardId || !byId.has(territory.wardId)) {
+      if (!territory.wardId || byId.get(territory.wardId)?.kind !== "WARD") {
         failures.push(`${territory.canonicalId} requires a staged Ward command parent.`);
-      } else if (!relationshipKeys.has(`WARD:${territory.wardId}->POLLING_UNIT:${territory.canonicalId}`)) {
-        failures.push(`${territory.canonicalId} is missing its Ward command relationship row.`);
+      } else {
+        requireSingleCommandParent(territory, "WARD", territory.wardId);
       }
     }
   }
@@ -374,9 +439,21 @@ function validateIdentityRelease(releaseDir: string, manifest: OgunReferenceRele
     lgaId: requireText(row, "lgaId"),
   }));
   const stateConstituencyMemberships = new Set<string>();
+  const membershipKeys = new Set<string>();
   for (const membership of lgaMemberships) {
-    if (!byId.has(membership.territoryId)) {
+    const membershipKey = `${membership.territoryKind}:${membership.territoryId}:${membership.lgaId}`;
+    if (membershipKeys.has(membershipKey)) {
+      failures.push(`Duplicate LGA membership row: ${membershipKey}.`);
+    }
+    membershipKeys.add(membershipKey);
+    const territory = byId.get(membership.territoryId);
+    if (!territory) {
       failures.push(`lga-memberships.csv references unknown territory ${membership.territoryId}.`);
+    } else if (territory.kind !== membership.territoryKind) {
+      failures.push(`lga-memberships.csv territory kind mismatch for ${membership.territoryId}: expected ${territory.kind}, found ${membership.territoryKind}.`);
+    }
+    if (membership.territoryKind !== "STATE_CONSTITUENCY") {
+      failures.push(`lga-memberships.csv only supports STATE_CONSTITUENCY memberships in this import contract.`);
     }
     if (!byId.has(membership.lgaId) || byId.get(membership.lgaId)?.kind !== "LGA") {
       failures.push(`lga-memberships.csv references unknown Ogun LGA ${membership.lgaId}.`);
@@ -394,7 +471,7 @@ function validateIdentityRelease(releaseDir: string, manifest: OgunReferenceRele
   return failures.length > 0 ? { value: null, failures } : { value: { territories, commandRelationships, lgaMemberships }, failures: [] };
 }
 
-function validateGeodataRelease(releaseDir: string, manifest: OgunReferenceReleaseManifest): ValidationResult<PollingUnitGeodataRow[]> {
+export function validateGeodataRelease(releaseDir: string, manifest: OgunReferenceReleaseManifest): ValidationResult<PollingUnitGeodataRow[]> {
   const failures: string[] = [];
   const geodataFile = resolveReleaseFile(releaseDir, manifest.files.pollingUnitGeodata!.path);
   assertSha(geodataFile, manifest.files.pollingUnitGeodata!.sha256, "pollingUnitGeodata", failures);
@@ -506,7 +583,7 @@ async function applyIdentityRelease(
   manifestPath: string,
   payload: NonNullable<ReturnType<typeof validateIdentityRelease>["value"]>,
 ) {
-  return prisma.$transaction(async (transaction) => {
+  return getPrisma().$transaction(async (transaction) => {
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
     const importedAt = new Date();
@@ -651,7 +728,7 @@ async function applyGeodataRelease(
   manifestPath: string,
   rows: PollingUnitGeodataRow[],
 ) {
-  return prisma.$transaction(async (transaction) => {
+  return getPrisma().$transaction(async (transaction) => {
     const transactionAny = transaction as any;
     const release = await upsertRelease(transactionAny, manifest, manifestPath);
     const importedAt = new Date();
@@ -692,7 +769,7 @@ async function validateIdentityDatabaseParents(payload: NonNullable<ReturnType<t
     ),
   );
   if (federalConstituencyIds.length > 0) {
-    const found = await prisma.federalConstituency.findMany({
+    const found = await getPrisma().federalConstituency.findMany({
       where: { id: { in: federalConstituencyIds }, stateId: OGUN_STATE_ID },
       select: { id: true },
     });
@@ -708,7 +785,7 @@ async function validateIdentityDatabaseParents(payload: NonNullable<ReturnType<t
 
 async function validateGeodataDatabaseParents(rows: PollingUnitGeodataRow[]) {
   const ids = rows.map((row) => row.pollingUnitId);
-  const found = await prisma.pollingUnit.findMany({
+  const found = await getPrisma().pollingUnit.findMany({
     where: { id: { in: ids }, stateId: OGUN_STATE_ID },
     select: { id: true },
   });
@@ -733,7 +810,7 @@ async function main() {
   }
 
   const { manifest, manifestPath } = manifestResult.value;
-  const state = await prisma.state.findUnique({ where: { id: OGUN_STATE_ID }, select: { id: true } });
+  const state = await getPrisma().state.findUnique({ where: { id: OGUN_STATE_ID }, select: { id: true } });
   if (!state) {
     console.error(`FAIL Ogun State must be bootstrapped before importing release ${manifest.releaseId}.`);
     process.exitCode = 1;
@@ -790,11 +867,13 @@ async function main() {
   }
 }
 
-main()
-  .catch((error) => {
-    console.error("Ogun reference release import failed:", error);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error("Ogun reference release import failed:", error);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma?.$disconnect();
+    });
+}
