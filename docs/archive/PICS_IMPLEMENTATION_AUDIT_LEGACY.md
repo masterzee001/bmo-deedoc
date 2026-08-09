@@ -1,7 +1,7 @@
 # Legacy PICS Reference: Implementation Audit
 
 ## Legacy Status
-This document is archived as a legacy PICS reference document.
+This document is archived as a legacy PICS reference document under `docs/archive/`.
 
 It captures a prior implementation audit snapshot and should be read as historical reference, not the canonical current technical document.
 Use `docs/TECHNICAL.md` for current architecture and implementation status.

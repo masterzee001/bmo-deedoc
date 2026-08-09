@@ -1,7 +1,7 @@
 # Legacy PICS Reference: Product Capability Guide
 
 ## Legacy Status
-This document is archived as a legacy PICS reference document.
+This document is archived as a legacy PICS reference document under `docs/archive/`.
 
 It reflects an earlier capability narrative and may mix current implementation with target-state language.
 Use `docs/TECHNICAL.md` for the current technical source of truth.
