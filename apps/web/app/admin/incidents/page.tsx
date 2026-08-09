@@ -230,6 +230,14 @@ export default function AdminIncidentsPage() {
                 <p className="muted">
                   {new Date(incident.createdAt).toLocaleString()}
                 </p>
+                <div className="action-row" style={{ marginTop: 12 }}>
+                  <Link href={`/admin/evidence?incidentId=${encodeURIComponent(incident.id)}`}>Open linked evidence</Link>
+                  {incident.pollingUnitId ? (
+                    <Link href={`/admin/evidence?pollingUnitId=${encodeURIComponent(incident.pollingUnitId)}`}>
+                      Open PU dossier
+                    </Link>
+                  ) : null}
+                </div>
                 {incident.governance?.flags.length ? (
                   <div className="reward-list" style={{ marginTop: 12 }}>
                     {incident.governance.flags.map((flag) => (

@@ -1,4 +1,14 @@
-import { TARGET_AUTH_ROLES, type CoordinatorLevel, type TargetAccountStatus } from "./platform-contracts";
+import {
+  TARGET_AUTH_ROLES,
+  type CoordinatorLevel,
+  type EvidenceClassification,
+  type EvidenceCustodyEventType,
+  type EvidenceReviewStatus,
+  type EvidenceType,
+  type LegalCaseStatus,
+  type TargetAccountStatus,
+  type TerritoryKind,
+} from "./platform-contracts";
 
 export const LEGACY_AUTH_ROLES = [
   "ADMIN",
@@ -828,6 +838,141 @@ export type ElectionDayReportAssetItem = {
   id: string;
   fileName: string;
   fileUrl: string;
+};
+
+export type EvidenceCustodyEventItem = {
+  id: string;
+  eventType: EvidenceCustodyEventType;
+  actorUserId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type EvidenceAssetItem = {
+  id: string;
+  evidenceType: EvidenceType;
+  classification: EvidenceClassification;
+  reviewStatus: EvidenceReviewStatus;
+  originalStorageKey: string;
+  storageBucket: string;
+  originalFileName: string;
+  mimeType: string;
+  fileSize: number;
+  sha256: string;
+  capturedAt: string | null;
+  uploadedAt: string;
+  serverReceivedAt: string;
+  latitude: number | null;
+  longitude: number | null;
+  accuracyMeters: number | null;
+  metadata: Record<string, unknown> | null;
+  derivatives: Record<string, unknown> | null;
+  uploaderUserId: string;
+  incidentId: string | null;
+  electionReportId: string | null;
+  territory: TerritorySummary;
+  custodyEvents?: EvidenceCustodyEventItem[];
+  originalAccess: {
+    publicUrl: null;
+    signedAccessRequired: boolean;
+  };
+  preservation: {
+    originalImmutable: boolean;
+    authoritativeStorage: "private-object-storage";
+    derivativeStatus: string;
+    retentionPolicy: string;
+  };
+};
+
+export type EvidenceExplorerSummary = {
+  total: number;
+  returned: number;
+  byType: Record<string, number>;
+  byReviewStatus: Record<string, number>;
+  byClassification: Record<string, number>;
+};
+
+export type EvidenceAggregationItem = {
+  territoryKind: Exclude<TerritoryKind, "STATE" | "LGA">;
+  territoryId: string;
+  evidenceCount: number;
+  latestServerReceivedAt: string | null;
+  byType: Record<string, number>;
+  byReviewStatus: Record<string, number>;
+  byClassification: Record<string, number>;
+};
+
+export type EvidenceTimelineItem = {
+  type: "ACTIVITY" | "INCIDENT" | "ELECTION_REPORT" | "EVIDENCE";
+  occurredAt: string;
+  id: string;
+  label: string;
+  sha256?: string;
+};
+
+export type EvidenceDossier = {
+  pollingUnit: PollingUnitItem | null;
+  territory: TerritorySummary;
+  completeness: {
+    evidenceCount: number;
+    photoCount: number;
+    videoCount: number;
+    writtenReportCount: number;
+    incidentCount: number;
+    reportCount: number;
+    custodyEventCount: number;
+  };
+  evidence: EvidenceAssetItem[];
+  incidents: IncidentListItem[];
+  reports: ElectionDayReportItem[];
+  custodyEvents: EvidenceCustodyEventItem[];
+  legalConclusion: null;
+};
+
+export type LegalCaseItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: LegalCaseStatus;
+  createdByUserId: string;
+  territory: TerritorySummary;
+  evidenceCount: number;
+  packageCount: number;
+  noteCount: number;
+  createdAt: string;
+  updatedAt: string;
+  legalConclusion: null;
+};
+
+export type EvidenceManifest = {
+  generatedAt: string;
+  purpose: string;
+  legalCaseId: string | null;
+  archivePackagingStatus: string;
+  items: Array<{
+    evidenceAssetId: string;
+    evidenceType: EvidenceType;
+    classification: EvidenceClassification;
+    reviewStatus: EvidenceReviewStatus;
+    sha256: string;
+    originalStorageKey: string;
+    storageBucket: string;
+    originalFileName: string;
+    mimeType: string;
+    fileSize: number;
+    serverReceivedAt: string;
+    pollingUnitId: string | null;
+    incidentId: string | null;
+    electionReportId: string | null;
+    uploaderUserId: string;
+  }>;
+};
+
+export type EvidencePackageItem = {
+  id: string;
+  itemCount: number;
+  manifestSha256: string;
+  createdAt: string;
 };
 
 export type FieldTaskItem = {
