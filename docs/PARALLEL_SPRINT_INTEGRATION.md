@@ -84,6 +84,16 @@ YES
 - Evidence branch is not integration-ready.
 - Existing non-critical audit findings remain tracked: 1 low and 4 high advisories, with no critical advisory found.
 
+## Platform Lead Migration Sequencing Guidance
+
+- Existing migrations remain immutable. No workstream may edit, reorder, delete, or renumber any directory already listed in `packages/database/prisma/ogun-migration-manifest.json`.
+- The current active stream ends at `20260809030000_pre_election_verification_rewards_foundation`. The next shared migration slot must use a later UTC timestamp and one coherent snake-case concern name.
+- Developer 1 owns shared migration sequencing. Developer 2 reward/payout or strength changes, Developer 3 Election Day session/location/realtime changes, and Developer 4 evidence/storage/audit ownership changes must be proposed to Platform Lead before a migration is generated.
+- Reference-data imports are not schema migrations. Approved Ogun identity and geodata releases must be checked in under `packages/database/reference/ogun/<release-id>/`, validated, applied twice in disposable PostgreSQL for idempotency, and then verified with the strict Ogun reference gate.
+- LGA must remain reference-only in every migration and importer contract. No migration may add LGA as a target coordinator level, command parent, or authorization shortcut.
+- Polling Unit identity and Polling Unit geodata stay separate. Identity imports may unblock Pre-Election territory operations; geodata imports unblock only Election Day GPS/geofence behavior after `--require-geodata` passes.
+- If two workstreams need schema changes in the same area, Platform Lead must combine or sequence them before merge; downstream branches should import shared contracts rather than duplicating enums or local status strings.
+
 ## Evidence Next Action
 
 Do not integrate Evidence until all of the following pass:

@@ -135,6 +135,7 @@ try {
   runNpm(["run", "seed"], testEnv);
   runNpm(["run", "bootstrap:reference-data"], testEnv);
   runNpm(["run", "verify:reference:ogun:allow-incomplete"], testEnv);
+  runNpm(["run", "report:reference:ogun"], testEnv);
   runNpm(["test", "--workspace", "@pics-nigeria/api"], testEnv);
   console.log("database_integration=ok");
 } finally {

@@ -33,6 +33,8 @@
     "verify:repository": "npm run verify:migrations && npm run verify:docs",
     "verify:reference:ogun": "npm run verify:reference:ogun --workspace @pics-nigeria/database",
     "verify:reference:ogun:allow-incomplete": "npm run verify:reference:ogun:allow-incomplete --workspace @pics-nigeria/database",
+    "report:reference:ogun": "npm run report:reference:ogun --workspace @pics-nigeria/database",
+    "verify:reference:ogun-contract": "npm run verify:reference:ogun-contract --workspace @pics-nigeria/database",
     "validate:reference:ogun-release": "npm run validate:reference:ogun-release --workspace @pics-nigeria/database",
     "import:reference:ogun": "npm run import:reference:ogun --workspace @pics-nigeria/database",
     "migrate:phase1-identities": "npm run migrate:phase1-identities --workspace @pics-nigeria/database --",

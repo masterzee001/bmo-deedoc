@@ -1,4 +1,6 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import XLSX from "xlsx";
 import type { PrismaClient } from "@prisma/client";
 
@@ -60,6 +62,25 @@ function readWorkbook(): WorkbookData {
   const stateAssembly = parseStateAssemblySheet(workbook.Sheets["STATE CONST."]);
 
   return { senate, federal, stateAssembly };
+}
+
+export function getInecConstituencyWorkbookSha256() {
+  return createHash("sha256").update(readFileSync(workbookPath)).digest("hex");
+}
+
+export function getOgunConstituencyWorkbookSummary() {
+  const workbook = readWorkbook();
+  const isOgun = (stateName: string) => normalizeName(stateName) === "OGUN";
+
+  return {
+    workbookPath,
+    workbookSha256: getInecConstituencyWorkbookSha256(),
+    senatorialDistricts: workbook.senate.filter((row) => isOgun(row.stateName)).length,
+    federalConstituencies: workbook.federal.filter((row) => isOgun(row.stateName)).length,
+    stateConstituencies: workbook.stateAssembly.filter(
+      (row) => isOgun(row.stateName) && /^SC\/.+\/OG$/i.test(row.code),
+    ).length,
+  };
 }
 
 function parseSenateSheet(sheet: XLSX.WorkSheet): SenateRow[] {
