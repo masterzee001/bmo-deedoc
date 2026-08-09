@@ -23,6 +23,8 @@ import {
 } from "../lib/serializers";
 import { createAuditLog } from "../lib/audit";
 import { createNotification } from "../lib/notifications";
+import { createElectionDayRealtimeEvent } from "../realtime/events";
+import { publishRealtimeEvent } from "../realtime/gateway";
 
 const router = Router();
 
@@ -535,6 +537,56 @@ router.post("/election-reports", requireAuth, requirePollingUnitFieldCapability,
 
       return createdReport;
     });
+
+    const reportTerritory = {
+      stateId: report.stateId,
+      senatorialDistrictId: report.senatorialDistrictId,
+      federalConstituencyId: report.federalConstituencyId,
+      stateConstituencyId: report.stateConstituencyId,
+      wardId: report.wardId,
+      pollingUnitId: report.pollingUnitId,
+    };
+    publishRealtimeEvent(
+      createElectionDayRealtimeEvent({
+        eventType: "election.report.submitted",
+        actorUserId: request.authUser!.id,
+        territory: reportTerritory,
+        idempotencyKey: report.id,
+        payload: {
+          reportId: report.id,
+          status: report.status,
+          openingStatus: report.openingStatus,
+          pollingUnitId: report.pollingUnitId,
+          reportDate: report.reportDate.toISOString(),
+          resultSubmitted: voteEntries.length > 0,
+          evidenceReceived: Boolean(report.arrivalPhotoAssetId && report.postCountingPhotoAssetId),
+        },
+      }),
+    );
+    if (voteEntries.length > 0) {
+      publishRealtimeEvent(
+        createElectionDayRealtimeEvent({
+          eventType: "election.result.submitted",
+          actorUserId: request.authUser!.id,
+          territory: reportTerritory,
+          idempotencyKey: `result:${report.id}`,
+          payload: {
+            reportId: report.id,
+            pollingUnitId: report.pollingUnitId,
+            reportDate: report.reportDate.toISOString(),
+          },
+        }),
+      );
+    }
+    publishRealtimeEvent(
+      createElectionDayRealtimeEvent({
+        eventType: "election.situation.updated",
+        actorUserId: request.authUser!.id,
+        territory: reportTerritory,
+        idempotencyKey: `situation:${report.id}`,
+        payload: { reason: "REPORT_SUBMITTED", pollingUnitId: report.pollingUnitId },
+      }),
+    );
 
     return response.status(201).json({
       message: "Election-day report submitted successfully.",

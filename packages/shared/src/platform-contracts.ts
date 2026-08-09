@@ -119,6 +119,9 @@ export const ELECTION_DAY_REALTIME_EVENT_TYPES = [
   "election.location.updated",
   "election.tracking.stale",
   "election.location.mismatch",
+  "election.alert.created",
+  "election.alert.updated",
+  "election.situation.updated",
   "election.incident.created",
   "election.incident.updated",
   "election.report.submitted",
@@ -128,6 +131,13 @@ export const ELECTION_DAY_REALTIME_EVENT_TYPES = [
   "call.ringing",
   "call.connected",
   "call.ended",
+] as const;
+
+export const REALTIME_RUNTIME_STATUSES = [
+  "TARGET_NOT_RUNNING",
+  "AVAILABLE",
+  "DEGRADED_NO_REDIS",
+  "DEGRADED_REDIS_UNAVAILABLE",
 ] as const;
 
 export const EVIDENCE_TYPES = ["PHOTO", "VIDEO", "WRITTEN_REPORT"] as const;
@@ -182,6 +192,7 @@ export type ElectionDayGeofenceStatus = (typeof ELECTION_DAY_GEOFENCE_STATUSES)[
 export type ElectionDayAlertType = (typeof ELECTION_DAY_ALERT_TYPES)[number];
 export type ElectionDayAlertStatus = (typeof ELECTION_DAY_ALERT_STATUSES)[number];
 export type ElectionDayRealtimeEventType = (typeof ELECTION_DAY_REALTIME_EVENT_TYPES)[number];
+export type RealtimeRuntimeStatus = (typeof REALTIME_RUNTIME_STATUSES)[number];
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export type EvidenceClassification = (typeof EVIDENCE_CLASSIFICATIONS)[number];
 export type EvidenceReviewStatus = (typeof EVIDENCE_REVIEW_STATUSES)[number];
@@ -281,6 +292,24 @@ export type PlatformEventEnvelope<TType extends string, TPayload> = {
   payload: TPayload;
 };
 
+export type ElectionDayRealtimePayload = Record<string, unknown>;
+
+export type ElectionDayRealtimeEnvelope = PlatformEventEnvelope<
+  ElectionDayRealtimeEventType,
+  ElectionDayRealtimePayload
+>;
+
+export type RealtimePresenceState = "ONLINE" | "ACTIVE_RECENTLY" | "OFFLINE" | "IN_CALL";
+
+export type RealtimeGatewayStatus = {
+  runtimeStatus: RealtimeRuntimeStatus;
+  restFallbackAvailable: boolean;
+  transport: "socket.io";
+  redisAdapter: "connected" | "not_configured" | "unavailable";
+  contractVersion: 1;
+  eventTypes: ElectionDayRealtimeEventType[];
+};
+
 export type ElectionDayLocationEvaluation = {
   status: ElectionDayGeofenceStatus;
   checkedAt: string;
@@ -314,7 +343,7 @@ export type ElectionDaySituationRoomStatus = {
   generatedAt: string;
   territory: OperationalTerritory;
   realtime: {
-    runtimeStatus: "TARGET_NOT_RUNNING" | "AVAILABLE";
+    runtimeStatus: RealtimeRuntimeStatus;
     restFallbackAvailable: boolean;
     contractVersion: 1;
     eventTypes: ElectionDayRealtimeEventType[];

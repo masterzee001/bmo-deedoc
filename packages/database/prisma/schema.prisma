@@ -291,6 +291,38 @@ enum LegalCaseStatus {
   CLOSED
 }
 
+enum OperationalAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  ESCALATED
+  RESOLVED
+}
+
+enum OperationalAlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  TERRITORY
+  ELECTION_OPERATION
+}
+
+enum MessageReceiptStatus {
+  DELIVERED
+  READ
+}
+
+enum RealtimeEventDeliveryStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
 model User {
   id                         String                        @id @default(cuid())
   name                       String
@@ -366,6 +398,10 @@ model User {
   legalCaseEvidenceLinks     CaseEvidence[]                @relation("CaseEvidenceAdder")
   createdLegalCaseNotes      LegalCaseNote[]               @relation("LegalCaseNoteAuthor")
   createdEvidencePackages    EvidencePackage[]             @relation("EvidencePackageCreator")
+  createdConversations       Conversation[]                @relation("ConversationCreator")
+  conversationMemberships    ConversationMember[]          @relation("ConversationMemberUser")
+  sentMessages               Message[]                     @relation("MessageSender")
+  messageReceipts            MessageReceipt[]              @relation("MessageReceiptUser")
 
   @@index([role])
   @@index([isActive])
@@ -1478,6 +1514,170 @@ model BroadcastMessage {
   @@index([taskStatus])
   @@index([stateId])
   @@index([lgaId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+}
+
+model OperationalAlert {
+  id                    String                   @id @default(cuid())
+  type                  String
+  status                OperationalAlertStatus   @default(OPEN)
+  severity              OperationalAlertSeverity @default(MEDIUM)
+  message               String
+  sourceType            String?
+  sourceId              String?
+  actorUserId           String?
+  acknowledgedByUserId  String?
+  resolvedByUserId      String?
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  wardId                String?
+  pollingUnitId         String?
+  metadataJson          Json?
+  detectedAt            DateTime                 @default(now())
+  acknowledgedAt        DateTime?
+  escalatedAt           DateTime?
+  resolvedAt            DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  @@index([type, status])
+  @@index([severity, status])
+  @@index([sourceType, sourceId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+  @@index([detectedAt])
+}
+
+model Conversation {
+  id                    String               @id @default(cuid())
+  type                  ConversationType
+  title                 String?
+  createdByUserId       String
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  wardId                String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdByUser         User                 @relation("ConversationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members               ConversationMember[]
+  messages              Message[]
+
+  @@index([type, createdAt])
+  @@index([createdByUserId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+}
+
+model ConversationMember {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  roleLabel      String?
+  joinedAt       DateTime     @default(now())
+  leftAt         DateTime?
+  lastReadAt     DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation("ConversationMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String              @id @default(cuid())
+  conversationId String
+  senderUserId   String
+  body           String
+  metadataJson   Json?
+  stateId        String
+  createdAt      DateTime            @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  conversation   Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderUser     User                @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+  receipts       MessageReceipt[]
+  attachments    MessageAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderUserId])
+  @@index([stateId])
+  @@index([createdAt])
+}
+
+model MessageReceipt {
+  id          String               @id @default(cuid())
+  messageId   String
+  userId      String
+  status      MessageReceiptStatus
+  deliveredAt DateTime?
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+  message     Message              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User                 @relation("MessageReceiptUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, status])
+  @@index([userId, status])
+}
+
+model MessageAttachment {
+  id              String   @id @default(cuid())
+  messageId       String
+  evidenceAssetId String?
+  storageKey      String?
+  fileName        String?
+  mimeType        String?
+  fileSize        Int?
+  sha256          String?
+  createdAt       DateTime @default(now())
+  message         Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([evidenceAssetId])
+}
+
+model RealtimeEventOutbox {
+  id                    String                      @id @default(cuid())
+  eventId               String                      @unique
+  eventType             String
+  eventVersion          Int
+  idempotencyKey        String                      @unique
+  payloadJson           Json
+  territoryJson         Json?
+  stateId               String?
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  wardId                String?
+  pollingUnitId         String?
+  status                RealtimeEventDeliveryStatus @default(PENDING)
+  attempts              Int                         @default(0)
+  lastError             String?
+  committedAt           DateTime                    @default(now())
+  publishedAt           DateTime?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+
+  @@index([eventType, committedAt])
+  @@index([status, committedAt])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
   @@index([wardId])
   @@index([pollingUnitId])
 }

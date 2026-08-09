@@ -9,7 +9,6 @@ import {
   Prisma,
 } from "@prisma/client";
 import {
-  ELECTION_DAY_REALTIME_EVENT_TYPES,
   OGUN_STATE_ID,
   type AuthUserProfile,
   type ElectionDayLocationEvaluation,
@@ -26,6 +25,8 @@ import { serializeBroadcastMessageItem, serializeIncidentItem } from "../lib/ser
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth, requirePollingUnitFieldCapability } from "../middleware/auth";
 import { prisma } from "../prisma";
+import { createElectionDayRealtimeEvent } from "../realtime/events";
+import { getRealtimeGatewayStatus, publishRealtimeEvent } from "../realtime/gateway";
 
 const router = Router();
 
@@ -143,6 +144,24 @@ function territoryFilter(scope: OperationalTerritory) {
   };
 }
 
+function operationalTerritoryFromProfile(profile: {
+  stateId: string;
+  senatorialDistrictId?: string | null;
+  federalConstituencyId?: string | null;
+  stateConstituencyId?: string | null;
+  wardId?: string | null;
+  pollingUnitId?: string | null;
+}): OperationalTerritory {
+  return {
+    stateId: profile.stateId,
+    senatorialDistrictId: profile.senatorialDistrictId || null,
+    federalConstituencyId: profile.federalConstituencyId || null,
+    stateConstituencyId: profile.stateConstituencyId || null,
+    wardId: profile.wardId || null,
+    pollingUnitId: profile.pollingUnitId || null,
+  };
+}
+
 async function requireCommandScope(actor: AuthUserProfile): Promise<OperationalTerritory | null> {
   const scope = commandScopeForActor(actor);
   if (!scope) {
@@ -237,7 +256,7 @@ async function createFieldActivity(
       orderBy: { createdAt: "asc" },
     });
     if (existing) {
-      return { activity: existing, alreadyRecorded: true };
+      return { activity: existing, alreadyRecorded: true, territory: operationalTerritoryFromProfile(agentProfile) };
     }
   }
 
@@ -280,7 +299,7 @@ async function createFieldActivity(
     },
   });
 
-  return { activity, alreadyRecorded: false };
+  return { activity, alreadyRecorded: false, territory: operationalTerritoryFromProfile({ ...agentProfile, pollingUnitId }) };
 }
 
 function hasResult(report: ReportRow | undefined) {
@@ -486,14 +505,16 @@ async function buildSituationRoomStatus(scope: OperationalTerritory, reportDate?
       detectedAt: new Date().toISOString(),
     }));
 
+  const realtimeStatus = getRealtimeGatewayStatus();
+
   return {
     generatedAt: new Date().toISOString(),
     territory: scope,
     realtime: {
-      runtimeStatus: "TARGET_NOT_RUNNING",
+      runtimeStatus: realtimeStatus.runtimeStatus,
       restFallbackAvailable: true,
       contractVersion: 1,
-      eventTypes: [...ELECTION_DAY_REALTIME_EVENT_TYPES],
+      eventTypes: realtimeStatus.eventTypes,
     },
     totals: {
       expectedPollingUnits: pollingUnits.length,
@@ -524,13 +545,15 @@ async function buildSituationRoomStatus(scope: OperationalTerritory, reportDate?
 }
 
 router.get("/realtime-contracts", requireAuth, async (_request, response) => {
+  const realtimeStatus = getRealtimeGatewayStatus();
   return response.json({
     realtime: {
-      runtimeStatus: "TARGET_NOT_RUNNING",
+      runtimeStatus: realtimeStatus.runtimeStatus,
       restFallbackAvailable: true,
-      transport: "Socket.IO/WebSocket target; REST endpoints are authoritative fallback in this branch.",
+      redisAdapter: realtimeStatus.redisAdapter,
+      transport: "Socket.IO attached to the API HTTP server; REST endpoints remain authoritative fallback.",
       contractVersion: 1,
-      eventTypes: ELECTION_DAY_REALTIME_EVENT_TYPES,
+      eventTypes: realtimeStatus.eventTypes,
     },
   });
 });
@@ -542,7 +565,32 @@ router.post("/check-in", requireAuth, requirePollingUnitFieldCapability, async (
   }
 
   try {
-    const { activity, alreadyRecorded } = await createFieldActivity(request.authUser!, AgentActivityType.CHECK_IN, parsed.data);
+    const { activity, alreadyRecorded, territory } = await createFieldActivity(request.authUser!, AgentActivityType.CHECK_IN, parsed.data);
+    if (!alreadyRecorded) {
+      publishRealtimeEvent(
+        createElectionDayRealtimeEvent({
+          eventType: "election.checkin.created",
+          actorUserId: request.authUser!.id,
+          territory,
+          idempotencyKey: parsed.data.idempotencyKey || activity.id,
+          payload: {
+            activityId: activity.id,
+            pollingUnitId: activity.pollingUnitId,
+            checkedInAt: activity.createdAt.toISOString(),
+            geofenceStatus: "GATED_AUTHORITATIVE_PU_GEODATA_REQUIRED",
+          },
+        }),
+      );
+      publishRealtimeEvent(
+        createElectionDayRealtimeEvent({
+          eventType: "election.situation.updated",
+          actorUserId: request.authUser!.id,
+          territory,
+          idempotencyKey: `situation:${activity.id}`,
+          payload: { reason: "CHECK_IN_CREATED", pollingUnitId: activity.pollingUnitId },
+        }),
+      );
+    }
     return response.status(alreadyRecorded ? 200 : 201).json({
       message: alreadyRecorded ? "Check-in was already recorded for this polling unit today." : "Election Day check-in recorded.",
       alreadyRecorded,
@@ -561,7 +609,16 @@ router.post("/check-out", requireAuth, requirePollingUnitFieldCapability, async 
   }
 
   try {
-    const { activity } = await createFieldActivity(request.authUser!, AgentActivityType.CHECK_OUT, parsed.data);
+    const { activity, territory } = await createFieldActivity(request.authUser!, AgentActivityType.CHECK_OUT, parsed.data);
+    publishRealtimeEvent(
+      createElectionDayRealtimeEvent({
+        eventType: "election.situation.updated",
+        actorUserId: request.authUser!.id,
+        territory,
+        idempotencyKey: parsed.data.idempotencyKey || `checkout:${activity.id}`,
+        payload: { reason: "CHECK_OUT_CREATED", activityId: activity.id, pollingUnitId: activity.pollingUnitId },
+      }),
+    );
     return response.status(201).json({ message: "Election Day check-out recorded.", activity });
   } catch (error) {
     return response.status(400).json({ message: error instanceof Error ? error.message : "Election Day check-out failed." });
@@ -575,7 +632,24 @@ router.post("/location-pings", requireAuth, requirePollingUnitFieldCapability, a
   }
 
   try {
-    const { activity } = await createFieldActivity(request.authUser!, AgentActivityType.LOCATION_PING, parsed.data);
+    const { activity, territory } = await createFieldActivity(request.authUser!, AgentActivityType.LOCATION_PING, parsed.data);
+    publishRealtimeEvent(
+      createElectionDayRealtimeEvent({
+        eventType: "election.location.updated",
+        actorUserId: request.authUser!.id,
+        territory,
+        idempotencyKey: parsed.data.idempotencyKey || activity.id,
+        payload: {
+          activityId: activity.id,
+          pollingUnitId: activity.pollingUnitId,
+          latitude: activity.latitude,
+          longitude: activity.longitude,
+          accuracyMeters: activity.accuracyMeters,
+          capturedAt: activity.createdAt.toISOString(),
+          geofenceStatus: "GATED_AUTHORITATIVE_PU_GEODATA_REQUIRED",
+        },
+      }),
+    );
     return response.status(201).json({
       message: "Election Day location ping recorded; geofence mismatch evaluation remains gated.",
       activity,
@@ -651,6 +725,38 @@ router.post("/incidents", requireAuth, requirePollingUnitFieldCapability, async 
 
     return created;
   });
+
+  const incidentTerritory = await resolveOperationalTerritory(prisma, {
+    stateId: incident.stateId,
+    senatorialDistrictId: incident.senatorialDistrictId,
+    wardId: incident.wardId,
+    pollingUnitId: incident.pollingUnitId,
+  });
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.incident.created",
+      actorUserId: request.authUser!.id,
+      territory: incidentTerritory,
+      idempotencyKey: incident.id,
+      payload: {
+        incidentId: incident.id,
+        type: incident.type,
+        severity: incident.severity,
+        status: incident.status,
+        pollingUnitId: incident.pollingUnitId,
+        createdAt: incident.createdAt.toISOString(),
+      },
+    }),
+  );
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.situation.updated",
+      actorUserId: request.authUser!.id,
+      territory: incidentTerritory,
+      idempotencyKey: `situation:${incident.id}`,
+      payload: { reason: "INCIDENT_CREATED", pollingUnitId: incident.pollingUnitId },
+    }),
+  );
 
   return response.status(201).json({
     message: "Election Day incident reported.",
@@ -747,6 +853,22 @@ router.post("/messages/territory", requireAuth, async (request, response) => {
     return created;
   });
 
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "message.created",
+      actorUserId: request.authUser!.id,
+      territory: scope,
+      idempotencyKey: broadcast.id,
+      payload: {
+        broadcastId: broadcast.id,
+        title: broadcast.title,
+        audience: broadcast.audience,
+        recipientCount: broadcast.recipientCount,
+        createdAt: broadcast.createdAt.toISOString(),
+      },
+    }),
+  );
+
   return response.status(201).json({
     message: "Election Day territory message created.",
     broadcast: serializeBroadcastMessageItem(broadcast),
@@ -835,6 +957,36 @@ router.post("/incidents/:incidentId/escalate", requireAuth, async (request, resp
     });
     return next;
   });
+
+  const updatedTerritory = await resolveOperationalTerritory(prisma, {
+    stateId: updated.stateId,
+    senatorialDistrictId: updated.senatorialDistrictId,
+    wardId: updated.wardId,
+    pollingUnitId: updated.pollingUnitId,
+  });
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.incident.updated",
+      actorUserId: request.authUser!.id,
+      territory: updatedTerritory,
+      idempotencyKey: `incident-updated:${updated.id}:${updated.updatedAt.toISOString()}`,
+      payload: {
+        incidentId: updated.id,
+        status: updated.status,
+        escalatedAt: updated.escalatedAt?.toISOString() || null,
+        pollingUnitId: updated.pollingUnitId,
+      },
+    }),
+  );
+  publishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.situation.updated",
+      actorUserId: request.authUser!.id,
+      territory: updatedTerritory,
+      idempotencyKey: `situation:${updated.id}:${updated.updatedAt.toISOString()}`,
+      payload: { reason: "INCIDENT_UPDATED", pollingUnitId: updated.pollingUnitId },
+    }),
+  );
 
   return response.json({
     message: "Election Day incident escalated.",

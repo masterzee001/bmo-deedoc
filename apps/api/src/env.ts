@@ -29,6 +29,10 @@ dotenv.config({ path: path.join(appRoot, ".env"), override: true });
 
 const durationPattern = /^\d+(ms|s|m|h|d|w|y)$/;
 const sizePattern = /^\d+(b|kb|mb)$/i;
+const booleanString = z
+  .string()
+  .default("false")
+  .transform((value) => ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
 const insecureJwtSecrets = new Set([
   "change-me",
   "changeme",
@@ -64,6 +68,12 @@ const envSchema = z
       .string()
       .default("false")
       .transform((value) => value.toLowerCase() === "true"),
+    REDIS_URL: z.string().url().or(z.literal("")).default(""),
+    REALTIME_ALLOWED_ORIGINS: z.string().default(""),
+    REALTIME_PATH: z.string().trim().min(1).default("/socket.io"),
+    REALTIME_CONNECTION_STATE_RECOVERY_MS: z.coerce.number().int().min(0).default(2 * 60 * 1000),
+    REALTIME_PRESENCE_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(90),
+    REALTIME_REDIS_REQUIRED: booleanString,
   })
   .superRefine((value, context) => {
     if (value.STORAGE_DRIVER === "s3") {
@@ -117,6 +127,9 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   CORS_ALLOWED_ORIGINS: parsed.data.CORS_ALLOWED_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  REALTIME_ALLOWED_ORIGINS: parsed.data.REALTIME_ALLOWED_ORIGINS.split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
 };
