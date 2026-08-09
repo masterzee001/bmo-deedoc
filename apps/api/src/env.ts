@@ -54,8 +54,38 @@ const envSchema = z
     AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(15 * 60 * 1000),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
     REGISTRATION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
+    STORAGE_DRIVER: z.enum(["s3", "memory"]).default(process.env.NODE_ENV === "test" ? "memory" : "s3"),
+    STORAGE_ENDPOINT: z.string().default(""),
+    STORAGE_REGION: z.string().default("auto"),
+    STORAGE_BUCKET: z.string().default(""),
+    STORAGE_ACCESS_KEY: z.string().default(""),
+    STORAGE_SECRET_KEY: z.string().default(""),
+    STORAGE_FORCE_PATH_STYLE: z
+      .string()
+      .default("false")
+      .transform((value) => value.toLowerCase() === "true"),
   })
   .superRefine((value, context) => {
+    if (value.STORAGE_DRIVER === "s3") {
+      for (const key of ["STORAGE_ENDPOINT", "STORAGE_REGION", "STORAGE_BUCKET", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"] as const) {
+        if (!value[key].trim()) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is required when STORAGE_DRIVER=s3.`,
+          });
+        }
+      }
+    }
+
+    if (value.NODE_ENV === "production" && value.STORAGE_DRIVER !== "s3") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["STORAGE_DRIVER"],
+        message: "Production evidence storage must use private S3-compatible object storage.",
+      });
+    }
+
     if (value.NODE_ENV !== "production") {
       return;
     }

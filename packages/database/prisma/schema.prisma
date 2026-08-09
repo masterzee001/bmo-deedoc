@@ -247,75 +247,125 @@ enum PayoutStatus {
   REJECTED
 }
 
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  WRITTEN_REPORT
+}
+
+enum EvidenceClassification {
+  ARRIVAL
+  OPENING
+  MATERIALS
+  SECURITY
+  INCIDENT
+  VOTING_PROCESS
+  COUNTING
+  RESULT_SHEET
+  POST_COUNTING
+  OTHER
+}
+
+enum EvidenceReviewStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  VERIFIED
+  DISPUTED
+  REQUIRES_CLARIFICATION
+  ARCHIVED
+}
+
+enum EvidenceCustodyEventType {
+  UPLOADED
+  VIEWED
+  REVIEWED
+  CLASSIFIED
+  DOWNLOADED
+  EXPORTED
+  ADDED_TO_CASE
+}
+
+enum LegalCaseStatus {
+  OPEN
+  LEGAL_HOLD
+  CLOSED
+}
+
 model User {
-  id                         String                     @id @default(cuid())
+  id                         String                        @id @default(cuid())
   name                       String
-  email                      String                     @unique
+  email                      String                        @unique
   phone                      String?
   passwordHash               String
   role                       UserRole
-  isActive                   Boolean                    @default(true)
-  accountStatus              AccountStatus              @default(ACTIVE)
-  createdAt                  DateTime                   @default(now())
-  updatedAt                  DateTime                   @updatedAt
+  isActive                   Boolean                       @default(true)
+  accountStatus              AccountStatus                 @default(ACTIVE)
+  createdAt                  DateTime                      @default(now())
+  updatedAt                  DateTime                      @updatedAt
   adminProfile               AdminProfile?
   candidateProfile           CandidateProfile?
   agentProfile               AgentProfile?
   voterProfile               VoterProfile?
   coordinatorProfile         CoordinatorProfile?
-  legacyCandidateDomain      Candidate?                 @relation("LegacyCandidateUser")
-  managedCandidateLinks      AdminCandidateAssignment[] @relation("AssignmentAdmin")
-  assignedAdminLinks         AdminCandidateAssignment[] @relation("AssignmentCandidate")
-  rewardEntries              RewardLedger[]             @relation("RewardOwner")
-  rewardRelatedEntries       RewardLedger[]             @relation("RewardRelatedUser")
-  rewardRedemptions          RewardRedemption[]         @relation("RewardRedemptionVoter")
-  reviewedRedemptions        RewardRedemption[]         @relation("RewardRedemptionReviewer")
-  referralsMade              VoterProfile[]             @relation("VoterReferral")
-  assignedAgents             AgentProfile[]             @relation("AssignedAdmin")
+  legacyCandidateDomain      Candidate?                    @relation("LegacyCandidateUser")
+  managedCandidateLinks      AdminCandidateAssignment[]    @relation("AssignmentAdmin")
+  assignedAdminLinks         AdminCandidateAssignment[]    @relation("AssignmentCandidate")
+  rewardEntries              RewardLedger[]                @relation("RewardOwner")
+  rewardRelatedEntries       RewardLedger[]                @relation("RewardRelatedUser")
+  rewardRedemptions          RewardRedemption[]            @relation("RewardRedemptionVoter")
+  reviewedRedemptions        RewardRedemption[]            @relation("RewardRedemptionReviewer")
+  referralsMade              VoterProfile[]                @relation("VoterReferral")
+  assignedAgents             AgentProfile[]                @relation("AssignedAdmin")
   participationEvents        ParticipationEvent[]
-  createdPolls               Poll[]                     @relation("PollCreator")
-  candidatePolls             Poll[]                     @relation("PollCandidate")
+  createdPolls               Poll[]                        @relation("PollCreator")
+  candidatePolls             Poll[]                        @relation("PollCandidate")
   pollResponses              PollResponse[]
-  authoredPosts              Post[]                     @relation("PostAuthor")
-  candidatePosts             Post[]                     @relation("PostCandidate")
-  voterFeedbackItems         Feedback[]                 @relation("FeedbackVoter")
-  agentFeedbackItems         Feedback[]                 @relation("FeedbackAgent")
-  candidateFeedbackItems     Feedback[]                 @relation("FeedbackCandidate")
+  authoredPosts              Post[]                        @relation("PostAuthor")
+  candidatePosts             Post[]                        @relation("PostCandidate")
+  voterFeedbackItems         Feedback[]                    @relation("FeedbackVoter")
+  agentFeedbackItems         Feedback[]                    @relation("FeedbackAgent")
+  candidateFeedbackItems     Feedback[]                    @relation("FeedbackCandidate")
   agentActivities            AgentActivity[]
-  reportedIncidents          Incident[]                 @relation("IncidentReporter")
-  assignedIncidents          Incident[]                 @relation("IncidentAssignedAdmin")
-  escalatedIncidents         Incident[]                 @relation("IncidentEscalatedBy")
-  assignedTasks              FieldTask[]                @relation("FieldTaskAssignee")
-  createdTasks               FieldTask[]                @relation("FieldTaskCreator")
-  createdBroadcasts          BroadcastMessage[]         @relation("BroadcastCreator")
+  reportedIncidents          Incident[]                    @relation("IncidentReporter")
+  assignedIncidents          Incident[]                    @relation("IncidentAssignedAdmin")
+  escalatedIncidents         Incident[]                    @relation("IncidentEscalatedBy")
+  assignedTasks              FieldTask[]                   @relation("FieldTaskAssignee")
+  createdTasks               FieldTask[]                   @relation("FieldTaskCreator")
+  createdBroadcasts          BroadcastMessage[]            @relation("BroadcastCreator")
   notifications              Notification[]
   auditLogs                  AuditLog[]
-  mediaAttachments           MediaAttachment[]          @relation("MediaUploader")
-  createdEngagementTasks     VoterEngagementTask[]      @relation("EngagementTaskCreator")
+  mediaAttachments           MediaAttachment[]             @relation("MediaUploader")
+  createdEngagementTasks     VoterEngagementTask[]         @relation("EngagementTaskCreator")
   engagementTaskClaims       VoterEngagementClaim[]
-  createdCampaignEvents      CampaignEvent[]            @relation("CampaignEventCreator")
-  candidateCampaignEvents    CampaignEvent[]            @relation("CampaignEventCandidate")
+  createdCampaignEvents      CampaignEvent[]               @relation("CampaignEventCreator")
+  candidateCampaignEvents    CampaignEvent[]               @relation("CampaignEventCandidate")
   campaignEventRsvps         CampaignEventRsvp[]
-  candidateMediaAssets       CandidateMediaAsset[]      @relation("CandidateMediaOwner")
-  electionDayReports         ElectionDayReport[]        @relation("ElectionDayReportAgent")
-  reviewedElectionDayReports ElectionDayReport[]        @relation("ElectionDayReportReviewer")
-  electionDayReportAssets    ElectionDayReportAsset[]   @relation("ElectionDayReportAssetOwner")
-  voterVerifications         VoterVerification[]        @relation("VoterVerificationMember")
-  reviewedVerifications      VoterVerification[]        @relation("VoterVerificationReviewer")
-  verificationHistoryActions VoterVerificationHistory[] @relation("VoterVerificationHistoryActor")
-  referralCodes              ReferralCode[]             @relation("ReferralCodeOwner")
-  referralsOwned             Referral[]                 @relation("ReferralReferrerUser")
-  referralsReceived          Referral[]                 @relation("ReferralReferredUser")
-  createdRewardRules         RewardRule[]               @relation("RewardRuleCreator")
-  rewardLedgerEntries        RewardLedgerEntry[]        @relation("RewardLedgerEntryUser")
-  relatedRewardLedgerEntries RewardLedgerEntry[]        @relation("RewardLedgerEntryRelatedUser")
-  payoutConfigurations       PayoutConfiguration[]      @relation("PayoutConfigurationCreator")
-  payoutOfficerAssignments   PayoutAssignment[]         @relation("PayoutAssignmentOfficer")
-  payoutBeneficiaryItems     PayoutAssignment[]         @relation("PayoutAssignmentBeneficiary")
-  payoutTransactions         PayoutTransaction[]        @relation("PayoutTransactionOfficer")
-  strengthMetricsCreated     StrengthMetricDefinition[] @relation("StrengthMetricCreator")
+  candidateMediaAssets       CandidateMediaAsset[]         @relation("CandidateMediaOwner")
+  electionDayReports         ElectionDayReport[]           @relation("ElectionDayReportAgent")
+  reviewedElectionDayReports ElectionDayReport[]           @relation("ElectionDayReportReviewer")
+  electionDayReportAssets    ElectionDayReportAsset[]      @relation("ElectionDayReportAssetOwner")
+  voterVerifications         VoterVerification[]           @relation("VoterVerificationMember")
+  reviewedVerifications      VoterVerification[]           @relation("VoterVerificationReviewer")
+  verificationHistoryActions VoterVerificationHistory[]    @relation("VoterVerificationHistoryActor")
+  referralCodes              ReferralCode[]                @relation("ReferralCodeOwner")
+  referralsOwned             Referral[]                    @relation("ReferralReferrerUser")
+  referralsReceived          Referral[]                    @relation("ReferralReferredUser")
+  createdRewardRules         RewardRule[]                  @relation("RewardRuleCreator")
+  rewardLedgerEntries        RewardLedgerEntry[]           @relation("RewardLedgerEntryUser")
+  relatedRewardLedgerEntries RewardLedgerEntry[]           @relation("RewardLedgerEntryRelatedUser")
+  payoutConfigurations       PayoutConfiguration[]         @relation("PayoutConfigurationCreator")
+  payoutOfficerAssignments   PayoutAssignment[]            @relation("PayoutAssignmentOfficer")
+  payoutBeneficiaryItems     PayoutAssignment[]            @relation("PayoutAssignmentBeneficiary")
+  payoutTransactions         PayoutTransaction[]           @relation("PayoutTransactionOfficer")
+  strengthMetricsCreated     StrengthMetricDefinition[]    @relation("StrengthMetricCreator")
   strengthWeightsCreated     StrengthWeightConfiguration[] @relation("StrengthWeightCreator")
-  campaignTargetsCreated     TerritoryTarget[]          @relation("TerritoryTargetCreator")
+  campaignTargetsCreated     TerritoryTarget[]             @relation("TerritoryTargetCreator")
+  uploadedEvidenceAssets     EvidenceAsset[]               @relation("EvidenceAssetUploader")
+  evidenceCustodyEvents      EvidenceCustodyEvent[]        @relation("EvidenceCustodyActor")
+  createdLegalCases          LegalCase[]                   @relation("LegalCaseCreator")
+  legalCaseEvidenceLinks     CaseEvidence[]                @relation("CaseEvidenceAdder")
+  createdLegalCaseNotes      LegalCaseNote[]               @relation("LegalCaseNoteAuthor")
+  createdEvidencePackages    EvidencePackage[]             @relation("EvidencePackageCreator")
 
   @@index([role])
   @@index([isActive])
@@ -668,23 +718,23 @@ model RewardLedger {
 }
 
 model VoterVerification {
-  id                 String                       @id @default(cuid())
-  memberUserId       String                       @unique
-  voterIdentifier    String
-  status             VoterVerificationStatus      @default(NOT_SUBMITTED)
-  isFlagged          Boolean                      @default(false)
-  fraudReason        String?
-  submittedAt        DateTime?
-  reviewStartedAt    DateTime?
-  reviewedAt         DateTime?
-  reviewedByUserId   String?
-  reviewNote         String?
-  createdAt          DateTime                     @default(now())
-  updatedAt          DateTime                     @updatedAt
-  memberUser         User                         @relation("VoterVerificationMember", fields: [memberUserId], references: [id], onDelete: Cascade)
-  reviewedByUser     User?                        @relation("VoterVerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  documents          VoterVerificationDocument[]
-  history            VoterVerificationHistory[]
+  id               String                      @id @default(cuid())
+  memberUserId     String                      @unique
+  voterIdentifier  String
+  status           VoterVerificationStatus     @default(NOT_SUBMITTED)
+  isFlagged        Boolean                     @default(false)
+  fraudReason      String?
+  submittedAt      DateTime?
+  reviewStartedAt  DateTime?
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewNote       String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  memberUser       User                        @relation("VoterVerificationMember", fields: [memberUserId], references: [id], onDelete: Cascade)
+  reviewedByUser   User?                       @relation("VoterVerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  documents        VoterVerificationDocument[]
+  history          VoterVerificationHistory[]
 
   @@index([status, submittedAt])
   @@index([reviewedByUserId])
@@ -693,17 +743,17 @@ model VoterVerification {
 }
 
 model VoterVerificationDocument {
-  id                 String             @id @default(cuid())
+  id                 String            @id @default(cuid())
   verificationId     String
-  originalStorageKey String             @unique
+  originalStorageKey String            @unique
   previewStorageKey  String?
   originalFileName   String
   mimeType           String
   fileSize           Int
   sha256             String
   storageProvider    String
-  uploadedAt         DateTime           @default(now())
-  verification       VoterVerification  @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  uploadedAt         DateTime          @default(now())
+  verification       VoterVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
 
   @@index([verificationId])
   @@index([sha256])
@@ -711,17 +761,17 @@ model VoterVerificationDocument {
 }
 
 model VoterVerificationHistory {
-  id                 String                    @id @default(cuid())
-  verificationId     String
-  actorUserId        String?
-  fromStatus         VoterVerificationStatus?
-  toStatus           VoterVerificationStatus
-  decision           VoterVerificationDecision
-  note               String?
-  metadataJson       Json?
-  createdAt          DateTime                  @default(now())
-  verification       VoterVerification         @relation(fields: [verificationId], references: [id], onDelete: Cascade)
-  actorUser          User?                      @relation("VoterVerificationHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  id             String                    @id @default(cuid())
+  verificationId String
+  actorUserId    String?
+  fromStatus     VoterVerificationStatus?
+  toStatus       VoterVerificationStatus
+  decision       VoterVerificationDecision
+  note           String?
+  metadataJson   Json?
+  createdAt      DateTime                  @default(now())
+  verification   VoterVerification         @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  actorUser      User?                     @relation("VoterVerificationHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([verificationId, createdAt])
   @@index([actorUserId])
@@ -729,13 +779,13 @@ model VoterVerificationHistory {
 }
 
 model ReferralCode {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   ownerUserId String
-  code        String   @unique
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  ownerUser   User     @relation("ReferralCodeOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  code        String     @unique
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  ownerUser   User       @relation("ReferralCodeOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   referrals   Referral[]
 
   @@index([ownerUserId])
@@ -743,22 +793,22 @@ model ReferralCode {
 }
 
 model Referral {
-  id                String           @id @default(cuid())
-  referredUserId    String           @unique
+  id                String         @id @default(cuid())
+  referredUserId    String         @unique
   referrerUserId    String
   referralCodeId    String?
   referralCode      String
-  status            ReferralStatus   @default(REGISTERED)
-  registeredAt      DateTime         @default(now())
+  status            ReferralStatus @default(REGISTERED)
+  registeredAt      DateTime       @default(now())
   qualifiedAt       DateTime?
   rewardProcessedAt DateTime?
   flaggedAt         DateTime?
   fraudReason       String?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  referredUser      User             @relation("ReferralReferredUser", fields: [referredUserId], references: [id], onDelete: Cascade)
-  referrerUser      User             @relation("ReferralReferrerUser", fields: [referrerUserId], references: [id], onDelete: Restrict)
-  referralCodeOwner ReferralCode?    @relation(fields: [referralCodeId], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  referredUser      User           @relation("ReferralReferredUser", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referrerUser      User           @relation("ReferralReferrerUser", fields: [referrerUserId], references: [id], onDelete: Restrict)
+  referralCodeOwner ReferralCode?  @relation(fields: [referralCodeId], references: [id], onDelete: SetNull)
   rewardEvents      RewardEvent[]
 
   @@unique([referrerUserId, referredUserId])
@@ -768,19 +818,19 @@ model Referral {
 }
 
 model RewardRule {
-  id                 String                 @id @default(cuid())
-  name               String
-  qualifyingEvent    RewardQualifyingEvent
-  eligibleRole       UserRole
+  id                       String                @id @default(cuid())
+  name                     String
+  qualifyingEvent          RewardQualifyingEvent
+  eligibleRole             UserRole
   eligibleCoordinatorLevel CoordinatorLevel?
-  active             Boolean                @default(true)
-  effectiveFrom      DateTime               @default(now())
-  effectiveUntil     DateTime?
-  createdByUserId    String
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
-  createdByUser      User                   @relation("RewardRuleCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  versions           RewardRuleVersion[]
+  active                   Boolean               @default(true)
+  effectiveFrom            DateTime              @default(now())
+  effectiveUntil           DateTime?
+  createdByUserId          String
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  createdByUser            User                  @relation("RewardRuleCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions                 RewardRuleVersion[]
 
   @@index([qualifyingEvent, active])
   @@index([eligibleRole])
@@ -850,16 +900,16 @@ model RewardLedgerEntry {
 }
 
 model PayoutConfiguration {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   minimumPoints       Int
-  pointConversionRate Decimal  @db.Decimal(18, 4)
+  pointConversionRate Decimal   @db.Decimal(18, 4)
   frequency           String
   nextPayoutDate      DateTime?
-  active              Boolean  @default(true)
+  active              Boolean   @default(true)
   createdByUserId     String
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  createdByUser       User     @relation("PayoutConfigurationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdByUser       User      @relation("PayoutConfigurationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([active])
   @@index([createdByUserId])
@@ -903,8 +953,8 @@ model PayoutAssignment {
   beneficiaryUserId   String
   points              Int
   amount              Decimal             @db.Decimal(18, 2)
-  status              PayoutStatus         @default(PENDING)
-  assignedAt          DateTime             @default(now())
+  status              PayoutStatus        @default(PENDING)
+  assignedAt          DateTime            @default(now())
   processedAt         DateTime?
   note                String?
   payoutCycle         PayoutCycle          @relation(fields: [payoutCycleId], references: [id], onDelete: Restrict)
@@ -921,18 +971,18 @@ model PayoutAssignment {
 }
 
 model PayoutTransaction {
-  id                  String            @id @default(cuid())
+  id                  String           @id @default(cuid())
   payoutAssignmentId  String
   payoutOfficerUserId String
-  paymentReference    String            @unique
+  paymentReference    String           @unique
   pointsRedeemed      Int
-  amountPaid          Decimal           @db.Decimal(18, 2)
+  amountPaid          Decimal          @db.Decimal(18, 2)
   status              PayoutStatus
   proofStorageKey     String?
   note                String?
-  createdAt           DateTime          @default(now())
-  payoutAssignment    PayoutAssignment  @relation(fields: [payoutAssignmentId], references: [id], onDelete: Restrict)
-  payoutOfficerUser   User              @relation("PayoutTransactionOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
+  createdAt           DateTime         @default(now())
+  payoutAssignment    PayoutAssignment @relation(fields: [payoutAssignmentId], references: [id], onDelete: Restrict)
+  payoutOfficerUser   User             @relation("PayoutTransactionOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
 
   @@index([payoutAssignmentId])
   @@index([payoutOfficerUserId])
@@ -953,20 +1003,20 @@ model StrengthMetricDefinition {
 }
 
 model StrengthWeightConfiguration {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   metric          String
-  weight          Decimal  @db.Decimal(8, 4)
-  effectiveFrom   DateTime @default(now())
+  weight          Decimal   @db.Decimal(8, 4)
+  effectiveFrom   DateTime  @default(now())
   effectiveUntil  DateTime?
   createdByUserId String
-  createdAt       DateTime @default(now())
-  createdByUser   User     @relation("StrengthWeightCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime  @default(now())
+  createdByUser   User      @relation("StrengthWeightCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([metric, effectiveFrom])
 }
 
 model TerritoryTarget {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   candidateId     String?
   territoryType   String
   territoryId     String
@@ -975,9 +1025,9 @@ model TerritoryTarget {
   startDate       DateTime
   endDate         DateTime?
   createdByUserId String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  createdByUser   User     @relation("TerritoryTargetCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdByUser   User      @relation("TerritoryTargetCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([territoryType, territoryId])
   @@index([metric])
@@ -985,25 +1035,25 @@ model TerritoryTarget {
 }
 
 model TerritoryMetricSnapshot {
-  id             String   @id @default(cuid())
-  territoryType  String
-  territoryId    String
-  metric         String
-  actualValue    Int
-  calculatedAt   DateTime @default(now())
-  metadataJson   Json?
+  id            String   @id @default(cuid())
+  territoryType String
+  territoryId   String
+  metric        String
+  actualValue   Int
+  calculatedAt  DateTime @default(now())
+  metadataJson  Json?
 
   @@index([territoryType, territoryId, metric, calculatedAt], map: "TerritoryMetricSnapshot_scope_metric_time_idx")
 }
 
 model TerritoryStrengthSnapshot {
-  id             String   @id @default(cuid())
-  territoryType  String
-  territoryId    String
-  candidateId    String?
-  score          Decimal  @db.Decimal(8, 4)
-  breakdownJson  Json
-  calculatedAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  territoryType String
+  territoryId   String
+  candidateId   String?
+  score         Decimal  @db.Decimal(8, 4)
+  breakdownJson Json
+  calculatedAt  DateTime @default(now())
 
   @@index([territoryType, territoryId, calculatedAt], map: "TerritoryStrengthSnapshot_scope_time_idx")
   @@index([candidateId])
@@ -1337,6 +1387,7 @@ model Incident {
   escalatedByUser      User?               @relation("IncidentEscalatedBy", fields: [escalatedByUserId], references: [id])
   tasks                FieldTask[]
   mediaAttachments     MediaAttachment[]
+  evidenceAssets       EvidenceAsset[]
 
   @@index([geoPoliticalZoneId])
   @@index([reportedByUserId])
@@ -1530,6 +1581,7 @@ model ElectionDayReport {
   reviewedByUser           User?                    @relation("ElectionDayReportReviewer", fields: [reviewedByUserId], references: [id])
   arrivalPhotoAsset        ElectionDayReportAsset   @relation("ElectionDayReportArrivalPhoto", fields: [arrivalPhotoAssetId], references: [id], onDelete: Restrict)
   postCountingPhotoAsset   ElectionDayReportAsset   @relation("ElectionDayReportPostCountingPhoto", fields: [postCountingPhotoAssetId], references: [id], onDelete: Restrict)
+  evidenceAssets           EvidenceAsset[]
   geoPoliticalZone         GeoPoliticalZone?        @relation(fields: [geoPoliticalZoneId], references: [id])
   state                    State                    @relation(fields: [stateId], references: [id])
   senatorialDistrict       SenatorialDistrict?      @relation(fields: [senatorialDistrictId], references: [id])
@@ -1574,6 +1626,188 @@ model MediaAttachment {
   @@index([createdAt])
 }
 
+model EvidenceAsset {
+  id                    String                 @id @default(cuid())
+  evidenceType          EvidenceType
+  classification        EvidenceClassification @default(OTHER)
+  reviewStatus          EvidenceReviewStatus   @default(SUBMITTED)
+  originalStorageKey    String                 @unique
+  storageBucket         String
+  originalFileName      String
+  mimeType              String
+  fileSize              Int
+  sha256                String
+  capturedAt            DateTime?
+  uploadedAt            DateTime               @default(now())
+  serverReceivedAt      DateTime               @default(now())
+  latitude              Float?
+  longitude             Float?
+  accuracyMeters        Float?
+  metadataJson          Json?
+  derivativesJson       Json?
+  uploaderUserId        String
+  incidentId            String?
+  electionReportId      String?
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  lgaId                 String?
+  wardId                String?
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  uploaderUser          User                   @relation("EvidenceAssetUploader", fields: [uploaderUserId], references: [id], onDelete: Restrict)
+  incident              Incident?              @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  electionReport        ElectionDayReport?     @relation(fields: [electionReportId], references: [id], onDelete: SetNull)
+  geoPoliticalZone      GeoPoliticalZone?      @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                  @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?    @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA?                   @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                  @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?     @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?           @relation(fields: [pollingUnitId], references: [id])
+  custodyEvents         EvidenceCustodyEvent[]
+  caseEvidence          CaseEvidence[]
+  packageItems          EvidencePackageItem[]
+
+  @@index([evidenceType])
+  @@index([classification])
+  @@index([reviewStatus])
+  @@index([uploaderUserId])
+  @@index([sha256])
+  @@index([incidentId])
+  @@index([electionReportId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([stateConstituencyId])
+  @@index([pollingUnitId])
+  @@index([serverReceivedAt])
+}
+
+model EvidenceCustodyEvent {
+  id              String                   @id @default(cuid())
+  evidenceAssetId String
+  actorUserId     String?
+  eventType       EvidenceCustodyEventType
+  metadataJson    Json?
+  createdAt       DateTime                 @default(now())
+  evidenceAsset   EvidenceAsset            @relation(fields: [evidenceAssetId], references: [id], onDelete: Cascade)
+  actorUser       User?                    @relation("EvidenceCustodyActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([evidenceAssetId])
+  @@index([actorUserId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model LegalCase {
+  id                    String               @id @default(cuid())
+  title                 String
+  description           String?
+  status                LegalCaseStatus      @default(OPEN)
+  createdByUserId       String
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  lgaId                 String?
+  wardId                String?
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdByUser         User                 @relation("LegalCaseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA?                 @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
+  evidenceLinks         CaseEvidence[]
+  notes                 LegalCaseNote[]
+  packages              EvidencePackage[]
+
+  @@index([status])
+  @@index([createdByUserId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([stateConstituencyId])
+  @@index([pollingUnitId])
+  @@index([createdAt])
+}
+
+model CaseEvidence {
+  id              String        @id @default(cuid())
+  legalCaseId     String
+  evidenceAssetId String
+  addedByUserId   String
+  note            String?
+  createdAt       DateTime      @default(now())
+  legalCase       LegalCase     @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  evidenceAsset   EvidenceAsset @relation(fields: [evidenceAssetId], references: [id], onDelete: Restrict)
+  addedByUser     User          @relation("CaseEvidenceAdder", fields: [addedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([legalCaseId, evidenceAssetId])
+  @@index([evidenceAssetId])
+  @@index([addedByUserId])
+}
+
+model LegalCaseNote {
+  id           String    @id @default(cuid())
+  legalCaseId  String
+  authorUserId String
+  note         String
+  createdAt    DateTime  @default(now())
+  legalCase    LegalCase @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+  authorUser   User      @relation("LegalCaseNoteAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([legalCaseId])
+  @@index([authorUserId])
+  @@index([createdAt])
+}
+
+model EvidencePackage {
+  id              String                @id @default(cuid())
+  legalCaseId     String?
+  createdByUserId String
+  manifestJson    Json
+  manifestSha256  String
+  itemCount       Int
+  createdAt       DateTime              @default(now())
+  legalCase       LegalCase?            @relation(fields: [legalCaseId], references: [id], onDelete: SetNull)
+  createdByUser   User                  @relation("EvidencePackageCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items           EvidencePackageItem[]
+
+  @@index([legalCaseId])
+  @@index([createdByUserId])
+  @@index([manifestSha256])
+  @@index([createdAt])
+}
+
+model EvidencePackageItem {
+  id                String          @id @default(cuid())
+  evidencePackageId String
+  evidenceAssetId   String
+  manifestEntryJson Json
+  createdAt         DateTime        @default(now())
+  evidencePackage   EvidencePackage @relation(fields: [evidencePackageId], references: [id], onDelete: Cascade)
+  evidenceAsset     EvidenceAsset   @relation(fields: [evidenceAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([evidencePackageId, evidenceAssetId])
+  @@index([evidenceAssetId])
+}
+
 model GeoPoliticalZone {
   id                   String                @id
   name                 String                @unique
@@ -1594,6 +1828,8 @@ model GeoPoliticalZone {
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents       CampaignEvent[]
   electionDayReports   ElectionDayReport[]
+  evidenceAssets       EvidenceAsset[]
+  legalCases           LegalCase[]
 }
 
 model PoliticalParty {
@@ -1616,13 +1852,13 @@ model PoliticalParty {
 }
 
 model State {
-  id                         String                @id
-  name                       String                @unique
+  id                         String                       @id
+  name                       String                       @unique
   geoPoliticalZoneId         String?
   agentsPerPollingUnitTarget Int?
-  createdAt                  DateTime              @default(now())
-  updatedAt                  DateTime              @updatedAt
-  geoPoliticalZone           GeoPoliticalZone?     @relation(fields: [geoPoliticalZoneId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+  geoPoliticalZone           GeoPoliticalZone?            @relation(fields: [geoPoliticalZoneId], references: [id], onDelete: Cascade)
   senatorialDistricts        SenatorialDistrict[]
   federalConstituencies      FederalConstituency[]
   stateConstituencies        StateConstituency[]
@@ -1646,42 +1882,44 @@ model State {
   campaignEvents             CampaignEvent[]
   electionDayReports         ElectionDayReport[]
   referenceImportReleases    ReferenceDataImportRelease[]
+  evidenceAssets             EvidenceAsset[]
+  legalCases                 LegalCase[]
 
   @@index([geoPoliticalZoneId])
 }
 
 model ReferenceDataImportRelease {
-  id                            String                    @id @default(cuid())
-  releaseId                     String                    @unique
-  kind                          ReferenceDataImportKind
-  stateId                       String
-  sourcePublisher               String
-  sourceUrl                     String?
-  sourceDocumentId              String?
-  sourceRetrievedAt             DateTime
-  sourceEffectiveAt             DateTime?
-  approvedBy                    String
-  approvedAt                    DateTime
-  manifestSha256                String
-  territoriesSha256             String?
-  commandRelationshipsSha256    String?
-  lgaMembershipsSha256          String?
-  pollingUnitGeodataSha256      String?
-  declaredCountsJson            Json
-  sourceCodeNamespaces          String[]                  @default([])
-  supersedesReleaseId           String?
-  status                        ReferenceDataImportStatus @default(STAGED)
-  appliedAt                     DateTime?
-  createdAt                     DateTime                  @default(now())
-  updatedAt                     DateTime                  @updatedAt
-  state                         State                     @relation(fields: [stateId], references: [id], onDelete: Restrict)
-  supersedesRelease             ReferenceDataImportRelease? @relation("ReferenceReleaseSupersession", fields: [supersedesReleaseId], references: [releaseId], onDelete: SetNull)
-  supersededBy                  ReferenceDataImportRelease[] @relation("ReferenceReleaseSupersession")
-  lgas                          LGA[]                     @relation("LgaReferenceImportRelease")
-  wards                         Ward[]                    @relation("WardReferenceImportRelease")
-  stateConstituencies           StateConstituency[]       @relation("StateConstituencyReferenceImportRelease")
-  pollingUnits                  PollingUnit[]             @relation("PollingUnitReferenceImportRelease")
-  pollingUnitGeodataRecords     PollingUnit[]             @relation("PollingUnitGeodataImportRelease")
+  id                         String                       @id @default(cuid())
+  releaseId                  String                       @unique
+  kind                       ReferenceDataImportKind
+  stateId                    String
+  sourcePublisher            String
+  sourceUrl                  String?
+  sourceDocumentId           String?
+  sourceRetrievedAt          DateTime
+  sourceEffectiveAt          DateTime?
+  approvedBy                 String
+  approvedAt                 DateTime
+  manifestSha256             String
+  territoriesSha256          String?
+  commandRelationshipsSha256 String?
+  lgaMembershipsSha256       String?
+  pollingUnitGeodataSha256   String?
+  declaredCountsJson         Json
+  sourceCodeNamespaces       String[]                     @default([])
+  supersedesReleaseId        String?
+  status                     ReferenceDataImportStatus    @default(STAGED)
+  appliedAt                  DateTime?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+  state                      State                        @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  supersedesRelease          ReferenceDataImportRelease?  @relation("ReferenceReleaseSupersession", fields: [supersedesReleaseId], references: [releaseId], onDelete: SetNull)
+  supersededBy               ReferenceDataImportRelease[] @relation("ReferenceReleaseSupersession")
+  lgas                       LGA[]                        @relation("LgaReferenceImportRelease")
+  wards                      Ward[]                       @relation("WardReferenceImportRelease")
+  stateConstituencies        StateConstituency[]          @relation("StateConstituencyReferenceImportRelease")
+  pollingUnits               PollingUnit[]                @relation("PollingUnitReferenceImportRelease")
+  pollingUnitGeodataRecords  PollingUnit[]                @relation("PollingUnitGeodataImportRelease")
 
   @@index([kind])
   @@index([stateId])
@@ -1713,6 +1951,8 @@ model SenatorialDistrict {
   voterEngagementTasks  VoterEngagementTask[]
   campaignEvents        CampaignEvent[]
   electionDayReports    ElectionDayReport[]
+  evidenceAssets        EvidenceAsset[]
+  legalCases            LegalCase[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1742,6 +1982,8 @@ model FederalConstituency {
   voterEngagementTasks VoterEngagementTask[]
   campaignEvents       CampaignEvent[]
   electionDayReports   ElectionDayReport[]
+  evidenceAssets       EvidenceAsset[]
+  legalCases           LegalCase[]
 
   @@unique([stateId, name])
   @@index([stateId])
@@ -1749,17 +1991,17 @@ model FederalConstituency {
 }
 
 model LGA {
-  id                             String                   @id
+  id                             String                      @id
   name                           String
   stateId                        String
   sourceCode                     String?
   sourceCodeNamespace            String?
-  sourceNameAliases              String[]                 @default([])
+  sourceNameAliases              String[]                    @default([])
   referenceImportReleaseId       String?
   referenceImportedAt            DateTime?
-  createdAt                      DateTime                 @default(now())
-  updatedAt                      DateTime                 @updatedAt
-  state                          State                    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  createdAt                      DateTime                    @default(now())
+  updatedAt                      DateTime                    @updatedAt
+  state                          State                       @relation(fields: [stateId], references: [id], onDelete: Cascade)
   referenceImportRelease         ReferenceDataImportRelease? @relation("LgaReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
   senatorialDistrictMemberships  SenatorialDistrictLga[]
   federalConstituencyMemberships FederalConstituencyLga[]
@@ -1782,6 +2024,8 @@ model LGA {
   voterEngagementTasks           VoterEngagementTask[]
   campaignEvents                 CampaignEvent[]
   electionDayReports             ElectionDayReport[]
+  evidenceAssets                 EvidenceAsset[]
+  legalCases                     LegalCase[]
 
   @@unique([stateId, name])
   @@unique([stateId, sourceCodeNamespace, sourceCode])
@@ -1790,39 +2034,41 @@ model LGA {
 }
 
 model Ward {
-  id                   String                @id
-  name                 String
-  stateId              String
-  lgaId                String
-  stateConstituencyId  String?
-  sourceCode           String?
-  sourceCodeNamespace  String?
-  sourceNameAliases    String[]              @default([])
+  id                       String                      @id
+  name                     String
+  stateId                  String
+  lgaId                    String
+  stateConstituencyId      String?
+  sourceCode               String?
+  sourceCodeNamespace      String?
+  sourceNameAliases        String[]                    @default([])
   referenceImportReleaseId String?
-  referenceImportedAt  DateTime?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  stateConstituency    StateConstituency?    @relation(fields: [stateConstituencyId], references: [id])
-  referenceImportRelease ReferenceDataImportRelease? @relation("WardReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
-  pollingUnits         PollingUnit[]
-  adminProfiles        AdminProfile[]
-  candidateProfiles    CandidateProfile[]
-  agentProfiles        AgentProfile[]
-  voterProfiles        VoterProfile[]
-  coordinatorProfiles  CoordinatorProfile[]
-  candidates           Candidate[]
-  polls                Poll[]
-  posts                Post[]
-  feedbackItems        Feedback[]
-  agentActivities      AgentActivity[]
-  incidents            Incident[]
-  fieldTasks           FieldTask[]
-  broadcastMessages    BroadcastMessage[]
-  voterEngagementTasks VoterEngagementTask[]
-  campaignEvents       CampaignEvent[]
-  electionDayReports   ElectionDayReport[]
+  referenceImportedAt      DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  state                    State                       @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                      LGA                         @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  stateConstituency        StateConstituency?          @relation(fields: [stateConstituencyId], references: [id])
+  referenceImportRelease   ReferenceDataImportRelease? @relation("WardReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
+  pollingUnits             PollingUnit[]
+  adminProfiles            AdminProfile[]
+  candidateProfiles        CandidateProfile[]
+  agentProfiles            AgentProfile[]
+  voterProfiles            VoterProfile[]
+  coordinatorProfiles      CoordinatorProfile[]
+  candidates               Candidate[]
+  polls                    Poll[]
+  posts                    Post[]
+  feedbackItems            Feedback[]
+  agentActivities          AgentActivity[]
+  incidents                Incident[]
+  fieldTasks               FieldTask[]
+  broadcastMessages        BroadcastMessage[]
+  voterEngagementTasks     VoterEngagementTask[]
+  campaignEvents           CampaignEvent[]
+  electionDayReports       ElectionDayReport[]
+  evidenceAssets           EvidenceAsset[]
+  legalCases               LegalCase[]
 
   @@unique([lgaId, name])
   @@unique([stateId, sourceCodeNamespace, sourceCode])
@@ -1833,37 +2079,39 @@ model Ward {
 }
 
 model StateConstituency {
-  id                    String                 @id
-  name                  String
-  stateId               String
-  lgaId                 String
-  federalConstituencyId String?
-  sourceCode            String?
-  sourceCodeNamespace   String?
-  sourceNameAliases     String[]               @default([])
+  id                       String                      @id
+  name                     String
+  stateId                  String
+  lgaId                    String
+  federalConstituencyId    String?
+  sourceCode               String?
+  sourceCodeNamespace      String?
+  sourceNameAliases        String[]                    @default([])
   referenceImportReleaseId String?
-  referenceImportedAt   DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  state                 State                  @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga                   LGA                    @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  federalConstituency   FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
-  referenceImportRelease ReferenceDataImportRelease? @relation("StateConstituencyReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
-  lgaMemberships        StateConstituencyLga[]
-  adminProfiles         AdminProfile[]
-  candidateProfiles     CandidateProfile[]
-  agentProfiles         AgentProfile[]
-  voterProfiles         VoterProfile[]
-  coordinatorProfiles   CoordinatorProfile[]
-  candidates            Candidate[]
-  wards                 Ward[]
-  polls                 Poll[]
-  posts                 Post[]
-  fieldTasks            FieldTask[]
-  broadcastMessages     BroadcastMessage[]
-  voterEngagementTasks  VoterEngagementTask[]
-  campaignEvents        CampaignEvent[]
-  electionDayReports    ElectionDayReport[]
+  referenceImportedAt      DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  state                    State                       @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                      LGA                         @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  federalConstituency      FederalConstituency?        @relation(fields: [federalConstituencyId], references: [id])
+  referenceImportRelease   ReferenceDataImportRelease? @relation("StateConstituencyReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
+  lgaMemberships           StateConstituencyLga[]
+  adminProfiles            AdminProfile[]
+  candidateProfiles        CandidateProfile[]
+  agentProfiles            AgentProfile[]
+  voterProfiles            VoterProfile[]
+  coordinatorProfiles      CoordinatorProfile[]
+  candidates               Candidate[]
+  wards                    Ward[]
+  polls                    Poll[]
+  posts                    Post[]
+  fieldTasks               FieldTask[]
+  broadcastMessages        BroadcastMessage[]
+  voterEngagementTasks     VoterEngagementTask[]
+  campaignEvents           CampaignEvent[]
+  electionDayReports       ElectionDayReport[]
+  evidenceAssets           EvidenceAsset[]
+  legalCases               LegalCase[]
 
   @@unique([stateId, name])
   @@unique([stateId, sourceCodeNamespace, sourceCode])
@@ -1874,48 +2122,50 @@ model StateConstituency {
 }
 
 model PollingUnit {
-  id                   String                @id
-  name                 String
-  stateId              String
-  lgaId                String
-  wardId               String
-  sourceCode           String?
-  sourceCodeNamespace  String?
-  sourceNameAliases    String[]              @default([])
+  id                       String                      @id
+  name                     String
+  stateId                  String
+  lgaId                    String
+  wardId                   String
+  sourceCode               String?
+  sourceCodeNamespace      String?
+  sourceNameAliases        String[]                    @default([])
   referenceImportReleaseId String?
-  referenceImportedAt  DateTime?
-  latitude             Float?
-  longitude            Float?
-  geoAccuracyMeters    Float?
-  geoCaptureMethod     String?
-  geoCapturedAt        DateTime?
-  geoSource            String?
-  geofenceRadiusMeters Int?
-  geodataImportReleaseId String?
-  geodataImportedAt    DateTime?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  ward                 Ward                  @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  referenceImportRelease ReferenceDataImportRelease? @relation("PollingUnitReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
-  geodataImportRelease ReferenceDataImportRelease? @relation("PollingUnitGeodataImportRelease", fields: [geodataImportReleaseId], references: [id], onDelete: SetNull)
-  adminProfiles        AdminProfile[]
-  candidateProfiles    CandidateProfile[]
-  agentProfiles        AgentProfile[]
-  voterProfiles        VoterProfile[]
-  coordinatorProfiles  CoordinatorProfile[]
-  candidates           Candidate[]
-  polls                Poll[]
-  posts                Post[]
-  feedbackItems        Feedback[]
-  agentActivities      AgentActivity[]
-  incidents            Incident[]
-  fieldTasks           FieldTask[]
-  broadcastMessages    BroadcastMessage[]
-  voterEngagementTasks VoterEngagementTask[]
-  campaignEvents       CampaignEvent[]
-  electionDayReports   ElectionDayReport[]
+  referenceImportedAt      DateTime?
+  latitude                 Float?
+  longitude                Float?
+  geoAccuracyMeters        Float?
+  geoCaptureMethod         String?
+  geoCapturedAt            DateTime?
+  geoSource                String?
+  geofenceRadiusMeters     Int?
+  geodataImportReleaseId   String?
+  geodataImportedAt        DateTime?
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  state                    State                       @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                      LGA                         @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  ward                     Ward                        @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  referenceImportRelease   ReferenceDataImportRelease? @relation("PollingUnitReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
+  geodataImportRelease     ReferenceDataImportRelease? @relation("PollingUnitGeodataImportRelease", fields: [geodataImportReleaseId], references: [id], onDelete: SetNull)
+  adminProfiles            AdminProfile[]
+  candidateProfiles        CandidateProfile[]
+  agentProfiles            AgentProfile[]
+  voterProfiles            VoterProfile[]
+  coordinatorProfiles      CoordinatorProfile[]
+  candidates               Candidate[]
+  polls                    Poll[]
+  posts                    Post[]
+  feedbackItems            Feedback[]
+  agentActivities          AgentActivity[]
+  incidents                Incident[]
+  fieldTasks               FieldTask[]
+  broadcastMessages        BroadcastMessage[]
+  voterEngagementTasks     VoterEngagementTask[]
+  campaignEvents           CampaignEvent[]
+  electionDayReports       ElectionDayReport[]
+  evidenceAssets           EvidenceAsset[]
+  legalCases               LegalCase[]
 
   @@unique([wardId, name])
   @@unique([stateId, sourceCodeNamespace, sourceCode])

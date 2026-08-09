@@ -132,6 +132,19 @@ export const ELECTION_DAY_REALTIME_EVENT_TYPES = [
 
 export const EVIDENCE_TYPES = ["PHOTO", "VIDEO", "WRITTEN_REPORT"] as const;
 
+export const EVIDENCE_CLASSIFICATIONS = [
+  "ARRIVAL",
+  "OPENING",
+  "MATERIALS",
+  "SECURITY",
+  "INCIDENT",
+  "VOTING_PROCESS",
+  "COUNTING",
+  "RESULT_SHEET",
+  "POST_COUNTING",
+  "OTHER",
+] as const;
+
 export const EVIDENCE_REVIEW_STATUSES = [
   "SUBMITTED",
   "UNDER_REVIEW",
@@ -140,6 +153,18 @@ export const EVIDENCE_REVIEW_STATUSES = [
   "REQUIRES_CLARIFICATION",
   "ARCHIVED",
 ] as const;
+
+export const EVIDENCE_CUSTODY_EVENT_TYPES = [
+  "UPLOADED",
+  "VIEWED",
+  "REVIEWED",
+  "CLASSIFIED",
+  "DOWNLOADED",
+  "EXPORTED",
+  "ADDED_TO_CASE",
+] as const;
+
+export const LEGAL_CASE_STATUSES = ["OPEN", "LEGAL_HOLD", "CLOSED"] as const;
 
 export type TargetAuthRole = (typeof TARGET_AUTH_ROLES)[number];
 export type TargetAccountStatus = (typeof TARGET_ACCOUNT_STATUSES)[number];
@@ -158,7 +183,10 @@ export type ElectionDayAlertType = (typeof ELECTION_DAY_ALERT_TYPES)[number];
 export type ElectionDayAlertStatus = (typeof ELECTION_DAY_ALERT_STATUSES)[number];
 export type ElectionDayRealtimeEventType = (typeof ELECTION_DAY_REALTIME_EVENT_TYPES)[number];
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+export type EvidenceClassification = (typeof EVIDENCE_CLASSIFICATIONS)[number];
 export type EvidenceReviewStatus = (typeof EVIDENCE_REVIEW_STATUSES)[number];
+export type EvidenceCustodyEventType = (typeof EVIDENCE_CUSTODY_EVENT_TYPES)[number];
+export type LegalCaseStatus = (typeof LEGAL_CASE_STATUSES)[number];
 
 export type OperationalTerritory = {
   stateId: string;
