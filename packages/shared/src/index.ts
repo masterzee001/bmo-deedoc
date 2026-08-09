@@ -105,6 +105,7 @@ export {
   NIGERIA_STATE_EXPECTED_LGA_COUNTS,
   NIGERIA_STATE_REFERENCE,
 } from "./nigeria-reference-data";
+export * from "./ogun-reference-contracts";
 
 export const FIELD_TASK_STATUSES = [
   "TODO",

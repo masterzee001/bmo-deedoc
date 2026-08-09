@@ -35,6 +35,17 @@ enum CoordinatorLevel {
   POLLING_UNIT
 }
 
+enum ReferenceDataImportKind {
+  OGUN_IDENTITY
+  OGUN_POLLING_UNIT_GEODATA
+}
+
+enum ReferenceDataImportStatus {
+  STAGED
+  APPLIED
+  REJECTED
+}
+
 enum AdminLevel {
   NATIONAL
   GEO_POLITICAL_ZONE
@@ -1216,8 +1227,48 @@ model State {
   voterEngagementTasks       VoterEngagementTask[]
   campaignEvents             CampaignEvent[]
   electionDayReports         ElectionDayReport[]
+  referenceImportReleases    ReferenceDataImportRelease[]
 
   @@index([geoPoliticalZoneId])
+}
+
+model ReferenceDataImportRelease {
+  id                            String                    @id @default(cuid())
+  releaseId                     String                    @unique
+  kind                          ReferenceDataImportKind
+  stateId                       String
+  sourcePublisher               String
+  sourceUrl                     String?
+  sourceDocumentId              String?
+  sourceRetrievedAt             DateTime
+  sourceEffectiveAt             DateTime?
+  approvedBy                    String
+  approvedAt                    DateTime
+  manifestSha256                String
+  territoriesSha256             String?
+  commandRelationshipsSha256    String?
+  lgaMembershipsSha256          String?
+  pollingUnitGeodataSha256      String?
+  declaredCountsJson            Json
+  sourceCodeNamespaces          String[]                  @default([])
+  supersedesReleaseId           String?
+  status                        ReferenceDataImportStatus @default(STAGED)
+  appliedAt                     DateTime?
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
+  state                         State                     @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  supersedesRelease             ReferenceDataImportRelease? @relation("ReferenceReleaseSupersession", fields: [supersedesReleaseId], references: [releaseId], onDelete: SetNull)
+  supersededBy                  ReferenceDataImportRelease[] @relation("ReferenceReleaseSupersession")
+  lgas                          LGA[]                     @relation("LgaReferenceImportRelease")
+  wards                         Ward[]                    @relation("WardReferenceImportRelease")
+  stateConstituencies           StateConstituency[]       @relation("StateConstituencyReferenceImportRelease")
+  pollingUnits                  PollingUnit[]             @relation("PollingUnitReferenceImportRelease")
+  pollingUnitGeodataRecords     PollingUnit[]             @relation("PollingUnitGeodataImportRelease")
+
+  @@index([kind])
+  @@index([stateId])
+  @@index([status])
+  @@index([supersedesReleaseId])
 }
 
 model SenatorialDistrict {
@@ -1283,9 +1334,15 @@ model LGA {
   id                             String                   @id
   name                           String
   stateId                        String
+  sourceCode                     String?
+  sourceCodeNamespace            String?
+  sourceNameAliases              String[]                 @default([])
+  referenceImportReleaseId       String?
+  referenceImportedAt            DateTime?
   createdAt                      DateTime                 @default(now())
   updatedAt                      DateTime                 @updatedAt
   state                          State                    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  referenceImportRelease         ReferenceDataImportRelease? @relation("LgaReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
   senatorialDistrictMemberships  SenatorialDistrictLga[]
   federalConstituencyMemberships FederalConstituencyLga[]
   stateConstituencyMemberships   StateConstituencyLga[]
@@ -1309,7 +1366,9 @@ model LGA {
   electionDayReports             ElectionDayReport[]
 
   @@unique([stateId, name])
+  @@unique([stateId, sourceCodeNamespace, sourceCode])
   @@index([stateId])
+  @@index([referenceImportReleaseId])
 }
 
 model Ward {
@@ -1318,11 +1377,17 @@ model Ward {
   stateId              String
   lgaId                String
   stateConstituencyId  String?
+  sourceCode           String?
+  sourceCodeNamespace  String?
+  sourceNameAliases    String[]              @default([])
+  referenceImportReleaseId String?
+  referenceImportedAt  DateTime?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
   lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
   stateConstituency    StateConstituency?    @relation(fields: [stateConstituencyId], references: [id])
+  referenceImportRelease ReferenceDataImportRelease? @relation("WardReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
   pollingUnits         PollingUnit[]
   adminProfiles        AdminProfile[]
   candidateProfiles    CandidateProfile[]
@@ -1342,9 +1407,11 @@ model Ward {
   electionDayReports   ElectionDayReport[]
 
   @@unique([lgaId, name])
+  @@unique([stateId, sourceCodeNamespace, sourceCode])
   @@index([stateId])
   @@index([lgaId])
   @@index([stateConstituencyId])
+  @@index([referenceImportReleaseId])
 }
 
 model StateConstituency {
@@ -1353,11 +1420,17 @@ model StateConstituency {
   stateId               String
   lgaId                 String
   federalConstituencyId String?
+  sourceCode            String?
+  sourceCodeNamespace   String?
+  sourceNameAliases     String[]               @default([])
+  referenceImportReleaseId String?
+  referenceImportedAt   DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   state                 State                  @relation(fields: [stateId], references: [id], onDelete: Cascade)
   lga                   LGA                    @relation(fields: [lgaId], references: [id], onDelete: Cascade)
   federalConstituency   FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
+  referenceImportRelease ReferenceDataImportRelease? @relation("StateConstituencyReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
   lgaMemberships        StateConstituencyLga[]
   adminProfiles         AdminProfile[]
   candidateProfiles     CandidateProfile[]
@@ -1375,9 +1448,11 @@ model StateConstituency {
   electionDayReports    ElectionDayReport[]
 
   @@unique([stateId, name])
+  @@unique([stateId, sourceCodeNamespace, sourceCode])
   @@index([stateId])
   @@index([lgaId])
   @@index([federalConstituencyId])
+  @@index([referenceImportReleaseId])
 }
 
 model PollingUnit {
@@ -1386,11 +1461,27 @@ model PollingUnit {
   stateId              String
   lgaId                String
   wardId               String
+  sourceCode           String?
+  sourceCodeNamespace  String?
+  sourceNameAliases    String[]              @default([])
+  referenceImportReleaseId String?
+  referenceImportedAt  DateTime?
+  latitude             Float?
+  longitude            Float?
+  geoAccuracyMeters    Float?
+  geoCaptureMethod     String?
+  geoCapturedAt        DateTime?
+  geoSource            String?
+  geofenceRadiusMeters Int?
+  geodataImportReleaseId String?
+  geodataImportedAt    DateTime?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
   lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
   ward                 Ward                  @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  referenceImportRelease ReferenceDataImportRelease? @relation("PollingUnitReferenceImportRelease", fields: [referenceImportReleaseId], references: [id], onDelete: SetNull)
+  geodataImportRelease ReferenceDataImportRelease? @relation("PollingUnitGeodataImportRelease", fields: [geodataImportReleaseId], references: [id], onDelete: SetNull)
   adminProfiles        AdminProfile[]
   candidateProfiles    CandidateProfile[]
   agentProfiles        AgentProfile[]
@@ -1409,9 +1500,12 @@ model PollingUnit {
   electionDayReports   ElectionDayReport[]
 
   @@unique([wardId, name])
+  @@unique([stateId, sourceCodeNamespace, sourceCode])
   @@index([stateId])
   @@index([lgaId])
   @@index([wardId])
+  @@index([referenceImportReleaseId])
+  @@index([geodataImportReleaseId])
 }
 
 model SenatorialDistrictLga {

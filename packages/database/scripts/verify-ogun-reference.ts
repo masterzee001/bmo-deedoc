@@ -1,23 +1,27 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
+import { OGUN_IDENTITY_REQUIRED_COUNTS, OGUN_STATE_ID } from "@pics-nigeria/shared";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
 
 const prisma = new PrismaClient();
+const prismaAny = prisma as any;
 const allowIncomplete = process.argv.includes("--allow-incomplete");
+const requireGeodata = process.argv.includes("--require-geodata");
 
 const expected = {
-  stateId: "ng-state-ogun",
+  stateId: OGUN_STATE_ID,
   senatorialDistricts: 3,
   federalConstituencies: 9,
-  stateConstituencies: 26,
-  lgas: 20,
+  stateConstituencies: OGUN_IDENTITY_REQUIRED_COUNTS.stateConstituencies,
+  lgas: OGUN_IDENTITY_REQUIRED_COUNTS.lgas,
 };
 
 async function main() {
   const identityBlockers: string[] = [];
+  const provenanceBlockers: string[] = [];
   const geodataBlockers: string[] = [];
   const failures: string[] = [];
   const ogunById = await prisma.state.findUnique({ where: { id: expected.stateId }, select: { id: true, name: true } });
@@ -43,18 +47,27 @@ async function main() {
       select: {
         id: true,
         stateId: true,
+        sourceCode: true,
+        sourceCodeNamespace: true,
+        referenceImportReleaseId: true,
         federalConstituencyId: true,
         lga: { select: { stateId: true } },
         federalConstituency: { select: { stateId: true } },
       },
     }),
-    prisma.lGA.findMany({ where: { stateId: ogun.id }, select: { id: true, stateId: true } }),
+    prisma.lGA.findMany({
+      where: { stateId: ogun.id },
+      select: { id: true, stateId: true, sourceCode: true, sourceCodeNamespace: true, referenceImportReleaseId: true },
+    }),
     prisma.ward.findMany({
       where: { stateId: ogun.id },
       select: {
         id: true,
         stateId: true,
         lgaId: true,
+        sourceCode: true,
+        sourceCodeNamespace: true,
+        referenceImportReleaseId: true,
         stateConstituencyId: true,
         lga: { select: { stateId: true } },
         stateConstituency: { select: { stateId: true } },
@@ -67,6 +80,17 @@ async function main() {
         stateId: true,
         lgaId: true,
         wardId: true,
+        sourceCode: true,
+        sourceCodeNamespace: true,
+        referenceImportReleaseId: true,
+        latitude: true,
+        longitude: true,
+        geoAccuracyMeters: true,
+        geoCaptureMethod: true,
+        geoCapturedAt: true,
+        geoSource: true,
+        geofenceRadiusMeters: true,
+        geodataImportReleaseId: true,
         lga: { select: { stateId: true } },
         ward: { select: { stateId: true, lgaId: true, stateConstituencyId: true } },
       },
@@ -147,8 +171,47 @@ async function main() {
     );
   }
 
-  identityBlockers.push("Polling Unit identity records do not yet store authoritative source codes and provenance.");
-  geodataBlockers.push("Polling Unit coordinates, accuracy, capture date, and approved geofence policy are not yet available.");
+  const appliedIdentityReleases = await prismaAny.referenceDataImportRelease.count({
+    where: { stateId: ogun.id, kind: "OGUN_IDENTITY", status: "APPLIED" },
+  });
+  const appliedGeodataReleases = await prismaAny.referenceDataImportRelease.count({
+    where: { stateId: ogun.id, kind: "OGUN_POLLING_UNIT_GEODATA", status: "APPLIED" },
+  });
+  const provenanceMissing = [
+    ...stateConstituencies.map((item) => ({ kind: "State Constituency", ...item })),
+    ...lgas.map((item) => ({ kind: "LGA", ...item })),
+    ...wards.map((item) => ({ kind: "Ward", ...item })),
+    ...pollingUnits.map((item) => ({ kind: "Polling Unit", ...item })),
+  ].filter((item) => !item.sourceCode || !item.sourceCodeNamespace || !item.referenceImportReleaseId);
+
+  if (appliedIdentityReleases === 0) {
+    provenanceBlockers.push("No applied Ogun identity import release is recorded.");
+  }
+  if (provenanceMissing.length > 0) {
+    provenanceBlockers.push(
+      `Ogun lower-level identity provenance is incomplete: records_missing_source_or_release=${provenanceMissing.length}.`,
+    );
+  }
+
+  const pollingUnitsMissingGeodata = pollingUnits.filter(
+    (item) =>
+      item.latitude === null ||
+      item.longitude === null ||
+      item.geoAccuracyMeters === null ||
+      !item.geoCaptureMethod ||
+      !item.geoCapturedAt ||
+      !item.geoSource ||
+      item.geofenceRadiusMeters === null ||
+      !item.geodataImportReleaseId,
+  ).length;
+  if (appliedGeodataReleases === 0) {
+    geodataBlockers.push("No applied Ogun Polling Unit geodata import release is recorded.");
+  }
+  if (pollingUnits.length === 0 || pollingUnitsMissingGeodata > 0) {
+    geodataBlockers.push(
+      `Polling Unit geodata is incomplete: polling_units=${pollingUnits.length}, missing_geodata=${pollingUnitsMissingGeodata}.`,
+    );
+  }
 
   console.log("Ogun reference verification");
   console.log(`state_id=${ogun.id}`);
@@ -162,9 +225,16 @@ async function main() {
   console.log(`wards_without_polling_units=${wardsWithoutPollingUnits}`);
   console.log(`state_constituencies_without_federal_parent=${stateConstituenciesWithoutFederal}`);
   console.log(`wards_without_state_constituency_parent=${wardsWithoutStateConstituency}`);
+  console.log(`applied_identity_releases=${appliedIdentityReleases}`);
+  console.log(`applied_geodata_releases=${appliedGeodataReleases}`);
+  console.log(`records_missing_source_or_release=${provenanceMissing.length}`);
+  console.log(`polling_units_missing_geodata=${pollingUnitsMissingGeodata}`);
 
   for (const blocker of identityBlockers) {
-    console.warn(`BLOCKER ${blocker}`);
+    console.warn(`BLOCKER [IDENTITY] ${blocker}`);
+  }
+  for (const blocker of provenanceBlockers) {
+    console.warn(`BLOCKER [PROVENANCE] ${blocker}`);
   }
   for (const blocker of geodataBlockers) {
     console.warn(`GEODATA_BLOCKER ${blocker}`);
@@ -174,12 +244,22 @@ async function main() {
     console.error(`FAIL ${failure}`);
   }
 
-  if (failures.length > 0 || (!allowIncomplete && identityBlockers.length > 0)) {
+  if (
+    failures.length > 0 ||
+    (!allowIncomplete && (identityBlockers.length > 0 || provenanceBlockers.length > 0)) ||
+    (requireGeodata && geodataBlockers.length > 0)
+  ) {
     process.exitCode = 1;
     return;
   }
 
-  console.log(`ogun_reference_status=${identityBlockers.length > 0 ? "structurally_valid_but_incomplete" : "identity_complete"}`);
+  console.log(`ogun_identity_status=${identityBlockers.length > 0 ? "incomplete" : "complete"}`);
+  console.log(`ogun_provenance_status=${provenanceBlockers.length > 0 ? "incomplete" : "complete"}`);
+  console.log(
+    `ogun_reference_status=${
+      identityBlockers.length > 0 || provenanceBlockers.length > 0 ? "structurally_valid_but_incomplete" : "identity_complete"
+    }`,
+  );
   console.log(`polling_unit_geodata_status=${geodataBlockers.length > 0 ? "not_ready" : "ready"}`);
 }
 

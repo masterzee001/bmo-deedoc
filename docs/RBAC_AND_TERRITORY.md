@@ -123,4 +123,6 @@ Frontend code displays shared contracts and never becomes an authorization sourc
 
 ## Ogun Data Verification
 
-`npm run verify:reference:ogun` is the strict gate. The disposable database confirms the canonical Ogun state, 3 Senatorial Districts, and 9 Federal Constituencies. Phase 1 schema supports direct State-Constituency-to-Federal and Ward-to-State-Constituency command links, but the verifier still blocks because approved lower-level records and mappings are not loaded. No missing record may be manufactured to satisfy the gate.
+`npm run verify:reference:ogun` is the strict identity/provenance gate. The disposable database confirms the canonical Ogun state, 3 Senatorial Districts, and 9 Federal Constituencies. Phase 1 schema supports direct State-Constituency-to-Federal and Ward-to-State-Constituency command links, but the verifier still blocks because approved lower-level records, command mappings, source codes, and import-release provenance are not loaded. No missing record may be manufactured to satisfy the gate.
+
+Polling Unit geodata is a separate target-only gate. `npm run verify:reference:ogun --workspace @pics-nigeria/database -- --require-geodata` must pass before Election Day GPS/geofence behavior depends on coordinates, accuracy, capture metadata, or geofence radius. Missing geodata must not be used to block Pre-Election identity/RBAC integration once the identity/provenance gate is complete.

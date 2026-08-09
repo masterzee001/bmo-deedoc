@@ -9,6 +9,10 @@
     {
       "name": "20260809010000_phase1_role_territory_foundation",
       "sha256": "8a1e5ee41d5f757826b4f93de85b4ebac81a84d0d570df71d68d69e1109a0e89"
+    },
+    {
+      "name": "20260809020000_ogun_reference_import_contract",
+      "sha256": "2b4cbefcd46b92d39dcca274c433a6bd953c165a6cab82ce6c067746bc002ad4"
     }
   ]
 }
