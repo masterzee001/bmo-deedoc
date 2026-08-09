@@ -1,4 +1,10 @@
-# Implementation Audit
+# Legacy PICS Reference: Implementation Audit
+
+## Legacy Status
+This document is archived as a legacy PICS reference document.
+
+It captures a prior implementation audit snapshot and should be read as historical reference, not the canonical current technical document.
+Use `docs/TECHNICAL.md` for current architecture and implementation status.
 
 ## Scope Of This Audit
 This note captures the current production-safe implementation before additional changes. It is intended to identify what already exists, what can be extended safely, what should not be disturbed, and which requested improvements likely need no schema change versus minimal additive schema change.

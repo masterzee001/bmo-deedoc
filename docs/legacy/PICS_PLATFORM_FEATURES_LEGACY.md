@@ -1,4 +1,10 @@
-# PICS Nigeria Product Capability Guide
+# Legacy PICS Reference: Product Capability Guide
+
+## Legacy Status
+This document is archived as a legacy PICS reference document.
+
+It reflects an earlier capability narrative and may mix current implementation with target-state language.
+Use `docs/TECHNICAL.md` for the current technical source of truth.
 
 ## What The Platform Does
 PICS Nigeria is a territory-governed political operations platform for party structures, campaign leadership, field administrators, candidates, agents, and supporters. It supports controlled user management, party-aligned operations, field tasking, live agent visibility, campaign communication, supporter engagement, rewards, audit-friendly administration, and operational incident review.
