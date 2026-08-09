@@ -20,13 +20,14 @@ export default function AdminLoginPage() {
     try {
       const data = await loginUser(email, password);
 
-      if (data.user.role !== "ADMIN" && data.user.role !== "SUPER_ADMIN") {
-        setError("This login page is for admins only.");
+      const hasCommandAccess = ["ADMIN", "SUPER_ADMIN", "STATE_OFFICER", "COORDINATOR"].includes(data.user.role);
+      if (!hasCommandAccess) {
+        setError("This login page is for authorized command users only.");
         return;
       }
 
       localStorage.setItem("picsNigeriaAdminToken", data.token);
-      router.push("/admin/dashboard");
+      router.push(data.user.role === "ADMIN" || data.user.role === "SUPER_ADMIN" ? "/admin/dashboard" : "/platform");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Login failed.");
     } finally {

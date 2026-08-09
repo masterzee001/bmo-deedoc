@@ -220,11 +220,13 @@ async function main() {
         upsert: {
           update: {
             adminLevel: "STATE",
+            politicalPartyId: sampleParty.id,
             geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
             stateId: territorySeed.state.id,
           },
           create: {
             adminLevel: "STATE",
+            politicalPartyId: sampleParty.id,
             geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
             stateId: territorySeed.state.id,
           },
@@ -239,6 +241,7 @@ async function main() {
       adminProfile: {
         create: {
           adminLevel: "STATE",
+          politicalPartyId: sampleParty.id,
           geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
           stateId: territorySeed.state.id,
         },

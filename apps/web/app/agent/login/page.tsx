@@ -58,8 +58,11 @@ export default function AgentLoginPage() {
       await verifyGpsAccess();
       const data = await loginUser(email, password, { agentGpsConsent: gpsConsent });
 
-      if (data.user.role !== "AGENT") {
-        setError("This login page is for agents only.");
+      const hasPollingUnitFieldAccess =
+        data.user.role === "AGENT" ||
+        (data.user.role === "COORDINATOR" && data.user.coordinatorProfile?.level === "POLLING_UNIT" && data.user.agentProfile);
+      if (!hasPollingUnitFieldAccess) {
+        setError("This login page is for Polling Unit field coordinators only.");
         return;
       }
 

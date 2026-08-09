@@ -195,47 +195,6 @@ async function ensureState(prisma: PrismaClient, stateName: string) {
   });
 }
 
-async function ensureLga(prisma: PrismaClient, stateId: string, lgaName: string) {
-  const existing = await prisma.lGA.findFirst({
-    where: {
-      stateId,
-      name: { equals: lgaName, mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-
-  if (existing) {
-    return existing;
-  }
-
-  const baseId = `bootstrap-lga-${stateId}-${lgaName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
-  let nextId = baseId;
-  let suffix = 2;
-
-  for (;;) {
-    const existingById = await prisma.lGA.findUnique({
-      where: { id: nextId },
-      select: { id: true },
-    });
-
-    if (!existingById) {
-      break;
-    }
-
-    nextId = `${baseId}-${suffix}`;
-    suffix += 1;
-  }
-
-  return prisma.lGA.create({
-    data: {
-      id: nextId,
-      stateId,
-      name: lgaName,
-    },
-    select: { id: true, name: true },
-  });
-}
-
 function pickPrimaryLga(
   constituencyName: string,
   composition: string,
@@ -253,7 +212,7 @@ function pickPrimaryLga(
     return matched[0];
   }
 
-  return availableLgas[0] || null;
+  return null;
 }
 
 function resolveMembershipLgas(
@@ -263,12 +222,7 @@ function resolveMembershipLgas(
   const normalizedMembershipNames = lgaNames.map((name) => normalizeName(name));
   const matched = availableLgas.filter((lga) => {
     const normalizedLga = normalizeName(lga.name);
-    return normalizedMembershipNames.some(
-      (candidate) =>
-        candidate === normalizedLga ||
-        candidate.includes(normalizedLga) ||
-        normalizedLga.includes(candidate),
-    );
+    return normalizedMembershipNames.some((candidate) => candidate === normalizedLga);
   });
 
   const uniqueMatched = new Map(matched.map((lga) => [lga.id, lga]));
@@ -287,9 +241,6 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     }
 
     const lgaNames = splitCompositionIntoLgaNames(row.composition);
-    for (const lgaName of lgaNames) {
-      await ensureLga(prisma, state.id, lgaName);
-    }
     const availableLgas = await prisma.lGA.findMany({
       where: { stateId: state.id },
       orderBy: { name: "asc" },
@@ -361,9 +312,6 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     }
 
     const federalLgaNames = splitCompositionIntoLgaNames(row.composition);
-    for (const lgaName of federalLgaNames) {
-      await ensureLga(prisma, state.id, lgaName);
-    }
     const availableLgas = await prisma.lGA.findMany({
       where: { stateId: state.id },
       orderBy: { name: "asc" },
@@ -450,20 +398,9 @@ export async function ensureNationalConstituencyReference(prisma: PrismaClient) 
     });
 
     const compositionLgaNames = splitCompositionIntoLgaNames(row.composition);
-    for (const lgaName of compositionLgaNames) {
-      await ensureLga(prisma, state.id, lgaName);
-    }
+    const memberLgas = resolveMembershipLgas(compositionLgaNames, stateLgas);
 
-    const refreshedStateLgas = compositionLgaNames.length > 0
-      ? await prisma.lGA.findMany({
-          where: { stateId: state.id },
-          orderBy: { name: "asc" },
-          select: { id: true, name: true },
-        })
-      : stateLgas;
-    const memberLgas = resolveMembershipLgas(compositionLgaNames, refreshedStateLgas);
-
-    const primaryLga = pickPrimaryLga(row.name, row.composition, refreshedStateLgas);
+    const primaryLga = pickPrimaryLga(row.name, row.composition, stateLgas);
     if (!primaryLga) {
       continue;
     }

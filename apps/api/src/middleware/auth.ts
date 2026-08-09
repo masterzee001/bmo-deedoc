@@ -35,11 +35,15 @@ export async function requireAuth(request: Request, response: Response, next: Ne
       return response.status(401).json({ message: "User not found." });
     }
 
-    if (!user.isActive) {
+    if (user.accountStatus === "SUSPENDED") {
+      return response.status(403).json({ message: "This account has been suspended." });
+    }
+
+    if (!user.isActive || user.accountStatus === "INACTIVE") {
       return response.status(403).json({ message: "This account has been deactivated." });
     }
 
-    if (user.role === "AGENT") {
+    if (user.agentProfile) {
       const agentProfile = await prisma.agentProfile.findUnique({
         where: { userId: user.id },
         select: { activeSessionNonce: true },
@@ -69,4 +73,23 @@ export function requireRole(...roles: UserRole[]) {
 
     return next();
   };
+}
+
+export function requireMemberCapability(request: Request, response: Response, next: NextFunction) {
+  const user = request.authUser;
+  if (!user || (user.role !== "VOTER" && user.role !== "MEMBER") || !user.voterProfile) {
+    return response.status(403).json({ message: "Member profile access is required." });
+  }
+  return next();
+}
+
+export function requirePollingUnitFieldCapability(request: Request, response: Response, next: NextFunction) {
+  const user = request.authUser;
+  const isLegacyAgent = user?.role === "AGENT";
+  const isMigratedPollingUnitCoordinator =
+    user?.role === "COORDINATOR" && user.coordinatorProfile?.level === "POLLING_UNIT";
+  if (!user || (!isLegacyAgent && !isMigratedPollingUnitCoordinator) || !user.agentProfile) {
+    return response.status(403).json({ message: "Polling Unit field operations access is required." });
+  }
+  return next();
 }

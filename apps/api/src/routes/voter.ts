@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { CampaignEventRsvpStatus, IncidentSeverity, IncidentStatus, IncidentType, NotificationType, RewardRedemptionStatus, RewardType } from "@prisma/client";
 import { z } from "zod";
 import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requireMemberCapability } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
@@ -215,7 +215,7 @@ async function resolveEngagementProgress(voterUserId: string, task: {
   return 0;
 }
 
-router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/rewards", requireAuth, requireMemberCapability, async (request, response) => {
   const voterUserId = request.authUser?.id;
 
   const [recentRewards, groupedRewards, recentRedemptions] = await Promise.all([
@@ -277,7 +277,7 @@ router.get("/rewards", requireAuth, requireRole("VOTER"), async (request, respon
   });
 });
 
-router.get("/reward-ledger", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/reward-ledger", requireAuth, requireMemberCapability, async (request, response) => {
   const voterUserId = request.authUser!.id;
   const [ledgerEntries, redemptions] = await Promise.all([
     prisma.rewardLedger.findMany({
@@ -316,7 +316,7 @@ router.get("/reward-ledger", requireAuth, requireRole("VOTER"), async (request, 
   });
 });
 
-router.post("/redemptions", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/redemptions", requireAuth, requireMemberCapability, async (request, response) => {
   const parsed = redemptionSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid redemption payload.", errors: parsed.error.flatten() });
@@ -358,7 +358,7 @@ router.post("/redemptions", requireAuth, requireRole("VOTER"), async (request, r
   });
 });
 
-router.get("/redemptions", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/redemptions", requireAuth, requireMemberCapability, async (request, response) => {
   const [redemptions, balance] = await Promise.all([
     prisma.rewardRedemption.findMany({
       where: { voterUserId: request.authUser!.id },
@@ -373,7 +373,7 @@ router.get("/redemptions", requireAuth, requireRole("VOTER"), async (request, re
   });
 });
 
-router.get("/polls", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/polls", requireAuth, requireMemberCapability, async (request, response) => {
   const voterProfile = request.authUser?.voterProfile;
   const polls = await prisma.poll.findMany({
     where: { isActive: true },
@@ -418,7 +418,7 @@ router.get("/polls", requireAuth, requireRole("VOTER"), async (request, response
   });
 });
 
-router.get("/events", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/events", requireAuth, requireMemberCapability, async (request, response) => {
   const voterProfile = request.authUser?.voterProfile;
   if (!voterProfile) {
     return response.json({ events: [] });
@@ -452,7 +452,7 @@ router.get("/events", requireAuth, requireRole("VOTER"), async (request, respons
   });
 });
 
-router.get("/engagement-tasks", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/engagement-tasks", requireAuth, requireMemberCapability, async (request, response) => {
   const voterProfile = request.authUser?.voterProfile;
 
   if (!voterProfile) {
@@ -495,7 +495,7 @@ router.get("/engagement-tasks", requireAuth, requireRole("VOTER"), async (reques
   return response.json({ tasks: taskItems });
 });
 
-router.post("/engagement-tasks/:taskId/claim", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/engagement-tasks/:taskId/claim", requireAuth, requireMemberCapability, async (request, response) => {
   const taskId = readRouteId(response, request.params.taskId, "task id");
   if (!taskId) {
     return;
@@ -554,7 +554,7 @@ router.post("/engagement-tasks/:taskId/claim", requireAuth, requireRole("VOTER")
   });
 });
 
-router.post("/events/:eventId/rsvp", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/events/:eventId/rsvp", requireAuth, requireMemberCapability, async (request, response) => {
   const parsed = campaignEventRsvpSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid campaign event RSVP payload.", errors: parsed.error.flatten() });
@@ -632,7 +632,7 @@ router.post("/events/:eventId/rsvp", requireAuth, requireRole("VOTER"), async (r
   });
 });
 
-router.post("/polls/:pollId/respond", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/polls/:pollId/respond", requireAuth, requireMemberCapability, async (request, response) => {
   const parsed = pollResponseSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid poll response payload.", errors: parsed.error.flatten() });
@@ -692,7 +692,7 @@ router.post("/polls/:pollId/respond", requireAuth, requireRole("VOTER"), async (
   return response.status(201).json({ message: "Poll response submitted successfully." });
 });
 
-router.get("/posts", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.get("/posts", requireAuth, requireMemberCapability, async (request, response) => {
   const voterProfile = request.authUser?.voterProfile;
   const posts = await prisma.post.findMany({
     where: { isPublished: true },
@@ -737,7 +737,7 @@ router.get("/posts", requireAuth, requireRole("VOTER"), async (request, response
   });
 });
 
-router.post("/feedback", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/feedback", requireAuth, requireMemberCapability, async (request, response) => {
   const parsed = feedbackSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid feedback payload.", errors: parsed.error.flatten() });
@@ -779,7 +779,7 @@ router.post("/feedback", requireAuth, requireRole("VOTER"), async (request, resp
   });
 });
 
-router.post("/incidents", requireAuth, requireRole("VOTER"), async (request, response) => {
+router.post("/incidents", requireAuth, requireMemberCapability, async (request, response) => {
   const parsed = incidentSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid incident payload.", errors: parsed.error.flatten() });

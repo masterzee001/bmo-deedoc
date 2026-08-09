@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-08-09",
+  "policy": "Legacy migrations are retained for forensic and deployed-history reconciliation only. The Ogun stream must not replay them.",
+  "migrations": [
+    { "name": "0001_init", "dialect": "sqlite", "sha256": "19b12bb1e6a69d0502fdd1a806792e9c31571e94d0dbe261d8bead2bf73bd662" },
+    { "name": "20260310182252_add_geopolitical_zone_and_party", "dialect": "sqlite", "sha256": "b76b5ea0c57c58c6484e9494003dd6935dd2a03f5a646d940a598fc695aade37" },
+    { "name": "20260311104849_add_constituency_scope_to_voters_and_agents", "dialect": "sqlite", "sha256": "c1925ea71656434b07e99ac9eeb6ab7ba4225201c4a6e7905d56085c4bc02d9b" },
+    { "name": "20260312143840_init", "dialect": "sqlite", "sha256": "c897eaebf61cce4462d378f4c0bc03ccd9d5efc0da0e28b5f96257498f560297" },
+    { "name": "20260312150455_init", "dialect": "sqlite", "sha256": "2f57b066c393276d55a91cbcea0075074e88225ec72a2f8cd61a4140a08ffe26" },
+    { "name": "20260313121500_add_polling_unit_to_voter_profile", "dialect": "postgresql-compatible", "sha256": "bae3bcb421d1e2a640b365c58915ba6e374c7d3854072ca37addea527e83fd90" },
+    { "name": "20260313183000_add_voter_contact_consent", "dialect": "postgresql", "sha256": "00d8638a39a5ee77beb258b65d0fda1fd10845ed49e2856d63409bb6b1309620" },
+    { "name": "20260313213000_add_voter_engagement_tasks", "dialect": "postgresql", "sha256": "7f883ddfa5574b71e2437ab6050477237131d3339cd188e7d9825a920c15c58f" },
+    { "name": "20260313234500_add_candidate_public_profiles_and_media", "dialect": "postgresql", "sha256": "8252d02cfead426f7e4842eb390a52192a2ed61e9a80573ab94473ed42e82ad5" },
+    { "name": "20260314001000_add_campaign_events", "dialect": "postgresql", "sha256": "4ca5077b3655e1b69d2e53c5c0220154dae8d4ae606bd3ca8ddf1a2ecb778dce" },
+    { "name": "20260314013000_extend_political_parties_for_public_profiles", "dialect": "postgresql", "sha256": "2ee2dfe4875afe0fb82e49f2fd11bb9c5aacbcee6bfd7b1ade233986528a4548" },
+    { "name": "20260314023000_add_candidate_media_assets", "dialect": "postgresql", "sha256": "d510d8529c626a25f0289b64cd655d4174bda04b8af96bad8bfa6cdb526dd566" },
+    { "name": "20260314130000_add_party_links_to_admins_and_agents", "dialect": "postgresql-compatible", "sha256": "3088364264b3d8eeeded2456d173cd5a7d0c62de2cfd4e9dbb6f915817bc3fc0" },
+    { "name": "20260315183000_add_election_day_reporting", "dialect": "postgresql", "sha256": "5ebe0fd8cc463c06536f475c1b05f94a1c3e4de1cb1704c0f2cdb4e8a69c33df" },
+    { "name": "20260316002000_add_state_agent_target", "dialect": "postgresql-compatible", "sha256": "487fe52c6b13c9e07e778554410190b955c9929a78f5552b956720c1e01c81e8" },
+    { "name": "20260316143000_add_agent_gps_session_controls", "dialect": "postgresql", "sha256": "c8b50097620c07692c60643395384e2e8ce744d9c8348bb55869742c553623cf" },
+    { "name": "20260317190000_add_constituency_lga_memberships", "dialect": "postgresql", "sha256": "40705e8a1b30195c3f596993899ad6be477c37755114011da9070bd3866079ba" }
+  ]
+}

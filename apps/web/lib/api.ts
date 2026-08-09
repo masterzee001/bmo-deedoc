@@ -22,6 +22,7 @@ import type {
   LgaItem,
   ManagedUserItem,
   NotificationItem,
+  OgunOrganizationTree,
   PollingUnitItem,
   PollingUnitCoverageSummary,
   CoverageInsights,
@@ -169,6 +170,15 @@ export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> 
 
   const payload = await readJson<{ user: AuthUserProfile }>(response);
   return payload.user;
+}
+
+export async function fetchOgunOrganizationTree(token: string): Promise<OgunOrganizationTree> {
+  const response = await fetch(`${API_BASE_URL}/platform/organization-tree`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ tree: OgunOrganizationTree }>(response);
+  return payload.tree;
 }
 
 export async function logoutCurrentUser(token: string): Promise<{ message: string }> {

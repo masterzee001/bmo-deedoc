@@ -6,30 +6,34 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
-    "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma --name init",
-    "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
+    "prisma:generate": "prisma generate --config prisma.config.ts",
+    "prisma:validate": "prisma validate --config prisma.config.ts",
+    "prisma:migrate": "prisma migrate dev --config prisma.config.ts",
+    "prisma:migrate:create": "prisma migrate dev --create-only --config prisma.config.ts",
+    "prisma:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
     "prisma:ensure-production": "tsx scripts/ensure-production-schema.ts",
-    "prisma:push": "prisma db push --schema prisma/schema.prisma --accept-data-loss",
     "bootstrap:reference-data": "tsx scripts/bootstrap-reference-data.ts",
     "bootstrap:polling-units:national": "tsx scripts/bootstrap-national-polling-units.ts",
     "bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
     "verify:reference-completeness": "tsx scripts/verify-reference-completeness.ts",
+    "verify:reference:ogun": "tsx scripts/verify-ogun-reference.ts",
+    "verify:reference:ogun:allow-incomplete": "tsx scripts/verify-ogun-reference.ts --allow-incomplete",
     "verify:production": "tsx scripts/verify-production-readiness.ts",
+    "migrate:phase1-identities": "tsx scripts/migrate-phase1-identities.ts",
     "seed": "tsx prisma/seed.ts",
     "seed:credentials": "tsx scripts/print-seeded-credentials.ts",
     "bootstrap:check": "tsx scripts/check-bootstrap.ts"
   },
   "dependencies": {
     "@pics-nigeria/shared": "1.0.0",
-    "@prisma/client": "^6.5.0",
+    "@prisma/client": "6.19.3",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
-    "prisma": "^6.5.0",
+    "prisma": "6.19.3",
     "tsx": "^4.19.3"
   }
 }

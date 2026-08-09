@@ -260,5 +260,5 @@ export function canManageCandidateOffice(actor: AuthUserProfile, officeType: Can
     return false;
   }
 
-  return levelRank[actor.adminProfile.adminLevel] >= officeRank[officeType];
+  return levelRank[actor.adminProfile.adminLevel] > officeRank[officeType];
 }

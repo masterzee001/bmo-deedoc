@@ -1,5 +1,7 @@
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
+import { rateLimit } from "express-rate-limit";
+import helmet from "helmet";
 import { env } from "./env";
 import adminRoutes from "./routes/admin";
 import agentRoutes from "./routes/agent";
@@ -7,6 +9,7 @@ import authRoutes from "./routes/auth";
 import candidateRoutes from "./routes/candidate";
 import mediaRoutes from "./routes/media";
 import notificationRoutes from "./routes/notifications";
+import platformRoutes from "./routes/platform";
 import voterRoutes from "./routes/voter";
 
 type JsonParseError = Error & {
@@ -16,14 +19,40 @@ type JsonParseError = Error & {
 
 export function createApp() {
   const app = express();
+  app.disable("x-powered-by");
+  if (env.TRUST_PROXY_HOPS > 0) {
+    app.set("trust proxy", env.TRUST_PROXY_HOPS);
+  }
+
   const allowedOrigins = new Set(
     env.CORS_ALLOWED_ORIGINS.length > 0
       ? env.CORS_ALLOWED_ORIGINS
-      : process.env.NODE_ENV === "production"
+      : env.NODE_ENV === "production"
         ? []
         : ["http://localhost:3000", "http://127.0.0.1:3000"],
   );
 
+  const loginLimiter = rateLimit({
+    windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+    limit: env.AUTH_RATE_LIMIT_MAX,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: { message: "Too many authentication attempts. Try again later." },
+  });
+  const registrationLimiter = rateLimit({
+    windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+    limit: env.REGISTRATION_RATE_LIMIT_MAX,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: { message: "Too many registration attempts. Try again later." },
+  });
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: false,
+    }),
+  );
   app.use(
     cors({
       origin(origin, callback) {
@@ -37,18 +66,24 @@ export function createApp() {
           return;
         }
 
-        callback(new Error("CORS origin not allowed."));
+        const error = new Error("CORS origin not allowed.");
+        error.name = "CorsError";
+        callback(error);
       },
     }),
   );
-  app.use(express.json());
+  app.use(express.json({ limit: env.API_JSON_BODY_LIMIT }));
 
   app.get("/health", (_request, response) => {
     response.json({ status: "ok" });
   });
 
+  app.use("/auth/login", loginLimiter);
+  app.use("/auth/register-voter", registrationLimiter);
   app.use("/auth", authRoutes);
   app.use("/voter", voterRoutes);
+  app.use("/platform", platformRoutes);
+  // Legacy/transitional identity routes remain until their content dependencies move to target domains.
   app.use("/admin", adminRoutes);
   app.use("/agent", agentRoutes);
   app.use("/candidate", candidateRoutes);
@@ -57,6 +92,11 @@ export function createApp() {
 
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     const jsonParseError = error as JsonParseError;
+
+    if (jsonParseError.name === "CorsError") {
+      response.status(403).json({ message: "CORS origin not allowed." });
+      return;
+    }
 
     if (jsonParseError.type === "entity.parse.failed" || jsonParseError.status === 400) {
       response.status(400).json({ message: "Invalid JSON payload." });

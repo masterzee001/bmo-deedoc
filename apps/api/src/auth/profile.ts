@@ -32,6 +32,7 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
       candidateProfile: true,
       voterProfile: true,
       agentProfile: true,
+      coordinatorProfile: true,
     },
   });
 
@@ -46,6 +47,13 @@ export async function getAuthUserProfile(userId: string): Promise<AuthUserProfil
     phone: user.phone,
     role: user.role,
     isActive: user.isActive,
+    accountStatus: user.accountStatus,
+    coordinatorProfile: user.coordinatorProfile
+      ? {
+          level: user.coordinatorProfile.level,
+          ...toTerritorySummary(user.coordinatorProfile),
+        }
+      : null,
     adminProfile: user.adminProfile
       ? {
           adminLevel: user.adminProfile.adminLevel,

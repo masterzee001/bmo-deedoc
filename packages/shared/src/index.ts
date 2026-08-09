@@ -1,10 +1,15 @@
-export const USER_ROLES = [
-  "SUPER_ADMIN",
+import { TARGET_AUTH_ROLES, type CoordinatorLevel, type TargetAccountStatus } from "./platform-contracts";
+
+export const LEGACY_AUTH_ROLES = [
   "ADMIN",
   "CANDIDATE",
   "AGENT",
   "VOTER",
 ] as const;
+
+export const USER_ROLES = [...TARGET_AUTH_ROLES, ...LEGACY_AUTH_ROLES] as const;
+
+export * from "./platform-contracts";
 
 export const ADMIN_LEVELS = [
   "NATIONAL",
@@ -203,6 +208,10 @@ export type AuthUserProfile = {
   phone: string | null;
   role: UserRole;
   isActive: boolean;
+  accountStatus: TargetAccountStatus;
+  coordinatorProfile: ({
+    level: CoordinatorLevel;
+  } & TerritorySummary) | null;
   adminProfile: ({
     adminLevel: AdminLevel;
     politicalPartyId: string | null;
@@ -383,7 +392,7 @@ export type VoterUserItem = {
   email: string;
   phone: string | null;
   isActive: boolean;
-  voterCardNumber: string;
+  voterRegistrationRecorded: boolean;
   referralCode: string;
   contactConsent: boolean;
   termsAcceptedAt: string | null;
@@ -395,7 +404,7 @@ export type CandidateVoterItem = {
   name: string;
   emailMask: string;
   phoneMask: string;
-  voterCardNumber: string;
+  voterRegistrationRecorded: boolean;
   contactConsent: boolean;
   termsAcceptedAt: string | null;
   territory: TerritorySummary;
@@ -411,7 +420,7 @@ export type ManagedUserItem = {
   adminLevel: AdminLevel | null;
   officeType: CandidateOfficeType | null;
   politicalPartyId: string | null;
-  voterCardNumber: string | null;
+  voterRegistrationRecorded: boolean;
 };
 
 export type PoliticalPartyItem = {

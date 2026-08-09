@@ -18,7 +18,7 @@ async function login(email: string, password: string): Promise<string> {
   const response = await fetch(`${baseUrl}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, agentGpsConsent: true }),
   });
 
   const payload = (await response.json()) as { token?: string; message?: string };
@@ -65,11 +65,12 @@ async function createAdminFixture(token: string, suffix: string) {
       email,
       password: "TestAdmin123!",
       adminLevel: "STATE",
+      politicalPartyId: "seed-party-independent-alliance",
       geoPoliticalZoneId: "seed-zone-south-west",
       stateId: "seed-state-lagos",
     },
   });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, JSON.stringify(created.payload));
   return { email, userId: readUserId(created.payload) };
 }
 
@@ -84,11 +85,12 @@ async function createCandidateFixture(token: string, suffix: string) {
       email,
       password: "TestCandidate123!",
       officeType: "GOVERNORSHIP",
+      politicalPartyId: "seed-party-independent-alliance",
       geoPoliticalZoneId: "seed-zone-south-west",
       stateId: "seed-state-lagos",
     },
   });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, JSON.stringify(created.payload));
   return { email, userId: readUserId(created.payload) };
 }
 
@@ -103,13 +105,14 @@ async function createAgentFixture(token: string, suffix: string) {
       email,
       password: "TestAgent123!",
       phone: "08031111111",
+      politicalPartyId: "seed-party-independent-alliance",
       stateId: "seed-state-lagos",
       lgaId: "seed-lga-ikeja",
       wardId: "seed-ward-ikeja-ward-a",
       pollingUnitId: "seed-pu-ikeja-001",
     },
   });
-  assert.equal(created.status, 201);
+  assert.equal(created.status, 201, JSON.stringify(created.payload));
   return { email, userId: readUserId(created.payload) };
 }
 
@@ -298,12 +301,13 @@ const cases: Case[] = [
         body: {
           name: "Updated Admin",
           adminLevel: "LGA",
+          politicalPartyId: "seed-party-independent-alliance",
           geoPoliticalZoneId: "seed-zone-south-west",
           stateId: "seed-state-lagos",
           lgaId: "seed-lga-ikeja",
         },
       });
-      assert.equal(updatedAdmin.status, 200);
+      assert.equal(updatedAdmin.status, 200, JSON.stringify(updatedAdmin.payload));
       assert.equal(updatedAdmin.payload.message, "Admin updated successfully.");
 
       const updatedCandidate = await apiRequest(`/admin/candidates/${candidate.userId}`, {
@@ -312,12 +316,13 @@ const cases: Case[] = [
         body: {
           name: "Updated Candidate",
           officeType: "HOUSE_OF_REP",
+          politicalPartyId: "seed-party-independent-alliance",
           geoPoliticalZoneId: "seed-zone-south-west",
           stateId: "seed-state-lagos",
           federalConstituencyId: "seed-fed-ikeja",
         },
       });
-      assert.equal(updatedCandidate.status, 200);
+      assert.equal(updatedCandidate.status, 200, JSON.stringify(updatedCandidate.payload));
       assert.equal(updatedCandidate.payload.message, "Candidate updated successfully.");
 
       const updatedAgent = await apiRequest(`/admin/agents/${agent.userId}`, {
@@ -326,12 +331,14 @@ const cases: Case[] = [
         body: {
           name: "Updated Agent",
           phone: "08032223333",
+          politicalPartyId: "seed-party-independent-alliance",
           stateId: "seed-state-lagos",
           lgaId: "seed-lga-ikeja",
-          wardId: "seed-ward-ikeja-ward-b",
+          wardId: "seed-ward-ikeja-ward-a",
+          pollingUnitId: "seed-pu-ikeja-001",
         },
       });
-      assert.equal(updatedAgent.status, 200);
+      assert.equal(updatedAgent.status, 200, JSON.stringify(updatedAgent.payload));
       assert.equal(updatedAgent.payload.message, "Agent updated successfully.");
     },
   },
@@ -351,12 +358,14 @@ const cases: Case[] = [
         body: {
           name: "Scoped Agent Update",
           phone: "08034445555",
+          politicalPartyId: "seed-party-independent-alliance",
           stateId: "seed-state-lagos",
           lgaId: "seed-lga-ikeja",
           wardId: "seed-ward-ikeja-ward-a",
+          pollingUnitId: "seed-pu-ikeja-001",
         },
       });
-      assert.equal(updatedAgent.status, 200);
+      assert.equal(updatedAgent.status, 200, JSON.stringify(updatedAgent.payload));
       assert.equal(updatedAgent.payload.message, "Agent updated successfully.");
 
       const deniedAdmin = await apiRequest(`/admin/users/${admin.userId}`, {
@@ -365,11 +374,12 @@ const cases: Case[] = [
         body: {
           name: "Denied",
           adminLevel: "STATE",
+          politicalPartyId: "seed-party-independent-alliance",
           geoPoliticalZoneId: "seed-zone-south-west",
           stateId: "seed-state-lagos",
         },
       });
-      assert.equal(deniedAdmin.status, 403);
+      assert.equal(deniedAdmin.status, 403, JSON.stringify(deniedAdmin.payload));
 
       const deniedCandidate = await apiRequest(`/admin/candidates/${candidate.userId}`, {
         method: "PATCH",
@@ -377,11 +387,12 @@ const cases: Case[] = [
         body: {
           name: "Denied",
           officeType: "GOVERNORSHIP",
+          politicalPartyId: "seed-party-independent-alliance",
           geoPoliticalZoneId: "seed-zone-south-west",
           stateId: "seed-state-lagos",
         },
       });
-      assert.equal(deniedCandidate.status, 403);
+      assert.equal(deniedCandidate.status, 403, JSON.stringify(deniedCandidate.payload));
     },
   },
   {

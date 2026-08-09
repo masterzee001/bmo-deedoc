@@ -9,10 +9,30 @@ datasource db {
 
 enum UserRole {
   SUPER_ADMIN
+  STATE_OFFICER
+  COORDINATOR
+  VALIDATOR
+  PAYOUT_OFFICER
+  MEMBER
+  // Legacy compatibility values. Phase 1 migration maps eligible Ogun users.
   ADMIN
   CANDIDATE
   AGENT
   VOTER
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CoordinatorLevel {
+  SENATORIAL_DISTRICT
+  FEDERAL_CONSTITUENCY
+  STATE_CONSTITUENCY
+  WARD
+  POLLING_UNIT
 }
 
 enum AdminLevel {
@@ -160,58 +180,146 @@ enum ElectionDayReportAssetKind {
 }
 
 model User {
-  id                     String                     @id @default(cuid())
-  name                   String
-  email                  String                     @unique
-  phone                  String?
-  passwordHash           String
-  role                   UserRole
-  isActive               Boolean                    @default(true)
-  createdAt              DateTime                   @default(now())
-  updatedAt              DateTime                   @updatedAt
-  adminProfile           AdminProfile?
-  candidateProfile       CandidateProfile?
-  agentProfile           AgentProfile?
-  voterProfile           VoterProfile?
-  managedCandidateLinks  AdminCandidateAssignment[] @relation("AssignmentAdmin")
-  assignedAdminLinks     AdminCandidateAssignment[] @relation("AssignmentCandidate")
-  rewardEntries          RewardLedger[]             @relation("RewardOwner")
-  rewardRelatedEntries   RewardLedger[]             @relation("RewardRelatedUser")
-  rewardRedemptions      RewardRedemption[]         @relation("RewardRedemptionVoter")
-  reviewedRedemptions    RewardRedemption[]         @relation("RewardRedemptionReviewer")
-  referralsMade          VoterProfile[]             @relation("VoterReferral")
-  assignedAgents         AgentProfile[]             @relation("AssignedAdmin")
-  participationEvents    ParticipationEvent[]
-  createdPolls           Poll[]                     @relation("PollCreator")
-  candidatePolls         Poll[]                     @relation("PollCandidate")
-  pollResponses          PollResponse[]
-  authoredPosts          Post[]                     @relation("PostAuthor")
-  candidatePosts         Post[]                     @relation("PostCandidate")
-  voterFeedbackItems     Feedback[]                 @relation("FeedbackVoter")
-  agentFeedbackItems     Feedback[]                 @relation("FeedbackAgent")
-  candidateFeedbackItems Feedback[]                 @relation("FeedbackCandidate")
-  agentActivities        AgentActivity[]
-  reportedIncidents      Incident[]                 @relation("IncidentReporter")
-  assignedIncidents      Incident[]                 @relation("IncidentAssignedAdmin")
-  escalatedIncidents     Incident[]                 @relation("IncidentEscalatedBy")
-  assignedTasks          FieldTask[]                @relation("FieldTaskAssignee")
-  createdTasks           FieldTask[]                @relation("FieldTaskCreator")
-  createdBroadcasts      BroadcastMessage[]         @relation("BroadcastCreator")
-  notifications          Notification[]
-  auditLogs              AuditLog[]
-  mediaAttachments       MediaAttachment[]          @relation("MediaUploader")
-  createdEngagementTasks VoterEngagementTask[]      @relation("EngagementTaskCreator")
-  engagementTaskClaims   VoterEngagementClaim[]
-  createdCampaignEvents  CampaignEvent[]            @relation("CampaignEventCreator")
-  candidateCampaignEvents CampaignEvent[]           @relation("CampaignEventCandidate")
-  campaignEventRsvps     CampaignEventRsvp[]
-  candidateMediaAssets   CandidateMediaAsset[]      @relation("CandidateMediaOwner")
-  electionDayReports     ElectionDayReport[]        @relation("ElectionDayReportAgent")
-  reviewedElectionDayReports ElectionDayReport[]    @relation("ElectionDayReportReviewer")
-  electionDayReportAssets ElectionDayReportAsset[]  @relation("ElectionDayReportAssetOwner")
+  id                         String                     @id @default(cuid())
+  name                       String
+  email                      String                     @unique
+  phone                      String?
+  passwordHash               String
+  role                       UserRole
+  isActive                   Boolean                    @default(true)
+  accountStatus              AccountStatus              @default(ACTIVE)
+  createdAt                  DateTime                   @default(now())
+  updatedAt                  DateTime                   @updatedAt
+  adminProfile               AdminProfile?
+  candidateProfile           CandidateProfile?
+  agentProfile               AgentProfile?
+  voterProfile               VoterProfile?
+  coordinatorProfile         CoordinatorProfile?
+  legacyCandidateDomain      Candidate?                 @relation("LegacyCandidateUser")
+  managedCandidateLinks      AdminCandidateAssignment[] @relation("AssignmentAdmin")
+  assignedAdminLinks         AdminCandidateAssignment[] @relation("AssignmentCandidate")
+  rewardEntries              RewardLedger[]             @relation("RewardOwner")
+  rewardRelatedEntries       RewardLedger[]             @relation("RewardRelatedUser")
+  rewardRedemptions          RewardRedemption[]         @relation("RewardRedemptionVoter")
+  reviewedRedemptions        RewardRedemption[]         @relation("RewardRedemptionReviewer")
+  referralsMade              VoterProfile[]             @relation("VoterReferral")
+  assignedAgents             AgentProfile[]             @relation("AssignedAdmin")
+  participationEvents        ParticipationEvent[]
+  createdPolls               Poll[]                     @relation("PollCreator")
+  candidatePolls             Poll[]                     @relation("PollCandidate")
+  pollResponses              PollResponse[]
+  authoredPosts              Post[]                     @relation("PostAuthor")
+  candidatePosts             Post[]                     @relation("PostCandidate")
+  voterFeedbackItems         Feedback[]                 @relation("FeedbackVoter")
+  agentFeedbackItems         Feedback[]                 @relation("FeedbackAgent")
+  candidateFeedbackItems     Feedback[]                 @relation("FeedbackCandidate")
+  agentActivities            AgentActivity[]
+  reportedIncidents          Incident[]                 @relation("IncidentReporter")
+  assignedIncidents          Incident[]                 @relation("IncidentAssignedAdmin")
+  escalatedIncidents         Incident[]                 @relation("IncidentEscalatedBy")
+  assignedTasks              FieldTask[]                @relation("FieldTaskAssignee")
+  createdTasks               FieldTask[]                @relation("FieldTaskCreator")
+  createdBroadcasts          BroadcastMessage[]         @relation("BroadcastCreator")
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+  mediaAttachments           MediaAttachment[]          @relation("MediaUploader")
+  createdEngagementTasks     VoterEngagementTask[]      @relation("EngagementTaskCreator")
+  engagementTaskClaims       VoterEngagementClaim[]
+  createdCampaignEvents      CampaignEvent[]            @relation("CampaignEventCreator")
+  candidateCampaignEvents    CampaignEvent[]            @relation("CampaignEventCandidate")
+  campaignEventRsvps         CampaignEventRsvp[]
+  candidateMediaAssets       CandidateMediaAsset[]      @relation("CandidateMediaOwner")
+  electionDayReports         ElectionDayReport[]        @relation("ElectionDayReportAgent")
+  reviewedElectionDayReports ElectionDayReport[]        @relation("ElectionDayReportReviewer")
+  electionDayReportAssets    ElectionDayReportAsset[]   @relation("ElectionDayReportAssetOwner")
 
   @@index([role])
   @@index([isActive])
+  @@index([accountStatus])
+}
+
+model CoordinatorProfile {
+  id                    String               @id @default(cuid())
+  userId                String               @unique
+  level                 CoordinatorLevel
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  wardId                String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state                 State                @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  ward                  Ward?                @relation(fields: [wardId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
+
+  @@index([level])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+}
+
+model Candidate {
+  id                    String                     @id @default(cuid())
+  legacyUserId          String?                    @unique
+  fullName              String
+  officeType            CandidateOfficeType
+  politicalPartyId      String?
+  portraitUrl           String?
+  portraitAssetId       String?
+  campaignSlogan        String?
+  bio                   String?
+  websiteUrl            String?
+  facebookUrl           String?
+  instagramUrl          String?
+  xUrl                  String?
+  isPublished           Boolean                    @default(false)
+  isActive              Boolean                    @default(true)
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  lgaId                 String?
+  wardId                String?
+  pollingUnitId         String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  legacyUser            User?                      @relation("LegacyCandidateUser", fields: [legacyUserId], references: [id], onDelete: SetNull)
+  politicalParty        PoliticalParty?            @relation(fields: [politicalPartyId], references: [id])
+  portraitAsset         CandidateMediaAsset?       @relation("CandidateDomainPortraitAsset", fields: [portraitAssetId], references: [id], onDelete: SetNull)
+  state                 State                      @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?        @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency?       @relation(fields: [federalConstituencyId], references: [id])
+  stateConstituency     StateConstituency?         @relation(fields: [stateConstituencyId], references: [id])
+  lga                   LGA?                       @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                      @relation(fields: [wardId], references: [id])
+  pollingUnit           PollingUnit?               @relation(fields: [pollingUnitId], references: [id])
+  adminAssignments      AdminCandidateAssignment[]
+  campaignEvents        CampaignEvent[]
+  polls                 Poll[]
+  posts                 Post[]
+  feedbackItems         Feedback[]
+
+  @@index([officeType])
+  @@index([politicalPartyId])
+  @@index([portraitAssetId])
+  @@index([isPublished])
+  @@index([isActive])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
+  @@index([lgaId])
+  @@index([wardId])
+  @@index([pollingUnitId])
 }
 
 model AdminProfile {
@@ -303,33 +411,33 @@ model CandidateProfile {
 }
 
 model AgentProfile {
-  id                  String       @id @default(cuid())
-  userId              String       @unique
-  assignedAdminUserId String?
-  politicalPartyId    String?
-  gpsTrackingConsentAt DateTime?
-  activeSessionNonce  String?
-  geoPoliticalZoneId  String?
-  stateId             String
-  senatorialDistrictId String?
+  id                    String               @id @default(cuid())
+  userId                String               @unique
+  assignedAdminUserId   String?
+  politicalPartyId      String?
+  gpsTrackingConsentAt  DateTime?
+  activeSessionNonce    String?
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
   federalConstituencyId String?
-  lgaId               String
-  wardId              String
-  stateConstituencyId String?
-  pollingUnitId       String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  user                User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignedAdminUser   User?        @relation("AssignedAdmin", fields: [assignedAdminUserId], references: [id])
-  politicalParty      PoliticalParty? @relation(fields: [politicalPartyId], references: [id])
-  geoPoliticalZone    GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state               State        @relation(fields: [stateId], references: [id])
-  senatorialDistrict  SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
-  lga                 LGA          @relation(fields: [lgaId], references: [id])
-  ward                Ward         @relation(fields: [wardId], references: [id])
-  stateConstituency   StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit         PollingUnit? @relation(fields: [pollingUnitId], references: [id])
+  lgaId                 String
+  wardId                String
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAdminUser     User?                @relation("AssignedAdmin", fields: [assignedAdminUserId], references: [id])
+  politicalParty        PoliticalParty?      @relation(fields: [politicalPartyId], references: [id])
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA                  @relation(fields: [lgaId], references: [id])
+  ward                  Ward                 @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([assignedAdminUserId])
@@ -345,33 +453,33 @@ model AgentProfile {
 }
 
 model VoterProfile {
-  id               String   @id @default(cuid())
-  userId           String   @unique
-  voterCardNumber  String   @unique
-  referralCode     String   @unique
-  referredByUserId String?
-  contactConsent   Boolean  @default(false)
-  termsAcceptedAt  DateTime?
-  geoPoliticalZoneId String?
-  stateId          String
-  senatorialDistrictId String?
+  id                    String               @id @default(cuid())
+  userId                String               @unique
+  voterCardNumber       String               @unique
+  referralCode          String               @unique
+  referredByUserId      String?
+  contactConsent        Boolean              @default(false)
+  termsAcceptedAt       DateTime?
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
   federalConstituencyId String?
-  lgaId            String
-  wardId           String
-  stateConstituencyId String?
-  pollingUnitId    String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  referredByUser   User?    @relation("VoterReferral", fields: [referredByUserId], references: [id])
-  geoPoliticalZone GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state            State    @relation(fields: [stateId], references: [id])
-  senatorialDistrict SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
-  lga              LGA      @relation(fields: [lgaId], references: [id])
-  ward             Ward     @relation(fields: [wardId], references: [id])
-  stateConstituency StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit      PollingUnit? @relation(fields: [pollingUnitId], references: [id])
+  lgaId                 String
+  wardId                String
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referredByUser        User?                @relation("VoterReferral", fields: [referredByUserId], references: [id])
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA                  @relation(fields: [lgaId], references: [id])
+  ward                  Ward                 @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([stateId])
@@ -385,34 +493,34 @@ model VoterProfile {
 }
 
 model VoterEngagementTask {
-  id                   String                 @id @default(cuid())
-  title                String
-  description          String
-  type                 String
-  rewardPoints         Int
-  targetCount          Int?
-  isActive             Boolean                @default(true)
-  createdByUserId      String
-  geoPoliticalZoneId   String?
-  stateId              String?
-  senatorialDistrictId String?
+  id                    String                 @id @default(cuid())
+  title                 String
+  description           String
+  type                  String
+  rewardPoints          Int
+  targetCount           Int?
+  isActive              Boolean                @default(true)
+  createdByUserId       String
+  geoPoliticalZoneId    String?
+  stateId               String?
+  senatorialDistrictId  String?
   federalConstituencyId String?
-  lgaId                String?
-  wardId               String?
-  stateConstituencyId  String?
-  pollingUnitId        String?
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
-  createdByUser        User                   @relation("EngagementTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  geoPoliticalZone     GeoPoliticalZone?      @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                State?                 @relation(fields: [stateId], references: [id])
-  senatorialDistrict   SenatorialDistrict?    @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency  FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
-  lga                  LGA?                   @relation(fields: [lgaId], references: [id])
-  ward                 Ward?                  @relation(fields: [wardId], references: [id])
-  stateConstituency    StateConstituency?     @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit          PollingUnit?           @relation(fields: [pollingUnitId], references: [id])
-  claims               VoterEngagementClaim[]
+  lgaId                 String?
+  wardId                String?
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  createdByUser         User                   @relation("EngagementTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone      GeoPoliticalZone?      @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State?                 @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?    @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA?                   @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                  @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?     @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?           @relation(fields: [pollingUnitId], references: [id])
+  claims                VoterEngagementClaim[]
 
   @@index([createdByUserId])
   @@index([isActive])
@@ -424,15 +532,15 @@ model VoterEngagementTask {
 }
 
 model VoterEngagementClaim {
-  id               String              @id @default(cuid())
-  taskId           String
-  voterUserId      String
-  progressCount    Int                 @default(0)
-  claimedAt        DateTime            @default(now())
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  task             VoterEngagementTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  voterUser        User                @relation(fields: [voterUserId], references: [id], onDelete: Cascade)
+  id            String              @id @default(cuid())
+  taskId        String
+  voterUserId   String
+  progressCount Int                 @default(0)
+  claimedAt     DateTime            @default(now())
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  task          VoterEngagementTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  voterUser     User                @relation(fields: [voterUserId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, voterUserId])
   @@index([voterUserId])
@@ -442,35 +550,38 @@ model AdminCandidateAssignment {
   id              String                   @id @default(cuid())
   adminUserId     String
   candidateUserId String
+  candidateId     String?
   permissionType  AssignmentPermissionType
   createdAt       DateTime                 @default(now())
   adminUser       User                     @relation("AssignmentAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
   candidateUser   User                     @relation("AssignmentCandidate", fields: [candidateUserId], references: [id], onDelete: Cascade)
+  candidate       Candidate?               @relation(fields: [candidateId], references: [id], onDelete: SetNull)
 
   @@unique([adminUserId, candidateUserId, permissionType])
   @@index([candidateUserId])
+  @@index([candidateId])
   @@index([permissionType])
 }
 
 model RewardLedger {
-  id            String   @id @default(cuid())
+  id            String     @id @default(cuid())
   voterUserId   String
   type          RewardType
   points        Int
   amount        Float?
   description   String
   relatedUserId String?
-  createdAt     DateTime @default(now())
-  voterUser     User     @relation("RewardOwner", fields: [voterUserId], references: [id], onDelete: Cascade)
-  relatedUser   User?    @relation("RewardRelatedUser", fields: [relatedUserId], references: [id])
+  createdAt     DateTime   @default(now())
+  voterUser     User       @relation("RewardOwner", fields: [voterUserId], references: [id], onDelete: Cascade)
+  relatedUser   User?      @relation("RewardRelatedUser", fields: [relatedUserId], references: [id])
 
+  @@unique([voterUserId, type, relatedUserId])
   @@index([voterUserId, createdAt])
   @@index([type])
-  @@unique([voterUserId, type, relatedUserId])
 }
 
 model ParticipationEvent {
-  id           String   @id @default(cuid())
+  id            String   @id @default(cuid())
   voterUserId   String
   type          String
   description   String
@@ -489,8 +600,9 @@ model ParticipationEvent {
 }
 
 model CampaignEvent {
-  id                    String                   @id @default(cuid())
+  id                    String               @id @default(cuid())
   candidateUserId       String
+  candidateId           String?
   createdByUserId       String
   title                 String
   description           String
@@ -500,7 +612,7 @@ model CampaignEvent {
   registrationUrl       String?
   startsAt              DateTime
   endsAt                DateTime?
-  isPublished           Boolean                  @default(false)
+  isPublished           Boolean              @default(false)
   geoPoliticalZoneId    String?
   stateId               String?
   senatorialDistrictId  String?
@@ -509,22 +621,24 @@ model CampaignEvent {
   wardId                String?
   stateConstituencyId   String?
   pollingUnitId         String?
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
-  candidateUser         User                     @relation("CampaignEventCandidate", fields: [candidateUserId], references: [id], onDelete: Cascade)
-  createdByUser         User                     @relation("CampaignEventCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  geoPoliticalZone      GeoPoliticalZone?        @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                 State?                   @relation(fields: [stateId], references: [id])
-  senatorialDistrict    SenatorialDistrict?      @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency   FederalConstituency?     @relation(fields: [federalConstituencyId], references: [id])
-  lga                   LGA?                     @relation(fields: [lgaId], references: [id])
-  ward                  Ward?                    @relation(fields: [wardId], references: [id])
-  stateConstituency     StateConstituency?       @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit           PollingUnit?             @relation(fields: [pollingUnitId], references: [id])
-  coverImageAsset       CandidateMediaAsset?     @relation("CampaignEventCoverAsset", fields: [coverImageAssetId], references: [id], onDelete: SetNull)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  candidateUser         User                 @relation("CampaignEventCandidate", fields: [candidateUserId], references: [id], onDelete: Cascade)
+  candidate             Candidate?           @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  createdByUser         User                 @relation("CampaignEventCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State?               @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA?                 @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
+  coverImageAsset       CandidateMediaAsset? @relation("CampaignEventCoverAsset", fields: [coverImageAssetId], references: [id], onDelete: SetNull)
   rsvps                 CampaignEventRsvp[]
 
   @@index([candidateUserId])
+  @@index([candidateId])
   @@index([createdByUserId])
   @@index([isPublished])
   @@index([startsAt])
@@ -537,7 +651,7 @@ model CampaignEvent {
 
 model CampaignEventRsvp {
   id          String                  @id @default(cuid())
-  eventId      String
+  eventId     String
   voterUserId String
   status      CampaignEventRsvpStatus @default(GOING)
   createdAt   DateTime                @default(now())
@@ -551,18 +665,19 @@ model CampaignEventRsvp {
 }
 
 model CandidateMediaAsset {
-  id               String                  @id @default(cuid())
-  ownerUserId      String
-  kind             CandidateMediaAssetKind
-  fileName         String
-  mimeType         String
-  data             Bytes
-  sizeBytes        Int
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
-  ownerUser        User                    @relation("CandidateMediaOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  portraitProfiles CandidateProfile[]      @relation("CandidateProfilePortraitAsset")
-  coverEvents      CampaignEvent[]         @relation("CampaignEventCoverAsset")
+  id                       String                  @id @default(cuid())
+  ownerUserId              String
+  kind                     CandidateMediaAssetKind
+  fileName                 String
+  mimeType                 String
+  data                     Bytes
+  sizeBytes                Int
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  ownerUser                User                    @relation("CandidateMediaOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  portraitProfiles         CandidateProfile[]      @relation("CandidateProfilePortraitAsset")
+  domainPortraitCandidates Candidate[]             @relation("CandidateDomainPortraitAsset")
+  coverEvents              CampaignEvent[]         @relation("CampaignEventCoverAsset")
 
   @@index([ownerUserId])
   @@index([kind])
@@ -573,6 +688,7 @@ model Poll {
   title                 String
   description           String?
   candidateUserId       String?
+  candidateId           String?
   officeType            CandidateOfficeType?
   geoPoliticalZoneId    String?
   stateId               String?
@@ -587,6 +703,7 @@ model Poll {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   candidateUser         User?                @relation("PollCandidate", fields: [candidateUserId], references: [id])
+  candidate             Candidate?           @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   createdByUser         User                 @relation("PollCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
   geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
   state                 State?               @relation(fields: [stateId], references: [id])
@@ -602,6 +719,7 @@ model Poll {
 
   @@index([geoPoliticalZoneId])
   @@index([candidateUserId])
+  @@index([candidateId])
   @@index([officeType])
   @@index([isActive])
   @@index([stateId])
@@ -614,12 +732,12 @@ model Poll {
 }
 
 model PollOption {
-  id        String   @id @default(cuid())
-  pollId     String
-  label      String
-  createdAt  DateTime @default(now())
-  poll       Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  responses  PollResponse[]
+  id        String         @id @default(cuid())
+  pollId    String
+  label     String
+  createdAt DateTime       @default(now())
+  poll      Poll           @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  responses PollResponse[]
 
   @@unique([pollId, label])
   @@index([pollId])
@@ -644,6 +762,7 @@ model Post {
   id                    String               @id @default(cuid())
   authorUserId          String
   candidateUserId       String?
+  candidateId           String?
   geoPoliticalZoneId    String?
   title                 String
   content               String
@@ -662,6 +781,7 @@ model Post {
   updatedAt             DateTime             @updatedAt
   authorUser            User                 @relation("PostAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
   candidateUser         User?                @relation("PostCandidate", fields: [candidateUserId], references: [id])
+  candidate             Candidate?           @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
   state                 State?               @relation(fields: [stateId], references: [id])
   senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
@@ -675,6 +795,7 @@ model Post {
   @@index([geoPoliticalZoneId])
   @@index([authorUserId])
   @@index([candidateUserId])
+  @@index([candidateId])
   @@index([isPublished])
   @@index([mediaType])
   @@index([stateId])
@@ -687,10 +808,11 @@ model Post {
 }
 
 model Feedback {
-  id                   String               @id @default(cuid())
+  id                   String              @id @default(cuid())
   voterUserId          String?
   agentUserId          String?
   candidateUserId      String?
+  candidateId          String?
   type                 String
   message              String
   geoPoliticalZoneId   String?
@@ -699,22 +821,24 @@ model Feedback {
   lgaId                String
   wardId               String?
   pollingUnitId        String?
-  createdAt            DateTime             @default(now())
-  voterUser            User?                @relation("FeedbackVoter", fields: [voterUserId], references: [id])
-  agentUser            User?                @relation("FeedbackAgent", fields: [agentUserId], references: [id])
-  candidateUser        User?                @relation("FeedbackCandidate", fields: [candidateUserId], references: [id])
-  geoPoliticalZone     GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                State                @relation(fields: [stateId], references: [id])
-  senatorialDistrict   SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
-  lga                  LGA                  @relation(fields: [lgaId], references: [id])
-  ward                 Ward?                @relation(fields: [wardId], references: [id])
-  pollingUnit          PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
+  createdAt            DateTime            @default(now())
+  voterUser            User?               @relation("FeedbackVoter", fields: [voterUserId], references: [id])
+  agentUser            User?               @relation("FeedbackAgent", fields: [agentUserId], references: [id])
+  candidateUser        User?               @relation("FeedbackCandidate", fields: [candidateUserId], references: [id])
+  candidate            Candidate?          @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  geoPoliticalZone     GeoPoliticalZone?   @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                State               @relation(fields: [stateId], references: [id])
+  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  lga                  LGA                 @relation(fields: [lgaId], references: [id])
+  ward                 Ward?               @relation(fields: [wardId], references: [id])
+  pollingUnit          PollingUnit?        @relation(fields: [pollingUnitId], references: [id])
   mediaAttachments     MediaAttachment[]
 
   @@index([geoPoliticalZoneId])
   @@index([voterUserId])
   @@index([agentUserId])
   @@index([candidateUserId])
+  @@index([candidateId])
   @@index([stateId])
   @@index([senatorialDistrictId])
   @@index([lgaId])
@@ -724,25 +848,25 @@ model Feedback {
 }
 
 model AgentActivity {
-  id             String            @id @default(cuid())
-  agentUserId    String
-  type           AgentActivityType
-  latitude       Float?
-  longitude      Float?
-  accuracyMeters Float?
-  note           String?
+  id                 String            @id @default(cuid())
+  agentUserId        String
+  type               AgentActivityType
+  latitude           Float?
+  longitude          Float?
+  accuracyMeters     Float?
+  note               String?
   geoPoliticalZoneId String?
-  stateId        String
-  lgaId          String
-  wardId         String
-  pollingUnitId  String?
-  createdAt      DateTime          @default(now())
-  agentUser      User              @relation(fields: [agentUserId], references: [id], onDelete: Cascade)
-  geoPoliticalZone GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state          State             @relation(fields: [stateId], references: [id])
-  lga            LGA               @relation(fields: [lgaId], references: [id])
-  ward           Ward              @relation(fields: [wardId], references: [id])
-  pollingUnit    PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
+  stateId            String
+  lgaId              String
+  wardId             String
+  pollingUnitId      String?
+  createdAt          DateTime          @default(now())
+  agentUser          User              @relation(fields: [agentUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone   GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
+  state              State             @relation(fields: [stateId], references: [id])
+  lga                LGA               @relation(fields: [lgaId], references: [id])
+  ward               Ward              @relation(fields: [wardId], references: [id])
+  pollingUnit        PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
 
   @@index([geoPoliticalZoneId])
   @@index([agentUserId])
@@ -752,38 +876,38 @@ model AgentActivity {
 }
 
 model Incident {
-  id             String    @id @default(cuid())
-  reportedByUserId String
-  type           IncidentType
-  title          String
-  description    String
-  severity       IncidentSeverity
-  status         IncidentStatus
-  latitude       Float?
-  longitude      Float?
-  geoPoliticalZoneId String?
-  stateId        String
+  id                   String              @id @default(cuid())
+  reportedByUserId     String
+  type                 IncidentType
+  title                String
+  description          String
+  severity             IncidentSeverity
+  status               IncidentStatus
+  latitude             Float?
+  longitude            Float?
+  geoPoliticalZoneId   String?
+  stateId              String
   senatorialDistrictId String?
-  lgaId          String
-  wardId         String?
-  pollingUnitId  String?
-  assignedAdminUserId String?
-  escalatedAt       DateTime?
-  escalatedByUserId String?
-  escalationNote    String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  reportedByUser User      @relation("IncidentReporter", fields: [reportedByUserId], references: [id], onDelete: Cascade)
-  geoPoliticalZone GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state          State     @relation(fields: [stateId], references: [id])
-  senatorialDistrict SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
-  lga            LGA       @relation(fields: [lgaId], references: [id])
-  ward           Ward?     @relation(fields: [wardId], references: [id])
-  pollingUnit    PollingUnit? @relation(fields: [pollingUnitId], references: [id])
-  assignedAdminUser User?  @relation("IncidentAssignedAdmin", fields: [assignedAdminUserId], references: [id])
-  escalatedByUser User? @relation("IncidentEscalatedBy", fields: [escalatedByUserId], references: [id])
-  tasks            FieldTask[]
-  mediaAttachments MediaAttachment[]
+  lgaId                String
+  wardId               String?
+  pollingUnitId        String?
+  assignedAdminUserId  String?
+  escalatedAt          DateTime?
+  escalatedByUserId    String?
+  escalationNote       String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  reportedByUser       User                @relation("IncidentReporter", fields: [reportedByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone     GeoPoliticalZone?   @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                State               @relation(fields: [stateId], references: [id])
+  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
+  lga                  LGA                 @relation(fields: [lgaId], references: [id])
+  ward                 Ward?               @relation(fields: [wardId], references: [id])
+  pollingUnit          PollingUnit?        @relation(fields: [pollingUnitId], references: [id])
+  assignedAdminUser    User?               @relation("IncidentAssignedAdmin", fields: [assignedAdminUserId], references: [id])
+  escalatedByUser      User?               @relation("IncidentEscalatedBy", fields: [escalatedByUserId], references: [id])
+  tasks                FieldTask[]
+  mediaAttachments     MediaAttachment[]
 
   @@index([geoPoliticalZoneId])
   @@index([reportedByUserId])
@@ -798,38 +922,38 @@ model Incident {
 }
 
 model FieldTask {
-  id                   String            @id @default(cuid())
-  title                String
-  description          String
-  status               FieldTaskStatus   @default(TODO)
-  priority             FieldTaskPriority @default(MEDIUM)
-  createdByUserId      String
-  assignedToUserId     String
-  incidentId           String?
-  dueAt                DateTime?
-  completedAt          DateTime?
-  resolutionNote       String?
-  geoPoliticalZoneId   String?
-  stateId              String
-  senatorialDistrictId String?
+  id                    String               @id @default(cuid())
+  title                 String
+  description           String
+  status                FieldTaskStatus      @default(TODO)
+  priority              FieldTaskPriority    @default(MEDIUM)
+  createdByUserId       String
+  assignedToUserId      String
+  incidentId            String?
+  dueAt                 DateTime?
+  completedAt           DateTime?
+  resolutionNote        String?
+  geoPoliticalZoneId    String?
+  stateId               String
+  senatorialDistrictId  String?
   federalConstituencyId String?
-  lgaId                String
-  wardId               String
-  stateConstituencyId  String?
-  pollingUnitId        String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  createdByUser        User              @relation("FieldTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  assignedToUser       User              @relation("FieldTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: Cascade)
-  incident             Incident?         @relation(fields: [incidentId], references: [id], onDelete: SetNull)
-  geoPoliticalZone     GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                State             @relation(fields: [stateId], references: [id])
-  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency  FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
-  lga                  LGA               @relation(fields: [lgaId], references: [id])
-  ward                 Ward              @relation(fields: [wardId], references: [id])
-  stateConstituency    StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit          PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
+  lgaId                 String
+  wardId                String
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdByUser         User                 @relation("FieldTaskCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  assignedToUser        User                 @relation("FieldTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: Cascade)
+  incident              Incident?            @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State                @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA                  @relation(fields: [lgaId], references: [id])
+  ward                  Ward                 @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
 
   @@index([assignedToUserId, status])
   @@index([createdByUserId, createdAt])
@@ -843,32 +967,32 @@ model FieldTask {
 }
 
 model BroadcastMessage {
-  id                   String            @id @default(cuid())
-  title                String
-  message              String
-  audience             BroadcastAudience
-  taskStatus           FieldTaskStatus?
-  createdByUserId      String
-  recipientCount       Int               @default(0)
-  geoPoliticalZoneId   String?
-  stateId              String?
-  senatorialDistrictId String?
+  id                    String               @id @default(cuid())
+  title                 String
+  message               String
+  audience              BroadcastAudience
+  taskStatus            FieldTaskStatus?
+  createdByUserId       String
+  recipientCount        Int                  @default(0)
+  geoPoliticalZoneId    String?
+  stateId               String?
+  senatorialDistrictId  String?
   federalConstituencyId String?
-  lgaId                String?
-  wardId               String?
-  stateConstituencyId  String?
-  pollingUnitId        String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  createdByUser        User              @relation("BroadcastCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
-  geoPoliticalZone     GeoPoliticalZone? @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                State?            @relation(fields: [stateId], references: [id])
-  senatorialDistrict   SenatorialDistrict? @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency  FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
-  lga                  LGA?              @relation(fields: [lgaId], references: [id])
-  ward                 Ward?             @relation(fields: [wardId], references: [id])
-  stateConstituency    StateConstituency? @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit          PollingUnit?      @relation(fields: [pollingUnitId], references: [id])
+  lgaId                 String?
+  wardId                String?
+  stateConstituencyId   String?
+  pollingUnitId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdByUser         User                 @relation("BroadcastCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                 State?               @relation(fields: [stateId], references: [id])
+  senatorialDistrict    SenatorialDistrict?  @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency   FederalConstituency? @relation(fields: [federalConstituencyId], references: [id])
+  lga                   LGA?                 @relation(fields: [lgaId], references: [id])
+  ward                  Ward?                @relation(fields: [wardId], references: [id])
+  stateConstituency     StateConstituency?   @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit           PollingUnit?         @relation(fields: [pollingUnitId], references: [id])
 
   @@index([audience, createdAt])
   @@index([taskStatus])
@@ -929,18 +1053,18 @@ model AuditLog {
 }
 
 model ElectionDayReportAsset {
-  id             String                      @id @default(cuid())
-  ownerUserId    String
-  kind           ElectionDayReportAssetKind
-  fileName       String
-  mimeType       String
-  data           Bytes
-  sizeBytes      Int
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
-  ownerUser      User                        @relation("ElectionDayReportAssetOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  arrivalReport  ElectionDayReport?         @relation("ElectionDayReportArrivalPhoto")
-  postCountingReport ElectionDayReport?     @relation("ElectionDayReportPostCountingPhoto")
+  id                 String                     @id @default(cuid())
+  ownerUserId        String
+  kind               ElectionDayReportAssetKind
+  fileName           String
+  mimeType           String
+  data               Bytes
+  sizeBytes          Int
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  ownerUser          User                       @relation("ElectionDayReportAssetOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  arrivalReport      ElectionDayReport?         @relation("ElectionDayReportArrivalPhoto")
+  postCountingReport ElectionDayReport?         @relation("ElectionDayReportPostCountingPhoto")
 
   @@index([ownerUserId])
   @@index([kind])
@@ -948,43 +1072,43 @@ model ElectionDayReportAsset {
 }
 
 model ElectionDayReport {
-  id                    String                    @id @default(cuid())
-  agentUserId           String
-  reviewedByUserId      String?
-  reportDate            DateTime
-  status                ElectionDayReportStatus  @default(SUBMITTED)
-  openingStatus         ElectionDayOpeningStatus
-  arrivalConfirmedAt    DateTime
-  turnoutObservation    String
-  incidentNotes         String?
-  remarks               String?
-  reviewNote            String?
-  voteEntriesJson       Json
-  arrivalPhotoAssetId   String                    @unique
-  postCountingPhotoAssetId String                 @unique
-  geoPoliticalZoneId    String?
-  stateId               String
-  senatorialDistrictId  String?
-  federalConstituencyId String?
-  lgaId                 String
-  wardId                String
-  stateConstituencyId   String?
-  pollingUnitId         String
-  createdAt             DateTime                  @default(now())
-  updatedAt             DateTime                  @updatedAt
-  reviewedAt            DateTime?
-  agentUser             User                      @relation("ElectionDayReportAgent", fields: [agentUserId], references: [id], onDelete: Cascade)
-  reviewedByUser        User?                     @relation("ElectionDayReportReviewer", fields: [reviewedByUserId], references: [id])
-  arrivalPhotoAsset     ElectionDayReportAsset    @relation("ElectionDayReportArrivalPhoto", fields: [arrivalPhotoAssetId], references: [id], onDelete: Restrict)
-  postCountingPhotoAsset ElectionDayReportAsset   @relation("ElectionDayReportPostCountingPhoto", fields: [postCountingPhotoAssetId], references: [id], onDelete: Restrict)
-  geoPoliticalZone      GeoPoliticalZone?         @relation(fields: [geoPoliticalZoneId], references: [id])
-  state                 State                     @relation(fields: [stateId], references: [id])
-  senatorialDistrict    SenatorialDistrict?       @relation(fields: [senatorialDistrictId], references: [id])
-  federalConstituency   FederalConstituency?      @relation(fields: [federalConstituencyId], references: [id])
-  lga                   LGA                       @relation(fields: [lgaId], references: [id])
-  ward                  Ward                      @relation(fields: [wardId], references: [id])
-  stateConstituency     StateConstituency?        @relation(fields: [stateConstituencyId], references: [id])
-  pollingUnit           PollingUnit               @relation(fields: [pollingUnitId], references: [id])
+  id                       String                   @id @default(cuid())
+  agentUserId              String
+  reviewedByUserId         String?
+  reportDate               DateTime
+  status                   ElectionDayReportStatus  @default(SUBMITTED)
+  openingStatus            ElectionDayOpeningStatus
+  arrivalConfirmedAt       DateTime
+  turnoutObservation       String
+  incidentNotes            String?
+  remarks                  String?
+  reviewNote               String?
+  voteEntriesJson          Json
+  arrivalPhotoAssetId      String                   @unique
+  postCountingPhotoAssetId String                   @unique
+  geoPoliticalZoneId       String?
+  stateId                  String
+  senatorialDistrictId     String?
+  federalConstituencyId    String?
+  lgaId                    String
+  wardId                   String
+  stateConstituencyId      String?
+  pollingUnitId            String
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  reviewedAt               DateTime?
+  agentUser                User                     @relation("ElectionDayReportAgent", fields: [agentUserId], references: [id], onDelete: Cascade)
+  reviewedByUser           User?                    @relation("ElectionDayReportReviewer", fields: [reviewedByUserId], references: [id])
+  arrivalPhotoAsset        ElectionDayReportAsset   @relation("ElectionDayReportArrivalPhoto", fields: [arrivalPhotoAssetId], references: [id], onDelete: Restrict)
+  postCountingPhotoAsset   ElectionDayReportAsset   @relation("ElectionDayReportPostCountingPhoto", fields: [postCountingPhotoAssetId], references: [id], onDelete: Restrict)
+  geoPoliticalZone         GeoPoliticalZone?        @relation(fields: [geoPoliticalZoneId], references: [id])
+  state                    State                    @relation(fields: [stateId], references: [id])
+  senatorialDistrict       SenatorialDistrict?      @relation(fields: [senatorialDistrictId], references: [id])
+  federalConstituency      FederalConstituency?     @relation(fields: [federalConstituencyId], references: [id])
+  lga                      LGA                      @relation(fields: [lgaId], references: [id])
+  ward                     Ward                     @relation(fields: [wardId], references: [id])
+  stateConstituency        StateConstituency?       @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnit              PollingUnit              @relation(fields: [pollingUnitId], references: [id])
 
   @@unique([agentUserId, pollingUnitId, reportDate])
   @@index([status])
@@ -1022,89 +1146,95 @@ model MediaAttachment {
 }
 
 model GeoPoliticalZone {
-  id                 String             @id
-  name               String             @unique
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  states             State[]
-  adminProfiles      AdminProfile[]
-  candidateProfiles  CandidateProfile[]
-  agentProfiles      AgentProfile[]
-  voterProfiles      VoterProfile[]
-  polls              Poll[]
-  posts              Post[]
-  feedbackItems      Feedback[]
-  agentActivities    AgentActivity[]
-  incidents          Incident[]
-  fieldTasks         FieldTask[]
-  broadcastMessages  BroadcastMessage[]
+  id                   String                @id
+  name                 String                @unique
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  states               State[]
+  adminProfiles        AdminProfile[]
+  candidateProfiles    CandidateProfile[]
+  agentProfiles        AgentProfile[]
+  voterProfiles        VoterProfile[]
+  polls                Poll[]
+  posts                Post[]
+  feedbackItems        Feedback[]
+  agentActivities      AgentActivity[]
+  incidents            Incident[]
+  fieldTasks           FieldTask[]
+  broadcastMessages    BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
-  campaignEvents     CampaignEvent[]
-  electionDayReports ElectionDayReport[]
+  campaignEvents       CampaignEvent[]
+  electionDayReports   ElectionDayReport[]
 }
 
 model PoliticalParty {
-  id                 String             @id
-  name               String             @unique
-  code               String             @unique
-  logoUrl            String?
-  description        String?
-  officialWebsite    String?
-  isApprovedByInec   Boolean            @default(false)
-  inecSourceUrl      String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  candidateProfiles  CandidateProfile[]
-  adminProfiles      AdminProfile[]
-  agentProfiles      AgentProfile[]
+  id                String             @id
+  name              String             @unique
+  code              String             @unique
+  logoUrl           String?
+  description       String?
+  officialWebsite   String?
+  isApprovedByInec  Boolean            @default(false)
+  inecSourceUrl     String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  candidateProfiles CandidateProfile[]
+  adminProfiles     AdminProfile[]
+  agentProfiles     AgentProfile[]
+  candidates        Candidate[]
 
   @@index([isApprovedByInec])
 }
 
 model State {
-  id                    String               @id
-  name                  String               @unique
-  geoPoliticalZoneId    String?
+  id                         String                @id
+  name                       String                @unique
+  geoPoliticalZoneId         String?
   agentsPerPollingUnitTarget Int?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  geoPoliticalZone      GeoPoliticalZone?    @relation(fields: [geoPoliticalZoneId], references: [id], onDelete: Cascade)
-  senatorialDistricts   SenatorialDistrict[]
-  federalConstituencies FederalConstituency[]
-  stateConstituencies   StateConstituency[]
-  lgas                  LGA[]
-  wards                 Ward[]
-  pollingUnits          PollingUnit[]
-  adminProfiles         AdminProfile[]
-  candidateProfiles     CandidateProfile[]
-  agentProfiles         AgentProfile[]
-  voterProfiles         VoterProfile[]
-  polls                 Poll[]
-  posts                 Post[]
-  feedbackItems         Feedback[]
-  agentActivities       AgentActivity[]
-  incidents             Incident[]
-  fieldTasks            FieldTask[]
-  broadcastMessages     BroadcastMessage[]
-  voterEngagementTasks  VoterEngagementTask[]
-  campaignEvents        CampaignEvent[]
-  electionDayReports    ElectionDayReport[]
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  geoPoliticalZone           GeoPoliticalZone?     @relation(fields: [geoPoliticalZoneId], references: [id], onDelete: Cascade)
+  senatorialDistricts        SenatorialDistrict[]
+  federalConstituencies      FederalConstituency[]
+  stateConstituencies        StateConstituency[]
+  lgas                       LGA[]
+  wards                      Ward[]
+  pollingUnits               PollingUnit[]
+  adminProfiles              AdminProfile[]
+  candidateProfiles          CandidateProfile[]
+  agentProfiles              AgentProfile[]
+  voterProfiles              VoterProfile[]
+  coordinatorProfiles        CoordinatorProfile[]
+  candidates                 Candidate[]
+  polls                      Poll[]
+  posts                      Post[]
+  feedbackItems              Feedback[]
+  agentActivities            AgentActivity[]
+  incidents                  Incident[]
+  fieldTasks                 FieldTask[]
+  broadcastMessages          BroadcastMessage[]
+  voterEngagementTasks       VoterEngagementTask[]
+  campaignEvents             CampaignEvent[]
+  electionDayReports         ElectionDayReport[]
+
   @@index([geoPoliticalZoneId])
 }
 
 model SenatorialDistrict {
-  id                    String               @id
+  id                    String                  @id
   name                  String
   stateId               String
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  state                 State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  state                 State                   @relation(fields: [stateId], references: [id], onDelete: Cascade)
   federalConstituencies FederalConstituency[]
   lgaMemberships        SenatorialDistrictLga[]
   adminProfiles         AdminProfile[]
   candidateProfiles     CandidateProfile[]
   agentProfiles         AgentProfile[]
   voterProfiles         VoterProfile[]
+  coordinatorProfiles   CoordinatorProfile[]
+  candidates            Candidate[]
   polls                 Poll[]
   posts                 Post[]
   feedbackItems         Feedback[]
@@ -1120,19 +1250,22 @@ model SenatorialDistrict {
 }
 
 model FederalConstituency {
-  id                   String               @id
+  id                   String                   @id
   name                 String
   stateId              String
   senatorialDistrictId String
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  state                State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  senatorialDistrict   SenatorialDistrict   @relation(fields: [senatorialDistrictId], references: [id], onDelete: Cascade)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  state                State                    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  senatorialDistrict   SenatorialDistrict       @relation(fields: [senatorialDistrictId], references: [id], onDelete: Cascade)
   lgaMemberships       FederalConstituencyLga[]
   adminProfiles        AdminProfile[]
   candidateProfiles    CandidateProfile[]
   agentProfiles        AgentProfile[]
   voterProfiles        VoterProfile[]
+  coordinatorProfiles  CoordinatorProfile[]
+  candidates           Candidate[]
+  stateConstituencies  StateConstituency[]
   polls                Poll[]
   posts                Post[]
   fieldTasks           FieldTask[]
@@ -1147,119 +1280,133 @@ model FederalConstituency {
 }
 
 model LGA {
-  id                  String               @id
-  name                String
-  stateId             String
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  state               State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  senatorialDistrictMemberships SenatorialDistrictLga[]
+  id                             String                   @id
+  name                           String
+  stateId                        String
+  createdAt                      DateTime                 @default(now())
+  updatedAt                      DateTime                 @updatedAt
+  state                          State                    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  senatorialDistrictMemberships  SenatorialDistrictLga[]
   federalConstituencyMemberships FederalConstituencyLga[]
-  stateConstituencyMemberships StateConstituencyLga[]
-  stateConstituencies StateConstituency[]
-  wards               Ward[]
-  pollingUnits        PollingUnit[]
-  adminProfiles       AdminProfile[]
-  candidateProfiles   CandidateProfile[]
-  agentProfiles       AgentProfile[]
-  voterProfiles       VoterProfile[]
-  polls               Poll[]
-  posts               Post[]
-  feedbackItems       Feedback[]
-  agentActivities     AgentActivity[]
-  incidents           Incident[]
-  fieldTasks          FieldTask[]
-  broadcastMessages   BroadcastMessage[]
-  voterEngagementTasks VoterEngagementTask[]
-  campaignEvents      CampaignEvent[]
-  electionDayReports  ElectionDayReport[]
+  stateConstituencyMemberships   StateConstituencyLga[]
+  stateConstituencies            StateConstituency[]
+  wards                          Ward[]
+  pollingUnits                   PollingUnit[]
+  adminProfiles                  AdminProfile[]
+  candidateProfiles              CandidateProfile[]
+  agentProfiles                  AgentProfile[]
+  voterProfiles                  VoterProfile[]
+  candidates                     Candidate[]
+  polls                          Poll[]
+  posts                          Post[]
+  feedbackItems                  Feedback[]
+  agentActivities                AgentActivity[]
+  incidents                      Incident[]
+  fieldTasks                     FieldTask[]
+  broadcastMessages              BroadcastMessage[]
+  voterEngagementTasks           VoterEngagementTask[]
+  campaignEvents                 CampaignEvent[]
+  electionDayReports             ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
 }
 
 model Ward {
-  id                String               @id
-  name              String
-  stateId           String
-  lgaId             String
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  state             State                @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga               LGA                  @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  pollingUnits      PollingUnit[]
-  adminProfiles     AdminProfile[]
-  candidateProfiles CandidateProfile[]
-  agentProfiles     AgentProfile[]
-  voterProfiles     VoterProfile[]
-  polls             Poll[]
-  posts             Post[]
-  feedbackItems     Feedback[]
-  agentActivities   AgentActivity[]
-  incidents         Incident[]
-  fieldTasks        FieldTask[]
-  broadcastMessages BroadcastMessage[]
+  id                   String                @id
+  name                 String
+  stateId              String
+  lgaId                String
+  stateConstituencyId  String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  stateConstituency    StateConstituency?    @relation(fields: [stateConstituencyId], references: [id])
+  pollingUnits         PollingUnit[]
+  adminProfiles        AdminProfile[]
+  candidateProfiles    CandidateProfile[]
+  agentProfiles        AgentProfile[]
+  voterProfiles        VoterProfile[]
+  coordinatorProfiles  CoordinatorProfile[]
+  candidates           Candidate[]
+  polls                Poll[]
+  posts                Post[]
+  feedbackItems        Feedback[]
+  agentActivities      AgentActivity[]
+  incidents            Incident[]
+  fieldTasks           FieldTask[]
+  broadcastMessages    BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
-  campaignEvents    CampaignEvent[]
-  electionDayReports ElectionDayReport[]
+  campaignEvents       CampaignEvent[]
+  electionDayReports   ElectionDayReport[]
 
   @@unique([lgaId, name])
   @@index([stateId])
   @@index([lgaId])
+  @@index([stateConstituencyId])
 }
 
 model StateConstituency {
-  id                String             @id
-  name              String
-  stateId           String
-  lgaId             String
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  state             State              @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga               LGA                @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  lgaMemberships    StateConstituencyLga[]
-  adminProfiles     AdminProfile[]
-  candidateProfiles CandidateProfile[]
-  agentProfiles     AgentProfile[]
-  voterProfiles     VoterProfile[]
-  polls             Poll[]
-  posts             Post[]
-  fieldTasks        FieldTask[]
-  broadcastMessages BroadcastMessage[]
-  voterEngagementTasks VoterEngagementTask[]
-  campaignEvents    CampaignEvent[]
-  electionDayReports ElectionDayReport[]
+  id                    String                 @id
+  name                  String
+  stateId               String
+  lgaId                 String
+  federalConstituencyId String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  state                 State                  @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                   LGA                    @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  federalConstituency   FederalConstituency?   @relation(fields: [federalConstituencyId], references: [id])
+  lgaMemberships        StateConstituencyLga[]
+  adminProfiles         AdminProfile[]
+  candidateProfiles     CandidateProfile[]
+  agentProfiles         AgentProfile[]
+  voterProfiles         VoterProfile[]
+  coordinatorProfiles   CoordinatorProfile[]
+  candidates            Candidate[]
+  wards                 Ward[]
+  polls                 Poll[]
+  posts                 Post[]
+  fieldTasks            FieldTask[]
+  broadcastMessages     BroadcastMessage[]
+  voterEngagementTasks  VoterEngagementTask[]
+  campaignEvents        CampaignEvent[]
+  electionDayReports    ElectionDayReport[]
 
   @@unique([stateId, name])
   @@index([stateId])
   @@index([lgaId])
+  @@index([federalConstituencyId])
 }
 
 model PollingUnit {
-  id                String             @id
-  name              String
-  stateId           String
-  lgaId             String
-  wardId            String
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  state             State              @relation(fields: [stateId], references: [id], onDelete: Cascade)
-  lga               LGA                @relation(fields: [lgaId], references: [id], onDelete: Cascade)
-  ward              Ward               @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  adminProfiles     AdminProfile[]
-  candidateProfiles CandidateProfile[]
-  agentProfiles     AgentProfile[]
-  voterProfiles     VoterProfile[]
-  polls             Poll[]
-  posts             Post[]
-  feedbackItems     Feedback[]
-  agentActivities   AgentActivity[]
-  incidents         Incident[]
-  fieldTasks        FieldTask[]
-  broadcastMessages BroadcastMessage[]
+  id                   String                @id
+  name                 String
+  stateId              String
+  lgaId                String
+  wardId               String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  state                State                 @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  lga                  LGA                   @relation(fields: [lgaId], references: [id], onDelete: Cascade)
+  ward                 Ward                  @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  adminProfiles        AdminProfile[]
+  candidateProfiles    CandidateProfile[]
+  agentProfiles        AgentProfile[]
+  voterProfiles        VoterProfile[]
+  coordinatorProfiles  CoordinatorProfile[]
+  candidates           Candidate[]
+  polls                Poll[]
+  posts                Post[]
+  feedbackItems        Feedback[]
+  agentActivities      AgentActivity[]
+  incidents            Incident[]
+  fieldTasks           FieldTask[]
+  broadcastMessages    BroadcastMessage[]
   voterEngagementTasks VoterEngagementTask[]
-  campaignEvents    CampaignEvent[]
-  electionDayReports ElectionDayReport[]
+  campaignEvents       CampaignEvent[]
+  electionDayReports   ElectionDayReport[]
 
   @@unique([wardId, name])
   @@index([stateId])

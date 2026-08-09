@@ -21,8 +21,8 @@ export default function HomePage() {
     try {
       const data = await loginUser(email, password);
 
-      if (data.user.role !== "VOTER") {
-        setError("This login page is for voters only.");
+      if (data.user.role !== "VOTER" && data.user.role !== "MEMBER") {
+        setError("This login page is for members only.");
         return;
       }
 

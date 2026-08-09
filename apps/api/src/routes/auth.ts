@@ -72,20 +72,20 @@ router.post("/login", async (request, response) => {
     return response.status(401).json({ message: "Invalid email or password." });
   }
 
-  if (!user.isActive) {
+  if (user.accountStatus === "SUSPENDED") {
+    return response.status(403).json({ message: "This account has been suspended." });
+  }
+
+  if (!user.isActive || user.accountStatus === "INACTIVE") {
     return response.status(403).json({ message: "This account has been deactivated." });
   }
 
   let sessionNonce: string | undefined;
-  if (user.role === UserRole.AGENT) {
-    const agentProfile = await prisma.agentProfile.findUnique({
-      where: { userId: user.id },
-      select: { userId: true, gpsTrackingConsentAt: true },
-    });
-
-    if (!agentProfile) {
-      return response.status(404).json({ message: "Agent profile not found." });
-    }
+  const agentProfile = await prisma.agentProfile.findUnique({
+    where: { userId: user.id },
+    select: { userId: true, gpsTrackingConsentAt: true },
+  });
+  if (agentProfile) {
 
     if (!agentProfile.gpsTrackingConsentAt && parsed.data.agentGpsConsent !== true) {
       return response.status(400).json({
@@ -119,7 +119,7 @@ router.get("/me", requireAuth, async (request, response) => {
 });
 
 router.post("/logout", requireAuth, async (request, response) => {
-  if (request.authUser?.role === UserRole.AGENT) {
+  if (request.authUser?.agentProfile) {
     await prisma.agentProfile.updateMany({
       where: { userId: request.authUser.id },
       data: { activeSessionNonce: null },
