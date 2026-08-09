@@ -17,6 +17,10 @@
     {
       "name": "20260809030000_pre_election_verification_rewards_foundation",
       "sha256": "ec7ba2b82660b345f717733ce3619f63e67cf3dfccb168665be2b9cdfca927de"
+    },
+    {
+      "name": "20260809040000_pre_election_payout_assignment_cycle_integrity",
+      "sha256": "a414f833e34979f7284d903f37e14c313a8597620225b01bad25df5495bb6859"
     }
   ]
 }

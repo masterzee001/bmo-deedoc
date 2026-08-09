@@ -877,6 +877,7 @@ model PayoutCycle {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   batches          PayoutBatch[]
+  assignments      PayoutAssignment[]
 
   @@index([status, payoutDate])
 }
@@ -896,6 +897,7 @@ model PayoutBatch {
 
 model PayoutAssignment {
   id                  String              @id @default(cuid())
+  payoutCycleId       String
   payoutBatchId       String
   payoutOfficerUserId String
   beneficiaryUserId   String
@@ -905,12 +907,15 @@ model PayoutAssignment {
   assignedAt          DateTime             @default(now())
   processedAt         DateTime?
   note                String?
+  payoutCycle         PayoutCycle          @relation(fields: [payoutCycleId], references: [id], onDelete: Restrict)
   payoutBatch         PayoutBatch          @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
   payoutOfficerUser   User                 @relation("PayoutAssignmentOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
   beneficiaryUser     User                 @relation("PayoutAssignmentBeneficiary", fields: [beneficiaryUserId], references: [id], onDelete: Restrict)
   transactions        PayoutTransaction[]
 
+  @@unique([payoutCycleId, beneficiaryUserId])
   @@unique([payoutBatchId, beneficiaryUserId])
+  @@index([payoutCycleId])
   @@index([payoutOfficerUserId, status])
   @@index([beneficiaryUserId])
 }

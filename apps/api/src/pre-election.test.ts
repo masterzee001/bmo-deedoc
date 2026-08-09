@@ -108,6 +108,14 @@ async function createUserFixtures() {
   });
   await prisma.user.create({
     data: {
+      name: "Pre Election Test Other Payout Officer",
+      email: testEmail("payout-other"),
+      passwordHash,
+      role: "PAYOUT_OFFICER",
+    },
+  });
+  await prisma.user.create({
+    data: {
       name: "Pre Election Test Coordinator",
       email: testEmail("coordinator"),
       passwordHash,
@@ -174,6 +182,20 @@ async function cleanup() {
   const userIds = users.map((user) => user.id);
 
   if (userIds.length > 0) {
+    await prisma.payoutTransaction.deleteMany({
+      where: { OR: [{ payoutOfficerUserId: { in: userIds } }, { payoutAssignment: { beneficiaryUserId: { in: userIds } } }] },
+    });
+    await prisma.payoutAssignment.deleteMany({
+      where: { OR: [{ payoutOfficerUserId: { in: userIds } }, { beneficiaryUserId: { in: userIds } }] },
+    });
+    await prisma.payoutBatch.deleteMany({ where: { assignments: { none: {} } } });
+    await prisma.payoutCycle.deleteMany({ where: { batches: { none: {} }, assignments: { none: {} } } });
+    await prisma.payoutConfiguration.deleteMany({ where: { createdByUserId: { in: userIds } } });
+    await prisma.territoryStrengthSnapshot.deleteMany({ where: { territoryId: { in: [stateId, wardId, pollingUnitId] } } });
+    await prisma.territoryMetricSnapshot.deleteMany({ where: { territoryId: { in: [stateId, wardId, pollingUnitId] } } });
+    await prisma.territoryTarget.deleteMany({ where: { createdByUserId: { in: userIds } } });
+    await prisma.strengthWeightConfiguration.deleteMany({ where: { createdByUserId: { in: userIds } } });
+    await prisma.strengthMetricDefinition.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.rewardLedgerEntry.deleteMany({
       where: { OR: [{ userId: { in: userIds } }, { relatedUserId: { in: userIds } }] },
     });
@@ -219,6 +241,7 @@ export async function runPreElectionTests() {
     const validatorToken = await login(testEmail("validator"));
     const coordinatorToken = await login(testEmail("coordinator"));
     const payoutToken = await login(testEmail("payout"));
+    const otherPayoutToken = await login(testEmail("payout-other"));
 
     const validatorRuleAttempt = await apiRequest("/pre-election/reward-rules", {
       method: "POST",
@@ -288,6 +311,159 @@ export async function runPreElectionTests() {
     assert.equal(await prisma.rewardLedgerEntry.count({ where: { userId: referrer.id, category: "VERIFIED_REFERRAL" } }), 1);
     const processedReferral = await prisma.referral.findUniqueOrThrow({ where: { id: referral.id } });
     assert.equal(processedReferral.status, "REWARD_PROCESSED");
+
+    const rewardBalance = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(rewardBalance.status, 200, JSON.stringify(rewardBalance.payload));
+    assert.equal(rewardBalance.payload.confirmedPoints, 25);
+    assert.equal(rewardBalance.payload.availablePoints, 25);
+
+    const referralStats = await apiRequest(`/pre-election/referrals/stats?territoryType=WARD&territoryId=${wardId}`, {
+      token: coordinatorToken,
+    });
+    assert.equal(referralStats.status, 200, JSON.stringify(referralStats.payload));
+    assert.equal(referralStats.payload.directRegistrations, 1);
+    assert.equal(referralStats.payload.directVerifiedRegistrations, 1);
+
+    const payoutConfigDenied = await apiRequest("/pre-election/payout/configurations", {
+      method: "POST",
+      token: payoutToken,
+      body: { minimumPoints: 25, pointConversionRate: 2, frequency: "WEEKLY" },
+    });
+    assert.equal(payoutConfigDenied.status, 403);
+
+    const payoutConfig = await apiRequest("/pre-election/payout/configurations", {
+      method: "POST",
+      token: superAdminToken,
+      body: { minimumPoints: 25, pointConversionRate: 2, frequency: "WEEKLY" },
+    });
+    assert.equal(payoutConfig.status, 201, JSON.stringify(payoutConfig.payload));
+
+    const payoutCycle = await apiRequest("/pre-election/payout/cycles", {
+      method: "POST",
+      token: superAdminToken,
+      body: {
+        name: "Pre Election Test Weekly Cycle",
+        opensAt: "2026-08-10T00:00:00.000Z",
+        closesAt: "2026-08-12T00:00:00.000Z",
+        payoutDate: "2026-08-13T00:00:00.000Z",
+      },
+    });
+    assert.equal(payoutCycle.status, 201, JSON.stringify(payoutCycle.payload));
+    const payoutCycleId = (payoutCycle.payload.payoutCycle as { id: string }).id;
+    const payoutOfficer = await prisma.user.findUniqueOrThrow({ where: { email: testEmail("payout") }, select: { id: true } });
+
+    const payoutBatch = await apiRequest(`/pre-election/payout/cycles/${payoutCycleId}/batches`, {
+      method: "POST",
+      token: superAdminToken,
+      body: { payoutOfficerUserId: payoutOfficer.id, beneficiaryUserIds: [referrer.id] },
+    });
+    assert.equal(payoutBatch.status, 201, JSON.stringify(payoutBatch.payload));
+    const assignments = (payoutBatch.payload.payoutBatch as { assignments: Array<{ id: string; points: number; amount: string }> })
+      .assignments;
+    assert.equal(assignments.length, 1);
+    assert.equal(assignments[0].points, 25);
+    assert.equal(assignments[0].amount, "50.00");
+
+    const duplicatePayoutBatch = await apiRequest(`/pre-election/payout/cycles/${payoutCycleId}/batches`, {
+      method: "POST",
+      token: superAdminToken,
+      body: { payoutOfficerUserId: payoutOfficer.id, beneficiaryUserIds: [referrer.id] },
+    });
+    assert.equal(duplicatePayoutBatch.status, 400);
+
+    const assignmentId = assignments[0].id;
+    const approveBatch = await apiRequest(`/pre-election/payout/batches/${(payoutBatch.payload.payoutBatch as { id: string }).id}/approve`, {
+      method: "PATCH",
+      token: superAdminToken,
+    });
+    assert.equal(approveBatch.status, 200, JSON.stringify(approveBatch.payload));
+
+    const unauthorizedPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: otherPayoutToken,
+      body: { status: "PROCESSING" },
+    });
+    assert.equal(unauthorizedPayout.status, 403);
+
+    const processingPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: { status: "PROCESSING" },
+    });
+    assert.equal(processingPayout.status, 200, JSON.stringify(processingPayout.payload));
+
+    const paidPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: {
+        status: "PAID",
+        paymentReference: "PRE-ELECTION-PAYOUT-REF-001",
+        proofStorageKey: "payout-proofs/pre-election-test/ref-001.pdf",
+        note: "Paid by transfer.",
+      },
+    });
+    assert.equal(paidPayout.status, 200, JSON.stringify(paidPayout.payload));
+    assert.equal(await prisma.payoutTransaction.count({ where: { payoutAssignmentId: assignmentId } }), 1);
+
+    const finalizedPayoutChange = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: { status: "HELD" },
+    });
+    assert.equal(finalizedPayoutChange.status, 409);
+
+    const postPayoutBalance = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(postPayoutBalance.status, 200, JSON.stringify(postPayoutBalance.payload));
+    assert.equal(postPayoutBalance.payload.reservedPayoutPoints, 25);
+    assert.equal(postPayoutBalance.payload.availablePoints, 0);
+
+    const strengthMetric = await apiRequest("/pre-election/strength/metrics", {
+      method: "POST",
+      token: superAdminToken,
+      body: { metric: "VERIFIED_MEMBERS", description: "Verified members in scope" },
+    });
+    assert.equal(strengthMetric.status, 201, JSON.stringify(strengthMetric.payload));
+
+    const strengthWeight = await apiRequest("/pre-election/strength/weights", {
+      method: "POST",
+      token: superAdminToken,
+      body: { metric: "VERIFIED_MEMBERS", weight: 1 },
+    });
+    assert.equal(strengthWeight.status, 201, JSON.stringify(strengthWeight.payload));
+
+    const strengthTarget = await apiRequest("/pre-election/strength/targets", {
+      method: "POST",
+      token: superAdminToken,
+      body: {
+        territoryType: "WARD",
+        territoryId: wardId,
+        metric: "VERIFIED_MEMBERS",
+        targetValue: 1,
+        startDate: "2026-08-01T00:00:00.000Z",
+      },
+    });
+    assert.equal(strengthTarget.status, 201, JSON.stringify(strengthTarget.payload));
+
+    const strengthSnapshot = await apiRequest("/pre-election/strength/snapshots/calculate", {
+      method: "POST",
+      token: superAdminToken,
+      body: { territoryType: "WARD", territoryId: wardId },
+    });
+    assert.equal(strengthSnapshot.status, 201, JSON.stringify(strengthSnapshot.payload));
+    const breakdown = (strengthSnapshot.payload.strengthSnapshot as { breakdown: Array<{ metric: string; actualValue: number }> }).breakdown;
+    const verifiedMembersMetric = breakdown.find((item) => item.metric === "VERIFIED_MEMBERS");
+    assert.ok(verifiedMembersMetric);
+    assert.equal(verifiedMembersMetric.actualValue, 1);
+
+    const targetProgress = await apiRequest(`/pre-election/strength/targets/progress?territoryType=WARD&territoryId=${wardId}`, {
+      token: superAdminToken,
+    });
+    assert.equal(targetProgress.status, 200, JSON.stringify(targetProgress.payload));
+    assert.equal((targetProgress.payload.progress as Array<{ metric: string; actualValue: number }>)[0].actualValue, 1);
 
     const approveAgain = await apiRequest(`/pre-election/verifications/${verificationCase.id}/decision`, {
       method: "PATCH",
