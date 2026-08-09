@@ -11,7 +11,7 @@ import {
   NotificationType,
 } from "@prisma/client";
 import { z } from "zod";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePollingUnitFieldCapability } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { validateTerritoryReferences } from "../lib/territory";
 import {
@@ -204,7 +204,7 @@ async function createAgentActivity(
   });
 }
 
-router.post("/check-in", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.post("/check-in", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = activityPayloadSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid check-in payload.", errors: parsed.error.flatten() });
@@ -218,7 +218,7 @@ router.post("/check-in", requireAuth, requireRole("AGENT"), async (request, resp
   }
 });
 
-router.post("/check-out", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.post("/check-out", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = activityPayloadSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid check-out payload.", errors: parsed.error.flatten() });
@@ -232,7 +232,7 @@ router.post("/check-out", requireAuth, requireRole("AGENT"), async (request, res
   }
 });
 
-router.post("/location", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.post("/location", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = activityPayloadSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid location payload.", errors: parsed.error.flatten() });
@@ -246,7 +246,7 @@ router.post("/location", requireAuth, requireRole("AGENT"), async (request, resp
   }
 });
 
-router.get("/activities", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.get("/activities", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = activityQuerySchema.safeParse(request.query);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid activity query.", errors: parsed.error.flatten() });
@@ -280,7 +280,7 @@ router.get("/activities", requireAuth, requireRole("AGENT"), async (request, res
   });
 });
 
-router.post("/incidents", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.post("/incidents", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = incidentSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid incident payload.", errors: parsed.error.flatten() });
@@ -344,7 +344,7 @@ router.post("/incidents", requireAuth, requireRole("AGENT"), async (request, res
   });
 });
 
-router.post("/election-report-assets/:kind", requireAuth, requireRole("AGENT"), electionDayReportUploadMiddleware, async (request, response) => {
+router.post("/election-report-assets/:kind", requireAuth, requirePollingUnitFieldCapability, electionDayReportUploadMiddleware, async (request, response) => {
   const rawKind = Array.isArray(request.params.kind) ? request.params.kind[0] : request.params.kind;
   const kind =
     rawKind === "arrival-photo"
@@ -391,7 +391,7 @@ router.post("/election-report-assets/:kind", requireAuth, requireRole("AGENT"), 
   });
 });
 
-router.get("/election-report-assets/:assetId", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.get("/election-report-assets/:assetId", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const assetId = Array.isArray(request.params.assetId) ? request.params.assetId[0] : request.params.assetId;
   if (!assetId) {
     return response.status(400).json({ message: "Invalid election report asset id." });
@@ -418,7 +418,7 @@ router.get("/election-report-assets/:assetId", requireAuth, requireRole("AGENT")
   return response.send(Buffer.from(asset.data));
 });
 
-router.get("/election-reports", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.get("/election-reports", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const reports = await prisma.electionDayReport.findMany({
     where: { agentUserId: request.authUser!.id },
     include: {
@@ -439,7 +439,7 @@ router.get("/election-reports", requireAuth, requireRole("AGENT"), async (reques
   });
 });
 
-router.post("/election-reports", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.post("/election-reports", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = electionDayReportSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid election report payload.", errors: parsed.error.flatten() });
@@ -552,7 +552,7 @@ router.post("/election-reports", requireAuth, requireRole("AGENT"), async (reque
   }
 });
 
-router.get("/incident-feedback", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.get("/incident-feedback", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const feedback = await prisma.feedback.findMany({
     where: { agentUserId: request.authUser!.id },
     orderBy: { createdAt: "desc" },
@@ -564,7 +564,7 @@ router.get("/incident-feedback", requireAuth, requireRole("AGENT"), async (reque
   });
 });
 
-router.get("/tasks", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.get("/tasks", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const tasks = await prisma.fieldTask.findMany({
     where: { assignedToUserId: request.authUser!.id },
     include: {
@@ -584,7 +584,7 @@ router.get("/tasks", requireAuth, requireRole("AGENT"), async (request, response
   });
 });
 
-router.patch("/tasks/:taskId", requireAuth, requireRole("AGENT"), async (request, response) => {
+router.patch("/tasks/:taskId", requireAuth, requirePollingUnitFieldCapability, async (request, response) => {
   const parsed = taskStatusSchema.safeParse(request.body);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid task update payload.", errors: parsed.error.flatten() });

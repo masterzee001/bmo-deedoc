@@ -73,8 +73,8 @@ export default function DashboardPage() {
       fetchVoterEngagementTasks(token),
     ]);
 
-    if (currentUser.role !== "VOTER") {
-      throw new ApiError("This starter dashboard is available to voters only.", 403);
+    if (currentUser.role !== "VOTER" && currentUser.role !== "MEMBER") {
+      throw new ApiError("This starter dashboard is available to members only.", 403);
     }
 
     setUser(currentUser);

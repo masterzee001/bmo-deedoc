@@ -2579,7 +2579,7 @@ router.get("/users/manage", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), as
       adminLevel: user.adminProfile?.adminLevel || null,
       officeType: user.candidateProfile?.officeType || null,
       politicalPartyId: user.adminProfile?.politicalPartyId || user.candidateProfile?.politicalPartyId || user.agentProfile?.politicalPartyId || null,
-      voterCardNumber: user.voterProfile?.voterCardNumber || null,
+      voterRegistrationRecorded: Boolean(user.voterProfile?.voterCardNumber),
     });
   }
 
@@ -3159,7 +3159,7 @@ router.get("/voters", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), async (r
       email: voter.email,
       phone: voter.phone,
       isActive: voter.isActive,
-      voterCardNumber: voter.voterProfile!.voterCardNumber,
+      voterRegistrationRecorded: Boolean(voter.voterProfile!.voterCardNumber),
       referralCode: voter.voterProfile!.referralCode,
       contactConsent: voter.voterProfile!.contactConsent,
       termsAcceptedAt: voter.voterProfile!.termsAcceptedAt?.toISOString() || null,
@@ -3189,7 +3189,6 @@ router.get("/voters/export", requireAuth, requireRole("SUPER_ADMIN"), async (req
       "name",
       "email",
       "phone",
-      "voterCardNumber",
       "referralCode",
       "termsAcceptedAt",
       "stateId",
@@ -3204,7 +3203,6 @@ router.get("/voters/export", requireAuth, requireRole("SUPER_ADMIN"), async (req
           escapeCsvValue(voter.name),
           escapeCsvValue(voter.email),
           escapeCsvValue(voter.phone),
-          escapeCsvValue(voter.voterProfile!.voterCardNumber),
           escapeCsvValue(voter.voterProfile!.referralCode),
           escapeCsvValue(voter.voterProfile!.termsAcceptedAt?.toISOString() || ""),
           escapeCsvValue(voter.voterProfile!.stateId),
@@ -3214,6 +3212,18 @@ router.get("/voters/export", requireAuth, requireRole("SUPER_ADMIN"), async (req
         ].join(","),
       ),
   ];
+
+  await createAuditLog(prisma, {
+    actorUserId: request.authUser!.id,
+    action: "VOTER_CONTACT_EXPORT",
+    targetType: "VOTER_EXPORT",
+    targetId: new Date().toISOString(),
+    metadata: {
+      recordCount: voters.length,
+      includedFields: ["name", "email", "phone", "referralCode", "termsAcceptedAt", "territoryIds"],
+      excludedSensitiveFields: ["voterCardNumber", "voterDocument"],
+    },
+  });
 
   response.setHeader("Content-Type", "text/csv; charset=utf-8");
   response.setHeader("Content-Disposition", `attachment; filename="voters-consented-${new Date().toISOString().slice(0, 10)}.csv"`);

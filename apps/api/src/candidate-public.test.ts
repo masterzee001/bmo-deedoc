@@ -52,6 +52,12 @@ function readUserId(payload: Record<string, unknown>): string {
   return user.id;
 }
 
+function readProfileUserId(payload: Record<string, unknown>): string {
+  const profile = payload.profile as { userId?: string } | undefined;
+  assert.ok(profile?.userId, "Response payload did not include a candidate profile user id.");
+  return profile.userId;
+}
+
 async function createCandidateFixture(token: string, suffix: string, officeType: string) {
   const email = `candidate-public-${suffix}@pics.ng`;
   createdUserEmails.add(email);
@@ -140,7 +146,8 @@ const cases: Case[] = [
           isProfilePublished: true,
         },
       });
-      assert.equal(profile.status, 200);
+      assert.equal(profile.status, 200, JSON.stringify(profile.payload));
+      const candidateUserId = readProfileUserId(profile.payload);
 
       const published = await apiRequest("/candidate/posts", {
         method: "POST",
@@ -166,8 +173,8 @@ const cases: Case[] = [
       });
       assert.equal(draft.status, 201);
 
-      const publicProfile = await apiRequest("/candidate/public/seed-user-candidate");
-      assert.equal(publicProfile.status, 200);
+      const publicProfile = await apiRequest(`/candidate/public/${candidateUserId}`);
+      assert.equal(publicProfile.status, 200, JSON.stringify(publicProfile.payload));
       const candidate = publicProfile.payload.candidate as { materials?: Array<{ title?: string }> };
       assert.ok(candidate.materials?.some((item) => item.title?.startsWith("Published material")));
       assert.ok(!candidate.materials?.some((item) => item.title?.startsWith("Draft material")));
@@ -212,6 +219,9 @@ const cases: Case[] = [
     name: "public candidate profile shows only published upcoming events",
     run: async () => {
       const token = await login("candidate@pics.ng", "Candidate123!");
+      const profile = await apiRequest("/candidate/profile", { token });
+      assert.equal(profile.status, 200, JSON.stringify(profile.payload));
+      const candidateUserId = readProfileUserId(profile.payload);
 
       const published = await apiRequest("/candidate/events", {
         method: "POST",
@@ -239,8 +249,8 @@ const cases: Case[] = [
       });
       assert.equal(draft.status, 201);
 
-      const publicProfile = await apiRequest("/candidate/public/seed-user-candidate");
-      assert.equal(publicProfile.status, 200);
+      const publicProfile = await apiRequest(`/candidate/public/${candidateUserId}`);
+      assert.equal(publicProfile.status, 200, JSON.stringify(publicProfile.payload));
       const candidate = publicProfile.payload.candidate as { upcomingEvents?: Array<{ title?: string }> };
       assert.ok(candidate.upcomingEvents?.some((item) => item.title?.startsWith("Town hall")));
       assert.ok(!candidate.upcomingEvents?.some((item) => item.title?.startsWith("Draft strategy meeting")));

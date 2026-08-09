@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hashCanonicalization": "UTF-8 with LF line endings",
+  "migrations": [
+    {
+      "name": "20260809000000_ogun_postgresql_baseline",
+      "sha256": "54ecb637075cc952fca4b0969dec080c5d3e5ca2ded16793e14e5c3372dc6d63"
+    },
+    {
+      "name": "20260809010000_phase1_role_territory_foundation",
+      "sha256": "8a1e5ee41d5f757826b4f93de85b4ebac81a84d0d570df71d68d69e1109a0e89"
+    }
+  ]
+}

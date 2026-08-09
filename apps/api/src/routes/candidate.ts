@@ -1536,7 +1536,7 @@ router.get("/voters", requireAuth, requireRole("CANDIDATE"), async (request, res
         name: voter.name,
         emailMask: maskEmail(voter.email),
         phoneMask: maskPhone(voter.phone),
-        voterCardNumber: voter.voterProfile!.voterCardNumber,
+        voterRegistrationRecorded: Boolean(voter.voterProfile!.voterCardNumber),
         contactConsent: voter.voterProfile!.contactConsent,
         termsAcceptedAt: voter.voterProfile!.termsAcceptedAt?.toISOString() || null,
         territory: serializeTerritory(voter.voterProfile!),

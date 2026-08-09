@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ogun_ci
+          POSTGRES_USER: ogun_ci
+          POSTGRES_PASSWORD: ogun_ci_local_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ogun_ci -d ogun_ci"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://ogun_ci:ogun_ci_local_only@127.0.0.1:5432/ogun_ci?schema=public
+      JWT_SECRET: phase0-ci-only-jwt-secret-64-characters-minimum-value
+      JWT_EXPIRES_IN: 15m
+      JWT_ISSUER: ogun-election-operations-api-test
+      JWT_AUDIENCE: ogun-election-operations-web-test
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify documentation and migration streams
+        run: npm run verify:repository
+
+      - name: Generate and validate Prisma client
+        run: npm run prisma:generate && npm run prisma:validate
+
+      - name: Type-check workspaces
+        run: npm run lint
+
+      - name: Build workspaces
+        run: npm run build
+
+      - name: Run isolated database integration tests
+        run: npm run test:integration:ci
+
+      - name: Reject critical dependency advisories
+        run: npm audit --audit-level=critical

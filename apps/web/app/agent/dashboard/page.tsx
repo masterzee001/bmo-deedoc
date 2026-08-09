@@ -56,8 +56,11 @@ export default function AgentDashboardPage() {
       fetchNotifications(token),
     ]);
 
-    if (currentUser.role !== "AGENT") {
-      throw new ApiError("This dashboard is available to agents only.", 403);
+    const hasPollingUnitFieldAccess =
+      currentUser.role === "AGENT" ||
+      (currentUser.role === "COORDINATOR" && currentUser.coordinatorProfile?.level === "POLLING_UNIT" && currentUser.agentProfile);
+    if (!hasPollingUnitFieldAccess) {
+      throw new ApiError("This dashboard is available to Polling Unit field coordinators only.", 403);
     }
 
     setUser(currentUser);
