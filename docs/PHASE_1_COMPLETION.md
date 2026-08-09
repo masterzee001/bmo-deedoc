@@ -97,6 +97,7 @@ Final command evidence is recorded below after the clean disposable PostgreSQL r
 | API/integration tests | PASS; 22 of 22 cases, including 6 Phase 1 architecture/security cases |
 | Dependency critical gate | PASS; 0 critical findings, with 4 high and 1 low findings still tracked under Phase 0 controls |
 | Strict Ogun reference gate | BLOCKED as designed on missing authoritative lower-level data; structural `--allow-incomplete` check passes |
+| Hosted CI | PASS; `CI / validate` run `31300468657` completed on commit `f9f0762` |
 
 ## Transitional Code
 
@@ -111,8 +112,7 @@ Final command evidence is recorded below after the clean disposable PostgreSQL r
 1. Approve and import versioned Ogun LGAs, 26 State Constituencies, Wards, Polling Units, and direct command-parent mappings. Current real lower-level assignments remain blocked.
 2. Run the Phase 0 production-derived migration rehearsal against an approved sanitized snapshot and migration-history export.
 3. Review the dry-run production identity exception report before any `--apply` execution.
-4. Commit/push the reviewed branch and obtain a green hosted CI run on that exact commit.
-5. Retire legacy role/routes only after dual-read reconciliation and dependent frontend/domain cutover.
+4. Retire legacy role/routes only after dual-read reconciliation and dependent frontend/domain cutover.
 
 ## Parallel Development Gate
 

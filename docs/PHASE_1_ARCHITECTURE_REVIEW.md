@@ -4,7 +4,7 @@
 - **Review branch:** `phase-1-ogun-territory-role-architecture`
 - **Scope:** Complete Phase 0 and Phase 1 worktree
 - **Phase 2:** Not started
-- **Architecture decision:** Approved subject to the external production rehearsal and hosted CI gates recorded below
+- **Architecture decision:** Approved; production-derived rehearsal remains an external deployment gate
 
 ## Governing Contract
 
@@ -34,6 +34,7 @@ The gate review identified and resolved the following before publication:
 5. Ogun reference verification now treats Polling Unit identity/provenance and Polling Unit geodata as separate gates. Missing coordinates do not block Pre-Election identity work.
 6. Identity migration apply now requires an active, non-suspended Super Admin actor.
 7. Agent preservation coverage now explicitly verifies GPS consent, session nonce, activities, tasks, incidents, Election Day reports and assets, notifications, and audit history.
+8. Migration checksum verification now normalizes SQL to repository-canonical LF and `.gitattributes` enforces LF SQL checkouts, preventing platform-specific false failures without changing migration SQL.
 
 ## Migration Integrity
 
@@ -71,16 +72,16 @@ Real lower-level Ogun data remains unavailable. The organization tree therefore 
 
 ### Hosted CI
 
-`PENDING` until the reviewed branch commit is pushed. Required job: `CI / validate` covering install, repository integrity, Prisma generation/validation, lint, build, isolated PostgreSQL migration/reconciliation tests, API tests, and the critical dependency gate.
+`PASS`. Hosted [`CI / validate`](https://github.com/masterzee001/bmo-deedoc/actions/runs/31300468657) completed successfully on reviewed commit `f9f0762c7661750da42e77465d718ea62e4b8a8f`. It covered install, repository integrity, Prisma generation/validation, lint, build, isolated PostgreSQL migration/reconciliation tests, all API tests, and the critical dependency gate.
 
 ## Parallel Ownership Gate
 
 | Owner | Readiness | Boundary |
 |---|---|---|
 | Platform Lead | Ready | Owns/reviews schema, migrations, shared contracts, auth/JWT, territory authorization, organization tree, identity migration, and cross-team integration |
-| Developer 2 - Pre-Election | Ready after green hosted CI | May build on locked roles/territories; lower-level real assignments remain gated by approved identity data |
-| Developer 3 - Election Day | Partial after green hosted CI | May build non-geodata foundations; GPS, geofence, and location alerts remain blocked on approved PU identity/geodata |
-| Developer 4 - Evidence | Ready after green hosted CI | May build private evidence boundaries; shared schema/migrations require Platform Lead review |
+| Developer 2 - Pre-Election | Ready | May build on locked roles/territories; lower-level real assignments remain gated by approved identity data |
+| Developer 3 - Election Day | Partial | May build non-geodata foundations; GPS, geofence, and location alerts remain blocked on approved PU identity/geodata |
+| Developer 4 - Evidence | Ready | May build private evidence boundaries; shared schema/migrations require Platform Lead review |
 
 No developer may independently change shared enums, Prisma schema, migrations, target authorization, or canonical territory rules without Platform Lead review.
 
@@ -100,4 +101,4 @@ No developer may independently change shared enums, Prisma schema, migrations, t
 | Polling Unit geodata | BLOCKED independently; does not block Pre-Election identity work |
 | Disposable cleanup | PASS; integration shadow database, container, network, and volume destroyed |
 
-Hosted CI evidence is recorded only after GitHub reports the exact pushed commit green.
+Hosted CI is green on the reviewed implementation and checksum-canonicalization commit recorded above.

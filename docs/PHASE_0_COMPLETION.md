@@ -73,14 +73,13 @@ Redis, realtime, workers, object storage, and STUN/TURN remain TARGET services a
 
 ## CI Status
 
-`.github/workflows/ci.yml` provides Node 22 and PostgreSQL 16 and runs locked install, repository integrity, Prisma generation/validation, type-check, build, database integration, and critical-advisory rejection. It does not deploy. Equivalent commands pass locally, but a hosted GitHub Actions run has not yet been observed.
+`.github/workflows/ci.yml` provides Node 22 and PostgreSQL 16 and runs locked install, repository integrity, Prisma generation/validation, type-check, build, database integration, and critical-advisory rejection. It does not deploy. Hosted `CI / validate` run `31300468657` passed on the combined reviewed Phase 0 and Phase 1 branch.
 
 ## Remaining Blockers
 
 1. Obtain production schema and `_prisma_migrations` exports, restore a sanitized snapshot, and rehearse exact-schema baseline, application smoke tests, rollback, and backup restoration.
 2. Obtain authoritative Ogun data with provenance for 26 State Constituencies, 20 LGAs, all Wards and Polling Units, direct constituency memberships, Polling Unit codes, coordinates, and geofence attributes.
 3. Review and accept or remediate the remaining Next/PostCSS/Sharp and `xlsx` high-risk findings.
-4. Run and approve the hosted CI workflow on the intended integration branch.
 
 ## Remaining Critical/High Vulnerabilities
 
@@ -141,24 +140,23 @@ Territory identity and geodata are separate gates. Missing Polling Unit coordina
 
 ### Hosted CI
 
-`BLOCKED / NOT EXECUTED`. GitHub authentication is available, but `origin/main` reports zero Actions workflows because `.github/workflows/ci.yml` remains uncommitted as required. The exact remaining action is: review the Phase 0 worktree, commit it without amendment, push a review branch, open the reviewed pull request or merge through the approved process, and require the `CI / validate` job to pass on that exact commit. Do not treat the local CI-equivalent run as hosted CI.
+`PASS`. The combined reviewed Phase 0 and Phase 1 branch ran hosted `CI / validate` successfully in run `31300468657` on commit `f9f0762`. The job completed repository integrity, Prisma generation/validation, type-check, build, isolated PostgreSQL verification, all API tests, and the critical-advisory gate without deployment.
 
 ### Disposable DB Test
 
-`PASS`. The closure rerun creates isolated PostgreSQL 16, applies the baseline, verifies both reconciliation branches, seeds/bootstrap approved references, runs structural Ogun verification, passes 16 of 16 API integration cases, and destroys its container, network, and volume.
+`PASS`. The combined review rerun creates isolated PostgreSQL 16, applies both Ogun migrations, reconstructs and reconciles an untracked baseline, seeds/bootstrap approved references, runs structural Ogun verification, passes 22 of 22 API integration cases, and destroys its shadow database, container, network, and volume.
 
 ### Migration Integrity
 
-`PASS`. `legacy_migrations_verified=17`, `ogun_migrations_verified=1`, and `migration_integrity=ok`. No existing migration was edited, deleted, renamed, or reordered.
+`PASS`. `legacy_migrations_verified=17`, `ogun_migrations_verified=2`, and `migration_integrity=ok`. No existing migration was edited, deleted, renamed, or reordered.
 
 ### Remaining Blockers
 
 1. Execute and approve the production-derived rehearsal using a sanitized snapshot and migration-history export.
 2. Approve and ingest versioned Ogun LGA, Ward, Polling Unit, and required constituency-membership identity data without manufacturing records.
-3. Commit/push only after review and obtain a green hosted `CI / validate` result on the reviewed commit.
 
 The four high dependency findings are accepted temporarily under documented controls and are tracked risks, not Phase 1 blockers. Polling Unit geodata is a later Election Day GPS gate rather than an early role-contract blocker.
 
 ### Phase 1 Decision
 
-`NO` at this review point. The target provider, baseline, immutable migration policy, roles, coordinator levels, command hierarchy, LGA rule, Candidate treatment, legacy Agent direction, shared contract home, review policy, approved upper-level Ogun references, and missing lower-level data are all explicit. However, the current work is still uncommitted, hosted CI is unexecuted, production-derived rehearsal is blocked, and lower-level territory identity is not approved. Four-developer parallel work is not authorized. After closure blockers 1-3 are accepted or resolved, the Platform Lead may authorize controlled **Phase 1 - Ogun Territory and Role Architecture** before broader parallel implementation.
+The historical Phase 0 decision at the time of closure was `NO`. It has been superseded by the completed Phase 1 implementation, architecture review, branch publication, and green hosted CI recorded in `PHASE_1_ARCHITECTURE_REVIEW.md`. Production-derived rehearsal and lower-level reference-data approval remain deployment/data gates rather than blockers to controlled parallel development under Platform Lead ownership.
