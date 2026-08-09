@@ -12,7 +12,8 @@ const ogunManifest = JSON.parse(readFileSync(path.join(prismaRoot, "ogun-migrati
 const failures = [];
 
 function sha256(filePath) {
-  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  const canonicalSql = readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
+  return createHash("sha256").update(canonicalSql).digest("hex");
 }
 
 const expectedLegacyNames = new Set(manifest.migrations.map((migration) => migration.name));
