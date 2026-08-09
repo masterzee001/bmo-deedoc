@@ -301,6 +301,13 @@ export type ElectionDayRealtimeEnvelope = PlatformEventEnvelope<
 
 export type RealtimePresenceState = "ONLINE" | "ACTIVE_RECENTLY" | "OFFLINE" | "IN_CALL";
 
+export type RealtimePresenceEntry = {
+  userId: string;
+  state: RealtimePresenceState;
+  lastSeenAt: string;
+  socketCount: number;
+};
+
 export type RealtimeGatewayStatus = {
   runtimeStatus: RealtimeRuntimeStatus;
   restFallbackAvailable: boolean;
@@ -373,6 +380,102 @@ export type ElectionDaySituationRoomStatus = {
     detectedAt: string;
   }>;
   pollingUnits: ElectionDayPollingUnitStatus[];
+};
+
+export type ElectionDayOperationalAlertItem = {
+  id: string;
+  type: ElectionDayAlertType | string;
+  status: ElectionDayAlertStatus;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  message: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  actorUserId: string | null;
+  acknowledgedByUserId: string | null;
+  resolvedByUserId: string | null;
+  territory: OperationalTerritory;
+  metadata: Record<string, unknown> | null;
+  detectedAt: string;
+  acknowledgedAt: string | null;
+  escalatedAt: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ElectionDayConversationItem = {
+  id: string;
+  type: "DIRECT" | "GROUP" | "TERRITORY" | "ELECTION_OPERATION";
+  title: string | null;
+  territory: OperationalTerritory;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+  members: Array<{
+    userId: string;
+    name: string;
+    role: string;
+    roleLabel: string | null;
+    presence: RealtimePresenceState;
+    lastSeenAt: string | null;
+    lastReadAt: string | null;
+  }>;
+  lastMessage: ElectionDayMessageItem | null;
+  unreadCount: number;
+};
+
+export type ElectionDayMessageItem = {
+  id: string;
+  conversationId: string;
+  senderUserId: string;
+  senderName: string;
+  body: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  editedAt: string | null;
+  deletedAt: string | null;
+  receipts: Array<{
+    userId: string;
+    status: "DELIVERED" | "READ";
+    deliveredAt: string | null;
+    readAt: string | null;
+  }>;
+  attachments: Array<{
+    id: string;
+    evidenceAssetId: string | null;
+    fileName: string | null;
+    mimeType: string | null;
+    fileSize: number | null;
+    sha256: string | null;
+  }>;
+};
+
+export type ElectionDayTimelineItem = {
+  id: string;
+  type: "ALERT" | "INCIDENT" | "REPORT" | "MESSAGE" | "ACTIVITY" | "REALTIME_EVENT";
+  title: string;
+  detail: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
+  pollingUnitId: string | null;
+  actorUserId: string | null;
+  occurredAt: string;
+  metadata: Record<string, unknown> | null;
+};
+
+export type ElectionDayWebrtcConfig = {
+  signalling: {
+    transport: "socket.io";
+    path: string;
+    events: ["call.ringing", "call.connected", "call.ended", "call.signal"];
+  };
+  iceServers: Array<{
+    urls: string | string[];
+    username?: string;
+    credential?: string;
+  }>;
+  turnConfigured: boolean;
+  recording: "DISABLED";
+  durableCallHistory: "BLOCKED_SCHEMA_REVIEW_REQUIRED";
 };
 
 export type PlatformAuditEnvelope = {
