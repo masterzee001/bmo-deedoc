@@ -152,6 +152,29 @@ The identity release contains stable canonical IDs, source codes, names and alia
 
 The importer must stage and validate the complete release before writing. Apply uses transactional upserts keyed by canonical ID, records release provenance on each imported record, produces create/update/unchanged/blocked counts, and is idempotent on rerun. It performs no implicit deletes; records absent from a later release require an explicit reviewed retirement list and dependency report.
 
+Implemented contract:
+
+- Shared types and constants live in `packages/shared/src/ogun-reference-contracts.ts`.
+- Import releases are recorded in `ReferenceDataImportRelease` with manifest/file hashes, declared counts, source-code namespaces, approval metadata, status, and supersession metadata.
+- Lower-level Ogun identity rows persist `sourceCode`, `sourceCodeNamespace`, aliases, `referenceImportReleaseId`, and `referenceImportedAt` on `StateConstituency`, `LGA`, `Ward`, and `PollingUnit`.
+- Polling Unit geodata is stored separately on `PollingUnit` with coordinates, accuracy, capture metadata, geofence radius, `geodataImportReleaseId`, and `geodataImportedAt`.
+- `npm run validate:reference:ogun-release --workspace @pics-nigeria/database -- --release-dir <path>` validates a checked-in release without writing.
+- `npm run import:reference:ogun --workspace @pics-nigeria/database -- --release-dir <path> --apply` applies a validated release transactionally. Without `--apply`, the script validates only.
+
+Identity release CSV contract:
+
+| File | Required columns |
+|---|---|
+| `territories.csv` | `kind`, `canonicalId`, `stateId`, `name`, `sourceCodeNamespace`, `sourceCode`, `aliases`, `lgaId`, `federalConstituencyId`, `stateConstituencyId`, `wardId` |
+| `command-relationships.csv` | `parentKind`, `parentId`, `childKind`, `childId` |
+| `lga-memberships.csv` | `territoryKind`, `territoryId`, `lgaId` |
+
+Geodata release CSV contract:
+
+| File | Required columns |
+|---|---|
+| `polling-unit-geodata.csv` | `pollingUnitId`, `latitude`, `longitude`, `accuracyMeters`, `captureMethod`, `capturedAt`, `source`, `geofenceRadiusMeters` |
+
 ## Identity And Geodata Gates
 
 Polling Unit identity and Polling Unit geodata are separate release tracks:
@@ -169,8 +192,9 @@ An identity import can be approved while geodata remains unavailable. Missing co
 2. Platform Lead reviews canonical-ID reuse and the generated duplicate/orphan/conflict report.
 3. The importer runs first in disposable PostgreSQL and runs twice to prove idempotency.
 4. `npm run verify:reference:ogun` must pass the identity gate without `--allow-incomplete`; geodata readiness is reported separately.
-5. Representative organization-tree and cross-territory authorization tests must pass against the imported release.
-6. Production import requires backup, aggregate before/after counts, a no-delete assertion, and reviewer sign-off.
+5. `npm run verify:reference:ogun --workspace @pics-nigeria/database -- --require-geodata` is required before Election Day GPS/geofence features use Polling Unit location data.
+6. Representative organization-tree and cross-territory authorization tests must pass against the imported release.
+7. Production import requires backup, aggregate before/after counts, a no-delete assertion, and reviewer sign-off.
 
 ## Import Acceptance Gate
 

@@ -63,6 +63,10 @@ export const REWARD_EVENT_TYPES = [
   "MANUAL_ADJUSTMENT",
 ] as const;
 
+export const REWARD_QUALIFYING_EVENTS = ["VOTER_VERIFICATION_APPROVED"] as const;
+
+export const REWARD_EVENT_STATUSES = ["PENDING", "PROCESSED", "SKIPPED"] as const;
+
 export const PAYOUT_STATUSES = [
   "PENDING",
   "ELIGIBLE",
@@ -85,6 +89,47 @@ export const POLLING_UNIT_OPERATIONAL_STATUSES = [
   "COMPLETED",
 ] as const;
 
+export const ELECTION_DAY_GEOFENCE_STATUSES = [
+  "NOT_EVALUATED",
+  "IN_RANGE",
+  "OUT_OF_RANGE_REVIEW_REQUIRED",
+  "LOCATION_UNKNOWN",
+  "GATED_AUTHORITATIVE_PU_GEODATA_REQUIRED",
+] as const;
+
+export const ELECTION_DAY_ALERT_TYPES = [
+  "NO_CHECK_IN",
+  "TRACKING_STOPPED",
+  "LOCATION_STALE",
+  "LOCATION_MISMATCH",
+  "GPS_PERMISSION_DISABLED",
+  "DEVICE_SESSION_CHANGED",
+  "REPORT_OVERDUE",
+] as const;
+
+export const ELECTION_DAY_ALERT_STATUSES = [
+  "OPEN",
+  "ACKNOWLEDGED",
+  "ESCALATED",
+  "RESOLVED",
+] as const;
+
+export const ELECTION_DAY_REALTIME_EVENT_TYPES = [
+  "election.checkin.created",
+  "election.location.updated",
+  "election.tracking.stale",
+  "election.location.mismatch",
+  "election.incident.created",
+  "election.incident.updated",
+  "election.report.submitted",
+  "election.report.reviewed",
+  "election.result.submitted",
+  "message.created",
+  "call.ringing",
+  "call.connected",
+  "call.ended",
+] as const;
+
 export const EVIDENCE_TYPES = ["PHOTO", "VIDEO", "WRITTEN_REPORT"] as const;
 
 export const EVIDENCE_REVIEW_STATUSES = [
@@ -104,8 +149,14 @@ export type Phase1AuthAction = (typeof PHASE_1_AUTH_ACTIONS)[number];
 export type VoterVerificationStatus = (typeof VOTER_VERIFICATION_STATUSES)[number];
 export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
 export type RewardEventType = (typeof REWARD_EVENT_TYPES)[number];
+export type RewardQualifyingEvent = (typeof REWARD_QUALIFYING_EVENTS)[number];
+export type RewardEventStatus = (typeof REWARD_EVENT_STATUSES)[number];
 export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 export type PollingUnitOperationalStatus = (typeof POLLING_UNIT_OPERATIONAL_STATUSES)[number];
+export type ElectionDayGeofenceStatus = (typeof ELECTION_DAY_GEOFENCE_STATUSES)[number];
+export type ElectionDayAlertType = (typeof ELECTION_DAY_ALERT_TYPES)[number];
+export type ElectionDayAlertStatus = (typeof ELECTION_DAY_ALERT_STATUSES)[number];
+export type ElectionDayRealtimeEventType = (typeof ELECTION_DAY_REALTIME_EVENT_TYPES)[number];
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export type EvidenceReviewStatus = (typeof EVIDENCE_REVIEW_STATUSES)[number];
 
@@ -200,6 +251,71 @@ export type PlatformEventEnvelope<TType extends string, TPayload> = {
     pollingUnitId?: string | null;
   } | null;
   payload: TPayload;
+};
+
+export type ElectionDayLocationEvaluation = {
+  status: ElectionDayGeofenceStatus;
+  checkedAt: string;
+  reason: string | null;
+  distanceMeters: number | null;
+  accuracyMeters: number | null;
+};
+
+export type ElectionDayPollingUnitStatus = {
+  pollingUnitId: string;
+  pollingUnitName: string | null;
+  coordinatorUserId: string | null;
+  coordinatorName: string | null;
+  operationalStatus: PollingUnitOperationalStatus;
+  checkedInAt: string | null;
+  lastSeenAt: string | null;
+  lastLocation: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters: number | null;
+    capturedAt: string;
+  } | null;
+  openIncidentCount: number;
+  reportStatus: "NOT_SUBMITTED" | "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED";
+  resultSubmitted: boolean;
+  evidenceReceived: boolean;
+  geofence: ElectionDayLocationEvaluation;
+};
+
+export type ElectionDaySituationRoomStatus = {
+  generatedAt: string;
+  territory: OperationalTerritory;
+  realtime: {
+    runtimeStatus: "TARGET_NOT_RUNNING" | "AVAILABLE";
+    restFallbackAvailable: boolean;
+    contractVersion: 1;
+    eventTypes: ElectionDayRealtimeEventType[];
+  };
+  totals: {
+    expectedPollingUnits: number;
+    assignedPollingUnits: number;
+    checkedInPollingUnits: number;
+    missingCheckIns: number;
+    activeRecently: number;
+    openIncidents: number;
+    criticalIncidents: number;
+    reportsReceived: number;
+    reportsOutstanding: number;
+    resultReportsReceived: number;
+    evidenceReceived: number;
+    completedPollingUnits: number;
+    reportingPercentage: number;
+  };
+  byOpeningStatus: Record<string, number>;
+  byReportStatus: Record<string, number>;
+  alerts: Array<{
+    type: ElectionDayAlertType;
+    status: ElectionDayAlertStatus;
+    pollingUnitId: string;
+    message: string;
+    detectedAt: string;
+  }>;
+  pollingUnits: ElectionDayPollingUnitStatus[];
 };
 
 export type PlatformAuditEnvelope = {

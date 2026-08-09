@@ -1,14 +1,18 @@
 import { Router } from "express";
 import crypto from "node:crypto";
-import { NotificationType, Prisma, RewardType, UserRole } from "@prisma/client";
+import {
+  Prisma,
+  ReferralStatus,
+  UserRole,
+  VoterVerificationDecision,
+  VoterVerificationStatus,
+} from "@prisma/client";
 import { z } from "zod";
 import { normalizeEmail } from "@pics-nigeria/shared";
 import { signAccessToken } from "../auth/jwt";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { getAuthUserProfile } from "../auth/profile";
 import { generateUniqueReferralCode } from "../auth/referral";
-import { createRewardEntryWithNotification } from "../lib/rewards";
-import { recordParticipationAndReward } from "../lib/participation";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth } from "../middleware/auth";
@@ -54,8 +58,31 @@ const registerVoterSchema = z.object({
   pollingUnitId: z.string().trim().min(1),
   referredByCode: z.string().trim().min(4).optional(),
   acceptTerms: z.boolean().optional(),
+  acceptPrivacy: z.boolean().optional(),
   contactConsent: z.boolean().optional(),
+  documentProcessingConsent: z.boolean().optional(),
   confirmAdult: z.boolean().optional(),
+  consentVersion: z.string().trim().max(50).optional(),
+  voterDocument: z
+    .object({
+      originalStorageKey: z
+        .string()
+        .trim()
+        .min(20)
+        .max(500)
+        .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
+      previewStorageKey: z
+        .string()
+        .trim()
+        .max(500)
+        .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
+        .optional(),
+      originalFileName: z.string().trim().min(1).max(255),
+      mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
+      fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
+      sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
+    })
+    .optional(),
 });
 
 router.post("/login", async (request, response) => {
@@ -286,9 +313,15 @@ router.post("/register-voter", async (request, response) => {
   }
 
   // Legacy frontend bundles may omit these fields until all public clients refresh.
-  if (parsed.data.acceptTerms === false || parsed.data.contactConsent === false) {
+  if (parsed.data.acceptTerms === false || parsed.data.acceptPrivacy === false || parsed.data.contactConsent === false) {
     return response.status(400).json({
       message: "You must accept the terms and consent agreement to register.",
+    });
+  }
+
+  if (parsed.data.voterDocument && parsed.data.documentProcessingConsent !== true) {
+    return response.status(400).json({
+      message: "Document processing consent is required before submitting voter evidence.",
     });
   }
 
@@ -367,28 +400,44 @@ router.post("/register-voter", async (request, response) => {
     return response.status(400).json({ message: "Polling unit does not belong to the selected ward." });
   }
 
-  let referrer: { id: string; email: string } | null = null;
+  let referrer: { id: string; email: string; referralCodeId: string | null; referralCode: string } | null = null;
   const referralCodeInput = parsed.data.referredByCode?.trim().toUpperCase();
 
   if (referralCodeInput) {
-    const referrerProfile = await prisma.voterProfile.findUnique({
-      where: { referralCode: referralCodeInput },
+    const coordinatorReferralCode = await prisma.referralCode.findUnique({
+      where: { code: referralCodeInput },
       include: {
-        user: {
+        ownerUser: {
           select: { id: true, email: true },
         },
       },
     });
+    const referrerProfile = coordinatorReferralCode
+      ? null
+      : await prisma.voterProfile.findUnique({
+          where: { referralCode: referralCodeInput },
+          include: {
+            user: {
+              select: { id: true, email: true },
+            },
+          },
+        });
 
-    if (!referrerProfile) {
+    if (!coordinatorReferralCode && !referrerProfile) {
       return response.status(400).json({ message: "Referral code is invalid." });
     }
 
-    if (normalizeEmail(referrerProfile.user.email) === email) {
+    const owner = coordinatorReferralCode?.ownerUser || referrerProfile!.user;
+    if (normalizeEmail(owner.email) === email) {
       return response.status(400).json({ message: "You cannot refer yourself." });
     }
 
-    referrer = referrerProfile.user;
+    referrer = {
+      id: owner.id,
+      email: owner.email,
+      referralCodeId: coordinatorReferralCode?.id || null,
+      referralCode: referralCodeInput,
+    };
   }
 
   const referralCode = await generateUniqueReferralCode();
@@ -399,6 +448,9 @@ router.post("/register-voter", async (request, response) => {
     referredByUserId: referrer?.id || null,
     contactConsent: parsed.data.contactConsent ?? true,
     termsAcceptedAt: new Date(),
+    privacyAcceptedAt: new Date(),
+    documentConsentAt: parsed.data.voterDocument ? new Date() : null,
+    consentVersion: parsed.data.consentVersion || "pre-election-v1",
     stateId: parsed.data.stateId,
     senatorialDistrictId: parsed.data.senatorialDistrictId || null,
     federalConstituencyId: parsed.data.federalConstituencyId || null,
@@ -432,33 +484,74 @@ router.post("/register-voter", async (request, response) => {
           },
         });
 
-    if (referrer) {
-      const existingReward = await transaction.rewardLedger.findFirst({
-        where: {
-          voterUserId: referrer.id,
-          type: RewardType.REFERRAL,
-          relatedUserId: user.id,
-        },
-        select: { id: true },
-      });
+    const duplicateDocument = parsed.data.voterDocument
+      ? await transaction.voterVerificationDocument.findFirst({
+          where: {
+            sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+            verification: {
+              memberUserId: { not: user.id },
+            },
+          },
+          select: { id: true },
+        })
+      : null;
 
-      if (!existingReward) {
-        await createRewardEntryWithNotification(transaction, {
-          voterUserId: referrer.id,
-          type: RewardType.REFERRAL,
-          points: 10,
-          description: `Referral reward for ${parsed.data.fullName.trim()}`,
-          relatedUserId: user.id,
-        });
-      }
-    }
-
-    await recordParticipationAndReward(transaction, {
-      voterUserId: user.id,
-      type: "VOTER_REGISTRATION",
-      description: "Completed voter registration",
-      pointsAwarded: 10,
+    const verification = await transaction.voterVerification.create({
+      data: {
+        memberUserId: user.id,
+        voterIdentifier: voterCardNumber,
+        status: parsed.data.voterDocument ? VoterVerificationStatus.PENDING : VoterVerificationStatus.NOT_SUBMITTED,
+        isFlagged: Boolean(duplicateDocument),
+        fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+        submittedAt: parsed.data.voterDocument ? new Date() : null,
+        documents: parsed.data.voterDocument
+          ? {
+              create: {
+                originalStorageKey: parsed.data.voterDocument.originalStorageKey,
+                previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
+                originalFileName: parsed.data.voterDocument.originalFileName,
+                mimeType: parsed.data.voterDocument.mimeType,
+                fileSize: parsed.data.voterDocument.fileSize,
+                sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+                storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+              },
+            }
+          : undefined,
+      },
     });
+
+    await transaction.voterVerificationHistory.create({
+      data: {
+        verificationId: verification.id,
+        actorUserId: user.id,
+        fromStatus: null,
+        toStatus: verification.status,
+        decision: parsed.data.voterDocument
+          ? duplicateDocument
+            ? VoterVerificationDecision.FLAGGED
+            : VoterVerificationDecision.SUBMITTED
+          : VoterVerificationDecision.NOTE_ADDED,
+        note: parsed.data.voterDocument
+          ? duplicateDocument
+            ? "Registration evidence submitted and flagged for duplicate document hash."
+            : "Registration evidence submitted for validation."
+          : "Registration completed without voter evidence submission.",
+      },
+    });
+
+    if (referrer) {
+      await transaction.referral.create({
+        data: {
+          referredUserId: user.id,
+          referrerUserId: referrer.id,
+          referralCodeId: referrer.referralCodeId,
+          referralCode: referrer.referralCode,
+          status: duplicateDocument ? ReferralStatus.FLAGGED : ReferralStatus.PENDING_VERIFICATION,
+          flaggedAt: duplicateDocument ? new Date() : null,
+          fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+        },
+      });
+    }
 
     return user;
   });

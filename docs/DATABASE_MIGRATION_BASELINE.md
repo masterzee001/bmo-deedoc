@@ -30,6 +30,17 @@ The repository now has two explicit streams:
 2. Run `npm run db:dev:up` to start PostgreSQL 16 on the configured development port.
 3. Run `npm run prisma:migrate:deploy`, `npm run seed`, and `npm run bootstrap:reference-data`.
 4. Run `npm run prisma:validate` and `npm run verify:reference:ogun:allow-incomplete`.
+
+Ogun lower-level reference-data releases must be rehearsed after the schema migration and before production apply:
+
+```bash
+npm run validate:reference:ogun-release --workspace @pics-nigeria/database -- --release-dir packages/database/reference/ogun/<release-id>
+npm run import:reference:ogun --workspace @pics-nigeria/database -- --release-dir packages/database/reference/ogun/<release-id> --apply
+npm run import:reference:ogun --workspace @pics-nigeria/database -- --release-dir packages/database/reference/ogun/<release-id> --apply
+npm run verify:reference:ogun --workspace @pics-nigeria/database
+```
+
+The repeated import is the idempotency rehearsal. Do not use `--require-geodata` unless the release is a separately approved Polling Unit geodata release and Election Day geofence readiness is being rehearsed.
 5. Use `npm run test:integration:docker` for the complete isolated create, migrate, seed, bootstrap, test, and destroy cycle.
 6. Run `npm run db:dev:destroy` only for a disposable local environment. It is never a production procedure.
 

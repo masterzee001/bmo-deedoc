@@ -1,6 +1,17 @@
 import { Router } from "express";
+import crypto from "node:crypto";
 import type { Request, Response } from "express";
-import { CampaignEventRsvpStatus, IncidentSeverity, IncidentStatus, IncidentType, NotificationType, RewardRedemptionStatus, RewardType } from "@prisma/client";
+import {
+  CampaignEventRsvpStatus,
+  IncidentSeverity,
+  IncidentStatus,
+  IncidentType,
+  NotificationType,
+  RewardRedemptionStatus,
+  RewardType,
+  VoterVerificationDecision,
+  VoterVerificationStatus,
+} from "@prisma/client";
 import { z } from "zod";
 import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
 import { requireAuth, requireMemberCapability } from "../middleware/auth";
@@ -57,6 +68,29 @@ const redemptionSchema = z.object({
   pointsRequested: z.number().int().min(1),
   amountRequested: z.number().positive().optional(),
   note: z.string().trim().max(500).optional(),
+});
+
+const verificationUploadRequestSchema = z.object({
+  originalFileName: z.string().trim().min(1).max(255),
+  mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
+  fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
+});
+
+const verificationSubmitSchema = verificationUploadRequestSchema.extend({
+  originalStorageKey: z
+    .string()
+    .trim()
+    .min(20)
+    .max(500)
+    .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
+  previewStorageKey: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
+    .optional(),
+  sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
+  documentProcessingConsent: z.boolean(),
 });
 
 const campaignEventRsvpSchema = z.object({
@@ -214,6 +248,217 @@ async function resolveEngagementProgress(voterUserId: string, task: {
 
   return 0;
 }
+
+function serializeVerification(verification: {
+  id: string;
+  memberUserId: string;
+  voterIdentifier: string;
+  status: VoterVerificationStatus;
+  isFlagged: boolean;
+  fraudReason: string | null;
+  submittedAt: Date | null;
+  reviewStartedAt: Date | null;
+  reviewedAt: Date | null;
+  reviewedByUserId: string | null;
+  reviewNote: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  documents: Array<{
+    id: string;
+    originalFileName: string;
+    mimeType: string;
+    fileSize: number;
+    sha256: string;
+    storageProvider: string;
+    uploadedAt: Date;
+  }>;
+  history: Array<{
+    id: string;
+    fromStatus: VoterVerificationStatus | null;
+    toStatus: VoterVerificationStatus;
+    decision: VoterVerificationDecision;
+    note: string | null;
+    createdAt: Date;
+  }>;
+}) {
+  return {
+    id: verification.id,
+    memberUserId: verification.memberUserId,
+    voterIdentifier: verification.voterIdentifier,
+    status: verification.status,
+    isFlagged: verification.isFlagged,
+    fraudReason: verification.fraudReason,
+    submittedAt: verification.submittedAt?.toISOString() || null,
+    reviewStartedAt: verification.reviewStartedAt?.toISOString() || null,
+    reviewedAt: verification.reviewedAt?.toISOString() || null,
+    reviewedByUserId: verification.reviewedByUserId,
+    reviewNote: verification.reviewNote,
+    documents: verification.documents.map((document) => ({
+      id: document.id,
+      originalFileName: document.originalFileName,
+      mimeType: document.mimeType,
+      fileSize: document.fileSize,
+      sha256: document.sha256,
+      storageProvider: document.storageProvider,
+      uploadedAt: document.uploadedAt.toISOString(),
+    })),
+    history: verification.history.map((entry) => ({
+      id: entry.id,
+      fromStatus: entry.fromStatus,
+      toStatus: entry.toStatus,
+      decision: entry.decision,
+      note: entry.note,
+      createdAt: entry.createdAt.toISOString(),
+    })),
+    createdAt: verification.createdAt.toISOString(),
+    updatedAt: verification.updatedAt.toISOString(),
+  };
+}
+
+router.get("/verification", requireAuth, requireMemberCapability, async (request, response) => {
+  const verification = await prisma.voterVerification.findUnique({
+    where: { memberUserId: request.authUser!.id },
+    include: {
+      documents: { orderBy: { uploadedAt: "desc" } },
+      history: { orderBy: { createdAt: "desc" } },
+    },
+  });
+
+  if (!verification) {
+    return response.json({ verification: null, status: VoterVerificationStatus.NOT_SUBMITTED });
+  }
+
+  return response.json({ verification: serializeVerification(verification), status: verification.status });
+});
+
+router.post("/verification/upload-request", requireAuth, requireMemberCapability, async (request, response) => {
+  const parsed = verificationUploadRequestSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid verification upload request.", errors: parsed.error.flatten() });
+  }
+
+  return response.status(201).json({
+    storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+    storageKey: `voter-verification/${request.authUser!.id}/${crypto.randomUUID()}`,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    maxFileSize: 8 * 1024 * 1024,
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+    note: "Workstream 4 owns the signed upload implementation; this contract deliberately returns a private object key, not a public URL.",
+  });
+});
+
+router.post("/verification/submit", requireAuth, requireMemberCapability, async (request, response) => {
+  const parsed = verificationSubmitSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid verification submission.", errors: parsed.error.flatten() });
+  }
+
+  if (!parsed.data.documentProcessingConsent) {
+    return response.status(400).json({ message: "Document processing consent is required before submitting voter evidence." });
+  }
+
+  const voterIdentifier = request.authUser!.voterProfile!.voterCardNumber;
+  const result = await prisma.$transaction(async (transaction) => {
+    const existingVerification = await transaction.voterVerification.findUnique({
+      where: { memberUserId: request.authUser!.id },
+      include: { documents: true },
+    });
+
+    if (existingVerification?.status === VoterVerificationStatus.VERIFIED) {
+      throw new Error("VERIFICATION_ALREADY_APPROVED");
+    }
+
+    const duplicateDocument = await transaction.voterVerificationDocument.findFirst({
+      where: {
+        sha256: parsed.data.sha256.toLowerCase(),
+        verification: {
+          memberUserId: { not: request.authUser!.id },
+        },
+      },
+      select: { id: true },
+    });
+
+    const verification = existingVerification
+      ? await transaction.voterVerification.update({
+          where: { id: existingVerification.id },
+          data: {
+            status: VoterVerificationStatus.PENDING,
+            isFlagged: Boolean(duplicateDocument),
+            fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+            submittedAt: new Date(),
+            reviewStartedAt: null,
+            reviewedAt: null,
+            reviewedByUserId: null,
+            reviewNote: null,
+          },
+        })
+      : await transaction.voterVerification.create({
+          data: {
+            memberUserId: request.authUser!.id,
+            voterIdentifier,
+            status: VoterVerificationStatus.PENDING,
+            isFlagged: Boolean(duplicateDocument),
+            fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+            submittedAt: new Date(),
+          },
+        });
+
+    await transaction.voterVerificationDocument.create({
+      data: {
+        verificationId: verification.id,
+        originalStorageKey: parsed.data.originalStorageKey,
+        previewStorageKey: parsed.data.previewStorageKey || null,
+        originalFileName: parsed.data.originalFileName,
+        mimeType: parsed.data.mimeType,
+        fileSize: parsed.data.fileSize,
+        sha256: parsed.data.sha256.toLowerCase(),
+        storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+      },
+    });
+
+    await transaction.voterVerificationHistory.create({
+      data: {
+        verificationId: verification.id,
+        actorUserId: request.authUser!.id,
+        fromStatus: existingVerification?.status || VoterVerificationStatus.NOT_SUBMITTED,
+        toStatus: VoterVerificationStatus.PENDING,
+        decision: duplicateDocument ? VoterVerificationDecision.FLAGGED : VoterVerificationDecision.SUBMITTED,
+        note: duplicateDocument ? "Potential duplicate voter document hash detected." : "Voter evidence submitted for validation.",
+      },
+    });
+
+    await transaction.voterProfile.update({
+      where: { userId: request.authUser!.id },
+      data: {
+        documentConsentAt: new Date(),
+      },
+    });
+
+    return transaction.voterVerification.findUniqueOrThrow({
+      where: { id: verification.id },
+      include: {
+        documents: { orderBy: { uploadedAt: "desc" } },
+        history: { orderBy: { createdAt: "desc" } },
+      },
+    });
+  }).catch((error: unknown) => {
+    if (error instanceof Error && error.message === "VERIFICATION_ALREADY_APPROVED") {
+      return null;
+    }
+    throw error;
+  });
+
+  if (!result) {
+    return response.status(409).json({ message: "Approved voter verification cannot be resubmitted." });
+  }
+
+  return response.status(201).json({
+    message: result.isFlagged
+      ? "Voter evidence submitted and flagged for validator review."
+      : "Voter evidence submitted for validator review.",
+    verification: serializeVerification(result),
+  });
+});
 
 router.get("/rewards", requireAuth, requireMemberCapability, async (request, response) => {
   const voterUserId = request.authUser?.id;

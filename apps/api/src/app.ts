@@ -7,9 +7,11 @@ import adminRoutes from "./routes/admin";
 import agentRoutes from "./routes/agent";
 import authRoutes from "./routes/auth";
 import candidateRoutes from "./routes/candidate";
+import electionDayRoutes from "./routes/election-day";
 import mediaRoutes from "./routes/media";
 import notificationRoutes from "./routes/notifications";
 import platformRoutes from "./routes/platform";
+import preElectionRoutes from "./routes/pre-election";
 import voterRoutes from "./routes/voter";
 
 type JsonParseError = Error & {
@@ -83,6 +85,8 @@ export function createApp() {
   app.use("/auth", authRoutes);
   app.use("/voter", voterRoutes);
   app.use("/platform", platformRoutes);
+  app.use("/election-day", electionDayRoutes);
+  app.use("/pre-election", preElectionRoutes);
   // Legacy/transitional identity routes remain until their content dependencies move to target domains.
   app.use("/admin", adminRoutes);
   app.use("/agent", agentRoutes);
