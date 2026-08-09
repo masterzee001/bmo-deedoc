@@ -190,6 +190,63 @@ enum ElectionDayReportAssetKind {
   POST_COUNTING_PHOTO
 }
 
+enum VoterVerificationStatus {
+  NOT_SUBMITTED
+  PENDING
+  UNDER_REVIEW
+  RESUBMISSION_REQUIRED
+  VERIFIED
+  REJECTED
+}
+
+enum VoterVerificationDecision {
+  SUBMITTED
+  CLAIMED
+  APPROVED
+  REJECTED
+  RESUBMISSION_REQUIRED
+  FLAGGED
+  NOTE_ADDED
+}
+
+enum ReferralStatus {
+  REGISTERED
+  PENDING_VERIFICATION
+  QUALIFIED
+  REJECTED
+  FLAGGED
+  REWARD_PROCESSED
+}
+
+enum RewardQualifyingEvent {
+  VOTER_VERIFICATION_APPROVED
+}
+
+enum RewardLedgerCategory {
+  VERIFIED_REFERRAL
+  FIELD_ACTIVITY
+  TASK_COMPLETION
+  APPROVED_PARTICIPATION
+  BONUS
+  MANUAL_ADJUSTMENT
+}
+
+enum RewardEventStatus {
+  PENDING
+  PROCESSED
+  SKIPPED
+}
+
+enum PayoutStatus {
+  PENDING
+  ELIGIBLE
+  APPROVED
+  PROCESSING
+  PAID
+  HELD
+  REJECTED
+}
+
 model User {
   id                         String                     @id @default(cuid())
   name                       String
@@ -243,6 +300,22 @@ model User {
   electionDayReports         ElectionDayReport[]        @relation("ElectionDayReportAgent")
   reviewedElectionDayReports ElectionDayReport[]        @relation("ElectionDayReportReviewer")
   electionDayReportAssets    ElectionDayReportAsset[]   @relation("ElectionDayReportAssetOwner")
+  voterVerifications         VoterVerification[]        @relation("VoterVerificationMember")
+  reviewedVerifications      VoterVerification[]        @relation("VoterVerificationReviewer")
+  verificationHistoryActions VoterVerificationHistory[] @relation("VoterVerificationHistoryActor")
+  referralCodes              ReferralCode[]             @relation("ReferralCodeOwner")
+  referralsOwned             Referral[]                 @relation("ReferralReferrerUser")
+  referralsReceived          Referral[]                 @relation("ReferralReferredUser")
+  createdRewardRules         RewardRule[]               @relation("RewardRuleCreator")
+  rewardLedgerEntries        RewardLedgerEntry[]        @relation("RewardLedgerEntryUser")
+  relatedRewardLedgerEntries RewardLedgerEntry[]        @relation("RewardLedgerEntryRelatedUser")
+  payoutConfigurations       PayoutConfiguration[]      @relation("PayoutConfigurationCreator")
+  payoutOfficerAssignments   PayoutAssignment[]         @relation("PayoutAssignmentOfficer")
+  payoutBeneficiaryItems     PayoutAssignment[]         @relation("PayoutAssignmentBeneficiary")
+  payoutTransactions         PayoutTransaction[]        @relation("PayoutTransactionOfficer")
+  strengthMetricsCreated     StrengthMetricDefinition[] @relation("StrengthMetricCreator")
+  strengthWeightsCreated     StrengthWeightConfiguration[] @relation("StrengthWeightCreator")
+  campaignTargetsCreated     TerritoryTarget[]          @relation("TerritoryTargetCreator")
 
   @@index([role])
   @@index([isActive])
@@ -471,6 +544,9 @@ model VoterProfile {
   referredByUserId      String?
   contactConsent        Boolean              @default(false)
   termsAcceptedAt       DateTime?
+  privacyAcceptedAt     DateTime?
+  documentConsentAt     DateTime?
+  consentVersion        String?
   geoPoliticalZoneId    String?
   stateId               String
   senatorialDistrictId  String?
@@ -589,6 +665,343 @@ model RewardLedger {
   @@unique([voterUserId, type, relatedUserId])
   @@index([voterUserId, createdAt])
   @@index([type])
+}
+
+model VoterVerification {
+  id                 String                       @id @default(cuid())
+  memberUserId       String                       @unique
+  voterIdentifier    String
+  status             VoterVerificationStatus      @default(NOT_SUBMITTED)
+  isFlagged          Boolean                      @default(false)
+  fraudReason        String?
+  submittedAt        DateTime?
+  reviewStartedAt    DateTime?
+  reviewedAt         DateTime?
+  reviewedByUserId   String?
+  reviewNote         String?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  memberUser         User                         @relation("VoterVerificationMember", fields: [memberUserId], references: [id], onDelete: Cascade)
+  reviewedByUser     User?                        @relation("VoterVerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  documents          VoterVerificationDocument[]
+  history            VoterVerificationHistory[]
+
+  @@index([status, submittedAt])
+  @@index([reviewedByUserId])
+  @@index([voterIdentifier])
+  @@index([isFlagged])
+}
+
+model VoterVerificationDocument {
+  id                 String             @id @default(cuid())
+  verificationId     String
+  originalStorageKey String             @unique
+  previewStorageKey  String?
+  originalFileName   String
+  mimeType           String
+  fileSize           Int
+  sha256             String
+  storageProvider    String
+  uploadedAt         DateTime           @default(now())
+  verification       VoterVerification  @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([verificationId])
+  @@index([sha256])
+  @@index([uploadedAt])
+}
+
+model VoterVerificationHistory {
+  id                 String                    @id @default(cuid())
+  verificationId     String
+  actorUserId        String?
+  fromStatus         VoterVerificationStatus?
+  toStatus           VoterVerificationStatus
+  decision           VoterVerificationDecision
+  note               String?
+  metadataJson       Json?
+  createdAt          DateTime                  @default(now())
+  verification       VoterVerification         @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  actorUser          User?                      @relation("VoterVerificationHistoryActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([verificationId, createdAt])
+  @@index([actorUserId])
+  @@index([decision])
+}
+
+model ReferralCode {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  code        String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  ownerUser   User     @relation("ReferralCodeOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  referrals   Referral[]
+
+  @@index([ownerUserId])
+  @@index([isActive])
+}
+
+model Referral {
+  id                String           @id @default(cuid())
+  referredUserId    String           @unique
+  referrerUserId    String
+  referralCodeId    String?
+  referralCode      String
+  status            ReferralStatus   @default(REGISTERED)
+  registeredAt      DateTime         @default(now())
+  qualifiedAt       DateTime?
+  rewardProcessedAt DateTime?
+  flaggedAt         DateTime?
+  fraudReason       String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  referredUser      User             @relation("ReferralReferredUser", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referrerUser      User             @relation("ReferralReferrerUser", fields: [referrerUserId], references: [id], onDelete: Restrict)
+  referralCodeOwner ReferralCode?    @relation(fields: [referralCodeId], references: [id], onDelete: SetNull)
+  rewardEvents      RewardEvent[]
+
+  @@unique([referrerUserId, referredUserId])
+  @@index([referrerUserId])
+  @@index([status])
+  @@index([registeredAt])
+}
+
+model RewardRule {
+  id                 String                 @id @default(cuid())
+  name               String
+  qualifyingEvent    RewardQualifyingEvent
+  eligibleRole       UserRole
+  eligibleCoordinatorLevel CoordinatorLevel?
+  active             Boolean                @default(true)
+  effectiveFrom      DateTime               @default(now())
+  effectiveUntil     DateTime?
+  createdByUserId    String
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  createdByUser      User                   @relation("RewardRuleCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions           RewardRuleVersion[]
+
+  @@index([qualifyingEvent, active])
+  @@index([eligibleRole])
+  @@index([createdByUserId])
+}
+
+model RewardRuleVersion {
+  id                   String              @id @default(cuid())
+  rewardRuleId         String
+  version              Int
+  directPoints         Int
+  upstreamPointsConfig Json?
+  maximumPoints        Int?
+  effectiveFrom        DateTime            @default(now())
+  createdAt            DateTime            @default(now())
+  rewardRule           RewardRule          @relation(fields: [rewardRuleId], references: [id], onDelete: Restrict)
+  rewardEvents         RewardEvent[]
+  ledgerEntries        RewardLedgerEntry[]
+
+  @@unique([rewardRuleId, version])
+  @@index([rewardRuleId, effectiveFrom])
+}
+
+model RewardEvent {
+  id                  String                @id @default(cuid())
+  eventType           RewardQualifyingEvent
+  sourceType          String
+  sourceId            String
+  referralId          String?
+  rewardRuleVersionId String?
+  status              RewardEventStatus     @default(PENDING)
+  idempotencyKey      String                @unique
+  occurredAt          DateTime              @default(now())
+  processedAt         DateTime?
+  createdAt           DateTime              @default(now())
+  referral            Referral?             @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  rewardRuleVersion   RewardRuleVersion?    @relation(fields: [rewardRuleVersionId], references: [id], onDelete: Restrict)
+  ledgerEntries       RewardLedgerEntry[]
+
+  @@unique([eventType, sourceType, sourceId])
+  @@index([status, occurredAt])
+  @@index([referralId])
+  @@index([rewardRuleVersionId])
+}
+
+model RewardLedgerEntry {
+  id                  String                @id @default(cuid())
+  userId              String
+  points              Int
+  category            RewardLedgerCategory
+  sourceEventType     RewardQualifyingEvent
+  sourceEventId       String
+  rewardRuleVersionId String?
+  relatedUserId       String?
+  description         String?
+  createdAt           DateTime              @default(now())
+  user                User                  @relation("RewardLedgerEntryUser", fields: [userId], references: [id], onDelete: Restrict)
+  relatedUser         User?                 @relation("RewardLedgerEntryRelatedUser", fields: [relatedUserId], references: [id], onDelete: SetNull)
+  sourceEvent         RewardEvent           @relation(fields: [sourceEventId], references: [id], onDelete: Restrict)
+  rewardRuleVersion   RewardRuleVersion?    @relation(fields: [rewardRuleVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, sourceEventId, category])
+  @@index([userId, createdAt])
+  @@index([category])
+  @@index([rewardRuleVersionId])
+  @@index([relatedUserId])
+}
+
+model PayoutConfiguration {
+  id                  String   @id @default(cuid())
+  minimumPoints       Int
+  pointConversionRate Decimal  @db.Decimal(18, 4)
+  frequency           String
+  nextPayoutDate      DateTime?
+  active              Boolean  @default(true)
+  createdByUserId     String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdByUser       User     @relation("PayoutConfigurationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([active])
+  @@index([createdByUserId])
+}
+
+model PayoutCycle {
+  id               String        @id @default(cuid())
+  name             String
+  opensAt          DateTime
+  closesAt         DateTime
+  payoutDate       DateTime
+  minimumThreshold Int
+  conversionRate   Decimal       @db.Decimal(18, 4)
+  status           PayoutStatus  @default(PENDING)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  batches          PayoutBatch[]
+
+  @@index([status, payoutDate])
+}
+
+model PayoutBatch {
+  id            String             @id @default(cuid())
+  payoutCycleId String
+  status        PayoutStatus       @default(PENDING)
+  createdAt     DateTime           @default(now())
+  approvedAt    DateTime?
+  payoutCycle   PayoutCycle        @relation(fields: [payoutCycleId], references: [id], onDelete: Restrict)
+  assignments   PayoutAssignment[]
+
+  @@index([payoutCycleId])
+  @@index([status])
+}
+
+model PayoutAssignment {
+  id                  String              @id @default(cuid())
+  payoutBatchId       String
+  payoutOfficerUserId String
+  beneficiaryUserId   String
+  points              Int
+  amount              Decimal             @db.Decimal(18, 2)
+  status              PayoutStatus         @default(PENDING)
+  assignedAt          DateTime             @default(now())
+  processedAt         DateTime?
+  note                String?
+  payoutBatch         PayoutBatch          @relation(fields: [payoutBatchId], references: [id], onDelete: Restrict)
+  payoutOfficerUser   User                 @relation("PayoutAssignmentOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
+  beneficiaryUser     User                 @relation("PayoutAssignmentBeneficiary", fields: [beneficiaryUserId], references: [id], onDelete: Restrict)
+  transactions        PayoutTransaction[]
+
+  @@unique([payoutBatchId, beneficiaryUserId])
+  @@index([payoutOfficerUserId, status])
+  @@index([beneficiaryUserId])
+}
+
+model PayoutTransaction {
+  id                  String            @id @default(cuid())
+  payoutAssignmentId  String
+  payoutOfficerUserId String
+  paymentReference    String            @unique
+  pointsRedeemed      Int
+  amountPaid          Decimal           @db.Decimal(18, 2)
+  status              PayoutStatus
+  proofStorageKey     String?
+  note                String?
+  createdAt           DateTime          @default(now())
+  payoutAssignment    PayoutAssignment  @relation(fields: [payoutAssignmentId], references: [id], onDelete: Restrict)
+  payoutOfficerUser   User              @relation("PayoutTransactionOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
+
+  @@index([payoutAssignmentId])
+  @@index([payoutOfficerUserId])
+  @@index([status])
+}
+
+model StrengthMetricDefinition {
+  id              String   @id @default(cuid())
+  metric          String   @unique
+  description     String?
+  active          Boolean  @default(true)
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUser   User     @relation("StrengthMetricCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([active])
+}
+
+model StrengthWeightConfiguration {
+  id              String   @id @default(cuid())
+  metric          String
+  weight          Decimal  @db.Decimal(8, 4)
+  effectiveFrom   DateTime @default(now())
+  effectiveUntil  DateTime?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  createdByUser   User     @relation("StrengthWeightCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([metric, effectiveFrom])
+}
+
+model TerritoryTarget {
+  id              String   @id @default(cuid())
+  candidateId     String?
+  territoryType   String
+  territoryId     String
+  metric          String
+  targetValue     Int
+  startDate       DateTime
+  endDate         DateTime?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUser   User     @relation("TerritoryTargetCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([territoryType, territoryId])
+  @@index([metric])
+  @@index([candidateId])
+}
+
+model TerritoryMetricSnapshot {
+  id             String   @id @default(cuid())
+  territoryType  String
+  territoryId    String
+  metric         String
+  actualValue    Int
+  calculatedAt   DateTime @default(now())
+  metadataJson   Json?
+
+  @@index([territoryType, territoryId, metric, calculatedAt], map: "TerritoryMetricSnapshot_scope_metric_time_idx")
+}
+
+model TerritoryStrengthSnapshot {
+  id             String   @id @default(cuid())
+  territoryType  String
+  territoryId    String
+  candidateId    String?
+  score          Decimal  @db.Decimal(8, 4)
+  breakdownJson  Json
+  calculatedAt   DateTime @default(now())
+
+  @@index([territoryType, territoryId, calculatedAt], map: "TerritoryStrengthSnapshot_scope_time_idx")
+  @@index([candidateId])
 }
 
 model ParticipationEvent {

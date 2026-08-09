@@ -63,6 +63,10 @@ export const REWARD_EVENT_TYPES = [
   "MANUAL_ADJUSTMENT",
 ] as const;
 
+export const REWARD_QUALIFYING_EVENTS = ["VOTER_VERIFICATION_APPROVED"] as const;
+
+export const REWARD_EVENT_STATUSES = ["PENDING", "PROCESSED", "SKIPPED"] as const;
+
 export const PAYOUT_STATUSES = [
   "PENDING",
   "ELIGIBLE",
@@ -145,6 +149,8 @@ export type Phase1AuthAction = (typeof PHASE_1_AUTH_ACTIONS)[number];
 export type VoterVerificationStatus = (typeof VOTER_VERIFICATION_STATUSES)[number];
 export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
 export type RewardEventType = (typeof REWARD_EVENT_TYPES)[number];
+export type RewardQualifyingEvent = (typeof REWARD_QUALIFYING_EVENTS)[number];
+export type RewardEventStatus = (typeof REWARD_EVENT_STATUSES)[number];
 export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 export type PollingUnitOperationalStatus = (typeof POLLING_UNIT_OPERATIONAL_STATUSES)[number];
 export type ElectionDayGeofenceStatus = (typeof ELECTION_DAY_GEOFENCE_STATUSES)[number];

@@ -13,6 +13,10 @@
     {
       "name": "20260809020000_ogun_reference_import_contract",
       "sha256": "2b4cbefcd46b92d39dcca274c433a6bd953c165a6cab82ce6c067746bc002ad4"
+    },
+    {
+      "name": "20260809030000_pre_election_verification_rewards_foundation",
+      "sha256": "ec7ba2b82660b345f717733ce3619f63e67cf3dfccb168665be2b9cdfca927de"
     }
   ]
 }

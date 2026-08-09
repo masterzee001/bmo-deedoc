@@ -1,15 +1,24 @@
 import crypto from "node:crypto";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "../prisma";
 
-export async function generateUniqueReferralCode(): Promise<string> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const code = `PICS${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-    const existing = await prisma.voterProfile.findUnique({
-      where: { referralCode: code },
-      select: { id: true },
-    });
+type ReferralCodeDatabase = PrismaClient | Prisma.TransactionClient;
 
-    if (!existing) {
+export async function generateUniqueReferralCode(database: ReferralCodeDatabase = prisma): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = `OGUN${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+    const [existingMemberCode, existingCoordinatorCode] = await Promise.all([
+      database.voterProfile.findUnique({
+        where: { referralCode: code },
+        select: { id: true },
+      }),
+      database.referralCode.findUnique({
+        where: { code },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!existingMemberCode && !existingCoordinatorCode) {
       return code;
     }
   }
