@@ -34,6 +34,16 @@ import type {
   ElectionDaySituationRoomStatus,
   ElectionDayTimelineItem,
   ElectionDayWebrtcConfig,
+  EvidenceAggregationItem,
+  EvidenceAssetItem,
+  EvidenceClassification,
+  EvidenceDossier,
+  EvidenceExplorerSummary,
+  EvidenceManifest,
+  EvidencePackageItem,
+  EvidenceReviewStatus,
+  EvidenceTimelineItem,
+  EvidenceType,
   PoliticalPartyItem,
   PoliticalPartyPublicProfile,
   PollListItem,
@@ -53,6 +63,7 @@ import type {
   VoterUserItem,
   WardItem,
   RealtimePresenceEntry,
+  LegalCaseItem,
 } from "@pics-nigeria/shared";
 
 function normalizeBaseUrl(value: string): string {
@@ -1669,6 +1680,246 @@ export async function fetchAdminElectionDayReportAsset(token: string, assetId: s
   }
 
   return response.blob();
+}
+
+function appendOptionalParam(params: URLSearchParams, key: string, value: string | undefined) {
+  if (value) {
+    params.set(key, value);
+  }
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return window.btoa(binary);
+}
+
+export async function fetchEvidenceExplorer(
+  token: string,
+  query?: {
+    search?: string;
+    evidenceType?: EvidenceType;
+    classification?: EvidenceClassification;
+    reviewStatus?: EvidenceReviewStatus;
+    pollingUnitId?: string;
+    incidentId?: string;
+    electionReportId?: string;
+    uploaderUserId?: string;
+    sha256?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+  },
+): Promise<{ evidence: EvidenceAssetItem[]; summary: EvidenceExplorerSummary }> {
+  const params = new URLSearchParams();
+  appendOptionalParam(params, "search", query?.search);
+  appendOptionalParam(params, "evidenceType", query?.evidenceType);
+  appendOptionalParam(params, "classification", query?.classification);
+  appendOptionalParam(params, "reviewStatus", query?.reviewStatus);
+  appendOptionalParam(params, "pollingUnitId", query?.pollingUnitId);
+  appendOptionalParam(params, "incidentId", query?.incidentId);
+  appendOptionalParam(params, "electionReportId", query?.electionReportId);
+  appendOptionalParam(params, "uploaderUserId", query?.uploaderUserId);
+  appendOptionalParam(params, "sha256", query?.sha256);
+  appendOptionalParam(params, "dateFrom", query?.dateFrom);
+  appendOptionalParam(params, "dateTo", query?.dateTo);
+  if (query?.limit) {
+    params.set("limit", String(query.limit));
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/evidence${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ evidence: EvidenceAssetItem[]; summary: EvidenceExplorerSummary }>(response);
+}
+
+export async function fetchEvidenceAggregation(
+  token: string,
+  query?: {
+    groupBy?: "POLLING_UNIT" | "WARD" | "STATE_CONSTITUENCY" | "FEDERAL_CONSTITUENCY" | "SENATORIAL_DISTRICT";
+    evidenceType?: EvidenceType;
+    classification?: EvidenceClassification;
+    reviewStatus?: EvidenceReviewStatus;
+    dateFrom?: string;
+    dateTo?: string;
+  },
+): Promise<{ groupBy: string; aggregation: EvidenceAggregationItem[]; sourceLimit: number }> {
+  const params = new URLSearchParams();
+  appendOptionalParam(params, "groupBy", query?.groupBy);
+  appendOptionalParam(params, "evidenceType", query?.evidenceType);
+  appendOptionalParam(params, "classification", query?.classification);
+  appendOptionalParam(params, "reviewStatus", query?.reviewStatus);
+  appendOptionalParam(params, "dateFrom", query?.dateFrom);
+  appendOptionalParam(params, "dateTo", query?.dateTo);
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/evidence/aggregation${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ groupBy: string; aggregation: EvidenceAggregationItem[]; sourceLimit: number }>(response);
+}
+
+export async function finalizeEvidenceUpload(
+  token: string,
+  body: {
+    evidenceType: EvidenceType;
+    classification: EvidenceClassification;
+    file: File;
+    capturedAt?: string;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    pollingUnitId?: string;
+    incidentId?: string;
+    electionReportId?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<{ message: string; evidence: EvidenceAssetItem }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/uploads/finalize`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      evidenceType: body.evidenceType,
+      classification: body.classification,
+      originalFileName: body.file.name,
+      mimeType: body.file.type || "application/octet-stream",
+      contentBase64: await fileToBase64(body.file),
+      capturedAt: body.capturedAt || undefined,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      accuracyMeters: body.accuracyMeters,
+      pollingUnitId: body.pollingUnitId || undefined,
+      incidentId: body.incidentId || undefined,
+      electionReportId: body.electionReportId || undefined,
+      metadata: body.metadata,
+    }),
+  });
+
+  return readJson<{ message: string; evidence: EvidenceAssetItem }>(response);
+}
+
+export async function updateEvidenceReview(
+  token: string,
+  evidenceAssetId: string,
+  body: { status: EvidenceReviewStatus; classification?: EvidenceClassification; note?: string },
+): Promise<{ message: string; evidence: EvidenceAssetItem }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/${evidenceAssetId}/review`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; evidence: EvidenceAssetItem }>(response);
+}
+
+export async function createEvidenceAccess(
+  token: string,
+  evidenceAssetId: string,
+  body: { action: "VIEW" | "DOWNLOAD"; expiresInSeconds?: number },
+): Promise<{ access: { signedUrl: string; expiresAt: string; publicUrl: null; storageKey: string } }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/${evidenceAssetId}/access`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ access: { signedUrl: string; expiresAt: string; publicUrl: null; storageKey: string } }>(response);
+}
+
+export async function fetchEvidenceTimeline(token: string, pollingUnitId: string): Promise<EvidenceTimelineItem[]> {
+  const response = await fetch(`${API_BASE_URL}/evidence/polling-units/${encodeURIComponent(pollingUnitId)}/timeline`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ pollingUnitId: string; timeline: EvidenceTimelineItem[] }>(response);
+  return payload.timeline;
+}
+
+export async function fetchEvidenceDossier(token: string, pollingUnitId: string): Promise<EvidenceDossier> {
+  const response = await fetch(`${API_BASE_URL}/evidence/polling-units/${encodeURIComponent(pollingUnitId)}/dossier`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ dossier: EvidenceDossier }>(response);
+  return payload.dossier;
+}
+
+export async function fetchLegalCases(token: string): Promise<LegalCaseItem[]> {
+  const response = await fetch(`${API_BASE_URL}/evidence/legal-cases`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ legalCases: LegalCaseItem[] }>(response);
+  return payload.legalCases;
+}
+
+export async function createLegalCase(
+  token: string,
+  body: { title: string; description?: string; pollingUnitId?: string; evidenceAssetIds?: string[]; note?: string },
+): Promise<{ legalCase: LegalCaseItem; noLegalConclusion: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/legal-cases`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ...body, evidenceAssetIds: body.evidenceAssetIds || [] }),
+  });
+
+  return readJson<{ legalCase: LegalCaseItem; noLegalConclusion: boolean }>(response);
+}
+
+export async function createEvidenceManifestExport(
+  token: string,
+  body: { evidenceAssetIds: string[]; legalCaseId?: string; purpose: string },
+): Promise<{ evidencePackage: EvidencePackageItem; manifest: EvidenceManifest }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/exports/manifest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ evidencePackage: EvidencePackageItem; manifest: EvidenceManifest }>(response);
+}
+
+export async function verifyEvidenceManifest(
+  token: string,
+  body: { manifest: EvidenceManifest; manifestSha256: string },
+): Promise<{ verified: boolean; computedSha256: string; suppliedSha256: string }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/exports/verify-manifest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ verified: boolean; computedSha256: string; suppliedSha256: string }>(response);
 }
 
 export async function fetchCandidateProfileEditor(token: string): Promise<CandidateProfileEditorItem> {

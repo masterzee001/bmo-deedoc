@@ -36,6 +36,7 @@ const groups: AdminNavGroup[] = [
       { href: "/admin/operations/coverage", label: "Coverage" },
       { href: "/admin/incidents", label: "Incidents" },
       { href: "/admin/election-reports", label: "Election Reports" },
+      { href: "/admin/evidence", label: "Evidence" },
       { href: "/admin/communications", label: "Communications" },
     ],
   },
