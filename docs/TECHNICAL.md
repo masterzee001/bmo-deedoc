@@ -69,9 +69,11 @@ Real-time systems must degrade gracefully.
 Target-state note:
 
 ```text
-This diagram is the intended target architecture, not the current repository implementation.
-As of August 9, 2026, the checked-in repo implements the Next.js web app, Express API, Prisma database package, and shared package.
-The dedicated real-time gateway, Redis-backed live-event topology, background worker runtime, WebRTC signalling service, and private object-storage pipeline should all be treated as TARGET architecture until implemented.
+This diagram is the intended target architecture. Application code and provisioned infrastructure differ.
+The checked-in repo implements the Next.js web app, Express API, Prisma database package, and shared package.
+Also implemented: the Socket.IO realtime gateway (inside the API process, not a separate service), its Redis adapter and presence writes, the WebRTC signalling and call-lifecycle contract, and the private S3-compatible object-storage pipeline for evidence.
+Still TARGET: the background worker runtime (no BullMQ dependency or queue code), a separately deployed realtime service, and the repo-wide production Docker topology.
+No production runtime is deployed. Implemented code does not mean a running Redis, bucket, TURN server, or container.
 ```
 
 ```text
@@ -134,7 +136,8 @@ Recommended structure:
 ```text
 TARGET architecture note:
 - apps/web and apps/api exist today.
-- apps/realtime and apps/worker are planned target services and are not implemented in the current checkout.
+- The realtime gateway is implemented, but it runs inside apps/api on the shared HTTP server. Extracting it into a standalone apps/realtime service is target structure.
+- apps/worker is not implemented: there is no BullMQ dependency and no queue code in the current checkout.
 - packages/auth and packages/config are also target structure until added to the repo.
 ```
 
@@ -1552,29 +1555,33 @@ Use queues where long-running work must not block API requests.
 
 ```text
 TARGET architecture note:
-This Docker layout is planned architecture only.
-There is no implemented repo-wide Docker topology in the current checkout as of August 9, 2026.
-Treat the container list below as the intended deployment/development target until Docker assets and service code are actually added.
+Docker is the locked service-packaging standard for the target production architecture.
+The full repo-wide production Docker topology is TARGET architecture until the container assets, health checks, restart policies, logging, monitoring, and service code are implemented.
+As of August 9, 2026, only the checked-in services and development/test database support should be treated as implemented.
 ```
 
-Recommended containers for local development:
+Target production containers:
 
 ```text
-postgres
-redis
+reverse-proxy
+web
 api
 realtime
 worker
-minio
+postgres
+redis
 ```
 
-Optional:
+Optional local-only support services may include:
 
 ```text
+minio
 mailhog
 ```
 
-Next.js may run locally through Node/npm rather than Docker for faster frontend development.
+Private S3-compatible object storage may be external or separately hosted. It must remain independent from the application filesystem and must not be replaced by ephemeral container-local uploads.
+
+Next.js may run locally through Node/npm for faster frontend development, but production packaging targets a containerized web service behind Nginx or Caddy.
 
 ---
 
@@ -1582,20 +1589,33 @@ Next.js may run locally through Node/npm rather than Docker for faster frontend 
 
 ```text
 TARGET architecture note:
-This compose workflow is not implemented in the current repo today.
-Do not present docker compose as an available local-dev path until the referenced Docker assets exist.
+Docker Compose may be used initially for single-VPS production orchestration.
+The full production compose workflow remains TARGET architecture until the referenced Docker assets, secrets handling, volumes, backups, health checks, restart policies, logging, and monitoring exist.
 ```
 
-Expected developer experience:
+Expected production orchestration shape:
 
-```bash
-docker compose up -d
+```text
+Internet
+   |
+   v
+Nginx / Caddy
+   |
+   v
+Docker / Docker Compose
+   |
+   +-- Next.js Web
+   +-- Express API + Socket.IO
+   +-- BullMQ Worker
+   +-- PostgreSQL
+   +-- Redis
 ```
 
-Then:
+Expected developer experience, once implemented:
 
 ```bash
 npm install
+docker compose up -d
 npm run prisma:generate
 npm run prisma:migrate
 npm run seed
@@ -1616,12 +1636,15 @@ The following files are planned artifacts, not files that currently exist in thi
 Recommended:
 
 ```text
+/apps/web/Dockerfile
 /apps/api/Dockerfile
 /apps/realtime/Dockerfile
 /apps/worker/Dockerfile
 
 docker-compose.yml
+docker-compose.prod.yml
 docker-compose.dev.yml
+deploy/nginx.conf or deploy/Caddyfile
 .dockerignore
 ```
 
@@ -2049,30 +2072,46 @@ Evidence Package Export
 
 # 80. Deployment
 
-Recommended logical production services:
+Locked production deployment target:
 
 ```text
-Web Frontend
-API Service
-Real-Time Service
-Worker Service
-PostgreSQL
-Redis
-Object Storage
-STUN/TURN
-Monitoring
-Backup System
+PRODUCTION DEPLOYMENT TARGET:
+VPS
 ```
 
-Services may initially share infrastructure, but architecture should permit independent scaling.
+Target production architecture:
+
+```text
+Internet
+   |
+   v
+Nginx / Caddy
+   |
+   v
+Docker / Docker Compose
+   |
+   +-- Next.js Web
+   +-- Express API + Socket.IO
+   +-- BullMQ Worker
+   +-- PostgreSQL
+   +-- Redis
+```
+
+Nginx or Caddy terminates HTTPS and reverse-proxies HTTP/WebSocket traffic to the application services. Docker is the service-packaging standard. Docker Compose may be used initially for single-VPS production orchestration.
+
+The architecture must permit future migration from one VPS to multiple servers without redesigning the application. Services may initially share infrastructure, but service boundaries, environment configuration, health checks, storage boundaries, and event contracts must allow later separation.
+
+Production secrets must come from production environment configuration and must never be committed. The production topology must support health checks, restart policies, structured logging, monitoring, alerting, persistent PostgreSQL storage, Redis configuration appropriate to its workloads, and backup/restore procedures.
+
+GitHub Actions `CI / validate` remains required for repository validation and is separate from production hosting.
+
+Existing Render and Vercel configuration may remain temporarily for legacy compatibility, but Render and Vercel are legacy/non-target production deployment paths.
 
 ---
 
 # 81. Frontend Deployment
 
-Next.js can remain on Vercel.
-
-The frontend is therefore not required to be Dockerized for production.
+Next.js is packaged as the target production web container and served behind Nginx or Caddy on the VPS deployment.
 
 It communicates with:
 
@@ -2081,27 +2120,31 @@ API_BASE_URL
 REALTIME_URL
 ```
 
+Vercel may remain as a legacy compatibility path while transition work is underway, but it is not the locked production hosting target.
+
 ---
 
 # 82. Backend Deployment
 
-Backend services should be packaged through Docker.
+Backend services must be packaged through Docker for the target production architecture.
 
-Production may use:
+Target backend services:
 
-* Render;
-* AWS ECS;
-* Fly.io;
-* Kubernetes;
-* another container-capable environment.
+```text
+Express API
+Realtime Gateway / Socket.IO
+BullMQ Worker
+```
 
-Deployment provider is an operational decision, not a hard-coded architecture dependency.
+These services run behind the VPS reverse proxy and share durable infrastructure through PostgreSQL, Redis, and private object storage contracts.
+
+Render configuration may remain temporarily for legacy compatibility, but Render is not the production target.
 
 ---
 
 # 83. Database
 
-Use managed PostgreSQL in production where possible.
+PostgreSQL runs as part of the target VPS architecture or on a separately operated database host when capacity requires it.
 
 Required capabilities:
 
@@ -2110,14 +2153,30 @@ Required capabilities:
 * connection pooling;
 * monitoring;
 * production migration discipline.
+* persistent data volumes or equivalent durable storage;
+* tested restore procedures.
 
 ---
 
 # 84. Redis
 
-Use managed Redis where possible.
+Redis runs as part of the target VPS architecture or on a separately operated Redis host when capacity requires it.
+
+Redis must be configured appropriately for its workloads:
+
+* BullMQ queue state;
+* Socket.IO adapter fan-out;
+* rate coordination;
+* cache;
+* transient presence.
 
 Redis must not become the only store for durable business data.
+
+Implementation status: the Socket.IO Redis adapter and presence writes are
+implemented in the API. BullMQ queue state is not — there is no worker runtime.
+**No Redis server is provisioned.** With `REDIS_URL` unset the gateway reports
+`DEGRADED_NO_REDIS` and serves single-instance realtime over the REST fallback;
+`REALTIME_REDIS_REQUIRED=true` makes production fail closed instead.
 
 ---
 
@@ -2136,6 +2195,16 @@ other compatible providers
 
 Architecture should minimize provider lock-in.
 
+Object storage must remain architecturally independent from the application filesystem. Application containers must not store voter documents or election evidence on ephemeral local container disks.
+
+Implementation status: the private S3-compatible pipeline is implemented
+(`apps/api/src/storage/evidence-storage.ts`) with AWS SigV4 request signing,
+write-if-absent overwrite denial, server-generated SHA-256, and presigned reads.
+Production environment validation rejects any driver other than `s3`; the
+in-memory driver is restricted to development and tests. **No production bucket
+is provisioned**, so the pipeline is implemented but not yet operating against
+real storage.
+
 ---
 
 # 86. WebRTC Infrastructure
@@ -2150,7 +2219,20 @@ TURN
 
 TURN must be available for users behind restrictive networks.
 
-A managed real-time provider may be used instead of self-hosting every component where reliability and speed justify it.
+Implemented today: signalling over the Socket.IO gateway, the durable call
+lifecycle in PostgreSQL (`VoiceCall`, `VoiceCallParticipant`, `VoiceCallEvent`),
+ICE server configuration served from `GET /election-day/webrtc/config`, a STUN
+default, and production environment validation that requires `TURN_URL`,
+`TURN_USERNAME`, and `TURN_CREDENTIAL`.
+
+**Not operational: there is no Coturn (or any TURN) server deployed.** The
+configuration contract reports `turnConfigured: false` when TURN credentials are
+absent rather than implying reachability. Until a TURN service is provisioned,
+calls connect only on permissive networks and must not be described as working
+for field devices behind carrier-grade NAT.
+
+Calls are never recorded. No media is persisted; only the signal type is retained
+for accountability.
 
 ---
 

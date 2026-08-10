@@ -653,20 +653,28 @@ WebRTC
 STUN
 TURN
 
-Development / Packaging:
+Development / Production Packaging:
 Docker
 Docker Compose
+Nginx / Caddy
+VPS
 ```
 
 ---
 
-# 20. Docker
+# 20. Docker And VPS Packaging
 
-Docker is recommended and locked for backend service packaging.
+Docker is locked as the service-packaging standard for the target production architecture.
 
-Docker Compose is recommended and locked for local multi-service development.
+Docker Compose may be used initially for single-VPS production orchestration once the production service definitions, health checks, restart policies, logging, and backup procedures are implemented.
 
-A developer should be able to bring up the backend environment using:
+The locked production deployment target is:
+
+```text
+VPS
+```
+
+Once the Docker Compose assets are implemented, a developer should be able to bring up the backend environment using:
 
 ```bash
 docker compose up
@@ -683,7 +691,13 @@ Background Worker
 S3-Compatible Local Storage
 ```
 
-The Next.js frontend may run outside Docker when deployed through Vercel.
+Only the PostgreSQL service exists today, in `docker-compose.dev.yml`. The rest
+are target compose services; the Background Worker additionally has no
+implementation to containerize yet.
+
+Target production services should run behind Nginx or Caddy, which terminates HTTPS and reverse-proxies traffic to the application containers.
+
+Render and Vercel configuration files may remain temporarily for legacy compatibility, but they are non-target production deployment paths.
 
 ---
 
@@ -774,29 +788,46 @@ Secrets must never be committed to Git.
 
 # 23. Deployment Architecture
 
-Recommended production architecture:
+Locked production deployment target:
 
 ```text
-NEXT.JS WEB
-    |
-    | HTTPS / WebSocket
-    |
-API / REAL-TIME LAYER
-    |
-    +---- PostgreSQL
-    |
-    +---- Redis
-    |
-    +---- Private Object Storage
-    |
-    +---- Worker Processes
-    |
-    +---- STUN / TURN
-    |
-    +---- Monitoring / Logs
+PRODUCTION DEPLOYMENT TARGET:
+VPS
 ```
 
-The architecture must allow multiple backend instances and must not rely permanently on one API process.
+Target production architecture:
+
+```text
+Internet
+   |
+   v
+Nginx / Caddy
+   |
+   v
+Docker / Docker Compose
+   |
+   +-- Next.js Web
+   +-- Express API + Socket.IO
+   +-- BullMQ Worker
+   +-- PostgreSQL
+   +-- Redis
+```
+
+Private S3-compatible object storage may be external or separately hosted, but it must remain architecturally independent from the application filesystem. Application containers must not rely on ephemeral local filesystem storage for voter documents or election evidence.
+
+WebRTC signalling, the durable call lifecycle, and ICE configuration are implemented in the API. A dedicated TURN service such as Coturn is still required and **is not yet operational**, so calls are not reachable for field devices behind carrier-grade NAT.
+
+Implementation status for the services above: the realtime gateway (Socket.IO, with its Redis adapter) and the private S3-compatible evidence storage pipeline are implemented in application code. The BullMQ worker is not implemented — there is no queue dependency or worker service in the repository. None of this infrastructure is deployed; implemented code does not mean a running Redis, bucket, TURN server, or container.
+
+Production requirements:
+
+* PostgreSQL uses persistent storage, backup automation, recovery testing, and migration discipline.
+* Redis uses persistence and configuration appropriate to its workload: queues, realtime fan-out, rate coordination, cache, and transient presence.
+* Secrets come from production environment configuration and are never committed.
+* Health checks, restart policies, structured logs, monitoring, and alerting are supported.
+* The topology can move from one VPS to multiple servers without redesigning the application.
+* GitHub Actions `CI / validate` remains the validation pipeline and is separate from production hosting.
+* Render and Vercel files, if retained, are legacy/non-target deployment paths.
 
 ---
 
