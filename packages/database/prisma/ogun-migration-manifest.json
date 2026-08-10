@@ -29,6 +29,10 @@
     {
       "name": "20260809060000_election_realtime_durable_messaging",
       "sha256": "f096ecc0c7677ba2a5488c329b0a06436c8c956dc9bbca99e7f722d24252cb18"
+    },
+    {
+      "name": "20260810000000_election_day_voice_call_lifecycle",
+      "sha256": "5677b3b322cc3b051c645fc0235a335aab7b0e59ab36b9309ab41be6513d2ed1"
     }
   ]
 }

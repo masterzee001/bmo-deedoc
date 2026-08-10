@@ -364,6 +364,26 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
     },
   },
   {
+    name: "evidence explorer and ward aggregation expose scoped post-election discovery",
+    run: async () => {
+      const token = await login(stateOfficerEmail);
+      const explorer = await apiRequest(`/evidence?search=${encodeURIComponent(uploadedEvidenceId)}&limit=25`, { token });
+      assert.equal(explorer.status, 200, JSON.stringify(explorer.payload));
+      const evidence = explorer.payload.evidence as Array<{ id: string; sha256: string; originalAccess: { signedAccessRequired: boolean } }>;
+      const summary = explorer.payload.summary as { total: number; byType: Record<string, number>; byReviewStatus: Record<string, number> };
+      assert.ok(evidence.some((item) => item.id === uploadedEvidenceId && item.sha256));
+      assert.equal(evidence[0].originalAccess.signedAccessRequired, true);
+      assert.ok(summary.total >= 1);
+      assert.ok(summary.byType.PHOTO >= 1);
+      assert.ok(summary.byReviewStatus.VERIFIED >= 1);
+
+      const aggregation = await apiRequest("/evidence/aggregation?groupBy=WARD", { token });
+      assert.equal(aggregation.status, 200, JSON.stringify(aggregation.payload));
+      const groups = aggregation.payload.aggregation as Array<{ territoryKind: string; territoryId: string; evidenceCount: number }>;
+      assert.ok(groups.some((item) => item.territoryKind === "WARD" && item.territoryId === branch.wardId && item.evidenceCount >= 1));
+    },
+  },
+  {
     name: "legal-support association and controlled manifest export are audited",
     run: async () => {
       const token = await login(stateOfficerEmail);
@@ -398,6 +418,22 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       assert.equal(manifest.archivePackagingStatus, "TARGET_LATER_MANIFEST_ONLY");
       assert.equal(manifest.items[0].evidenceAssetId, uploadedEvidenceId);
       assert.match(evidencePackage.manifestSha256, /^[a-f0-9]{64}$/);
+
+      const cases = await apiRequest("/evidence/legal-cases", { token });
+      assert.equal(cases.status, 200, JSON.stringify(cases.payload));
+      const legalCases = cases.payload.legalCases as Array<{ id: string; evidenceCount: number; legalConclusion: null }>;
+      assert.ok(legalCases.some((item) => item.id === legalCaseId && item.evidenceCount === 1 && item.legalConclusion === null));
+
+      const verification = await apiRequest("/evidence/exports/verify-manifest", {
+        token,
+        method: "POST",
+        body: {
+          manifest,
+          manifestSha256: evidencePackage.manifestSha256,
+        },
+      });
+      assert.equal(verification.status, 200, JSON.stringify(verification.payload));
+      assert.equal((verification.payload as { verified: boolean }).verified, true);
 
       const exportedEvents = await prisma.evidenceCustodyEvent.count({
         where: { evidenceAssetId: uploadedEvidenceId, eventType: "EXPORTED" },

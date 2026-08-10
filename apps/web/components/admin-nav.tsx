@@ -13,6 +13,7 @@ const groups: AdminNavGroup[] = [
     title: "Core",
     items: [
       { href: "/admin/dashboard", label: "Overview" },
+      { href: "/admin/pre-election", label: "Pre-Election" },
       { href: "/admin/rewards", label: "Rewards" },
       { href: "/admin/activity", label: "Activity" },
       { href: "/admin/reference", label: "Reference Data" },
@@ -35,6 +36,7 @@ const groups: AdminNavGroup[] = [
       { href: "/admin/operations/coverage", label: "Coverage" },
       { href: "/admin/incidents", label: "Incidents" },
       { href: "/admin/election-reports", label: "Election Reports" },
+      { href: "/admin/evidence", label: "Evidence" },
       { href: "/admin/communications", label: "Communications" },
     ],
   },

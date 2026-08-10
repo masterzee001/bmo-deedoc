@@ -317,6 +317,43 @@ enum MessageReceiptStatus {
   READ
 }
 
+enum VoiceCallStatus {
+  INITIATED
+  RINGING
+  CONNECTED
+  ENDED
+}
+
+enum VoiceCallEndReason {
+  COMPLETED
+  REJECTED
+  MISSED
+  CANCELLED
+  FAILED
+}
+
+enum VoiceCallParticipantStatus {
+  CALLING
+  RINGING
+  ACCEPTED
+  REJECTED
+  MISSED
+  LEFT
+  FAILED
+}
+
+enum VoiceCallEventType {
+  INITIATED
+  RINGING
+  ACCEPTED
+  REJECTED
+  CONNECTED
+  ENDED
+  MISSED
+  FAILED
+  SIGNAL_RELAYED
+}
+
 enum RealtimeEventDeliveryStatus {
   PENDING
   PUBLISHED
@@ -402,6 +439,9 @@ model User {
   conversationMemberships    ConversationMember[]          @relation("ConversationMemberUser")
   sentMessages               Message[]                     @relation("MessageSender")
   messageReceipts            MessageReceipt[]              @relation("MessageReceiptUser")
+  initiatedVoiceCalls        VoiceCall[]                   @relation("VoiceCallInitiator")
+  voiceCallParticipations    VoiceCallParticipant[]        @relation("VoiceCallParticipantUser")
+  voiceCallEventActions      VoiceCallEvent[]              @relation("VoiceCallEventActor")
 
   @@index([role])
   @@index([isActive])
@@ -1648,6 +1688,88 @@ model MessageAttachment {
 
   @@index([messageId])
   @@index([evidenceAssetId])
+}
+
+/// Durable Election Day voice-call state. PostgreSQL is authoritative for call
+/// lifecycle and history; Redis/Socket.IO only carries transient signalling.
+/// Calls are never recorded: no media or transcript is persisted here.
+model VoiceCall {
+  id                    String                 @id @default(cuid())
+  conversationId        String?
+  initiatorUserId       String
+  status                VoiceCallStatus        @default(INITIATED)
+  endReason             VoiceCallEndReason?
+  stateId               String
+  senatorialDistrictId  String?
+  federalConstituencyId String?
+  stateConstituencyId   String?
+  wardId                String?
+  pollingUnitId         String?
+  startedAt             DateTime               @default(now())
+  ringingAt             DateTime?
+  connectedAt           DateTime?
+  endedAt               DateTime?
+  durationSeconds       Int?
+  endedByUserId         String?
+  recordingPolicy       String                 @default("DISABLED")
+  metadataJson          Json?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  initiatorUser         User                   @relation("VoiceCallInitiator", fields: [initiatorUserId], references: [id], onDelete: Restrict)
+  participants          VoiceCallParticipant[]
+  events                VoiceCallEvent[]
+
+  @@index([status, startedAt])
+  @@index([initiatorUserId])
+  @@index([conversationId])
+  @@index([stateId])
+  @@index([senatorialDistrictId])
+  @@index([federalConstituencyId])
+  @@index([stateConstituencyId])
+  @@index([wardId])
+  @@index([pollingUnitId])
+  @@index([startedAt])
+}
+
+model VoiceCallParticipant {
+  id          String                     @id @default(cuid())
+  callId      String
+  userId      String
+  isInitiator Boolean                    @default(false)
+  status      VoiceCallParticipantStatus @default(CALLING)
+  invitedAt   DateTime                   @default(now())
+  ringingAt   DateTime?
+  answeredAt  DateTime?
+  leftAt      DateTime?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  call        VoiceCall                  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user        User                       @relation("VoiceCallParticipantUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@index([userId, status])
+  @@index([callId])
+}
+
+/// Append-only lifecycle history for a voice call. Signal payloads are never
+/// stored; only the signal type is recorded for accountability.
+model VoiceCallEvent {
+  id            String             @id @default(cuid())
+  callId        String
+  type          VoiceCallEventType
+  actorUserId   String?
+  targetUserId  String?
+  signalType    String?
+  fromStatus    VoiceCallStatus?
+  toStatus      VoiceCallStatus?
+  metadataJson  Json?
+  occurredAt    DateTime           @default(now())
+  call          VoiceCall          @relation(fields: [callId], references: [id], onDelete: Cascade)
+  actorUser     User?              @relation("VoiceCallEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([callId, occurredAt])
+  @@index([actorUserId])
+  @@index([type])
 }
 
 model RealtimeEventOutbox {

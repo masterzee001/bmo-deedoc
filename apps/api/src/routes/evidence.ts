@@ -89,6 +89,37 @@ const manifestExportSchema = z.object({
   purpose: z.string().trim().min(3).max(500),
 });
 
+const evidenceSearchSchema = z.object({
+  search: z.string().trim().max(120).optional(),
+  evidenceType: z.enum(EVIDENCE_TYPES).optional(),
+  classification: z.enum(EVIDENCE_CLASSIFICATIONS).optional(),
+  reviewStatus: z.enum(EVIDENCE_REVIEW_STATUSES).optional(),
+  pollingUnitId: z.string().trim().optional(),
+  incidentId: z.string().trim().optional(),
+  electionReportId: z.string().trim().optional(),
+  uploaderUserId: z.string().trim().optional(),
+  sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i).optional(),
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+const aggregationSchema = z.object({
+  groupBy: z
+    .enum(["POLLING_UNIT", "WARD", "STATE_CONSTITUENCY", "FEDERAL_CONSTITUENCY", "SENATORIAL_DISTRICT"])
+    .default("WARD"),
+  dateFrom: z.string().datetime().optional(),
+  dateTo: z.string().datetime().optional(),
+  reviewStatus: z.enum(EVIDENCE_REVIEW_STATUSES).optional(),
+  classification: z.enum(EVIDENCE_CLASSIFICATIONS).optional(),
+  evidenceType: z.enum(EVIDENCE_TYPES).optional(),
+});
+
+const manifestVerifySchema = z.object({
+  manifest: z.record(z.unknown()),
+  manifestSha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
+});
+
 type EvidenceTerritory = {
   geoPoliticalZoneId: string | null;
   stateId: string;
@@ -177,6 +208,23 @@ function evidenceWhereForActor(actor: AuthUserProfile): Prisma.EvidenceAssetWher
   return { id: "__deny__" };
 }
 
+function legalCaseWhereForActor(actor: AuthUserProfile): Prisma.LegalCaseWhereInput {
+  if (isPrivilegedEvidenceReviewer(actor)) {
+    return { stateId: OGUN_STATE_ID };
+  }
+  if (actor.role === "COORDINATOR" && actor.coordinatorProfile) {
+    return {
+      stateId: actor.coordinatorProfile.stateId || OGUN_STATE_ID,
+      senatorialDistrictId: actor.coordinatorProfile.senatorialDistrictId || undefined,
+      federalConstituencyId: actor.coordinatorProfile.federalConstituencyId || undefined,
+      stateConstituencyId: actor.coordinatorProfile.stateConstituencyId || undefined,
+      wardId: actor.coordinatorProfile.wardId || undefined,
+      pollingUnitId: actor.coordinatorProfile.pollingUnitId || undefined,
+    };
+  }
+  return { id: "__deny__" };
+}
+
 function sanitizeFileName(fileName: string) {
   const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/_+/g, "_").slice(0, 120);
   return sanitized || "evidence.bin";
@@ -234,6 +282,40 @@ function serializeEvidence(asset: Prisma.EvidenceAssetGetPayload<{ include: { cu
       publicUrl: null,
       signedAccessRequired: true,
     },
+    preservation: {
+      originalImmutable: true,
+      authoritativeStorage: "private-object-storage",
+      derivativeStatus: "TARGET_LATER",
+      retentionPolicy: "ELECTION_EVIDENCE_STRONG_RETENTION_TARGET",
+    },
+  };
+}
+
+function serializeLegalCase(
+  legalCase: Prisma.LegalCaseGetPayload<{ include: { evidenceLinks: true; packages: true; notes: true } }>,
+) {
+  return {
+    id: legalCase.id,
+    title: legalCase.title,
+    description: legalCase.description,
+    status: legalCase.status,
+    createdByUserId: legalCase.createdByUserId,
+    territory: {
+      geoPoliticalZoneId: legalCase.geoPoliticalZoneId,
+      stateId: legalCase.stateId,
+      senatorialDistrictId: legalCase.senatorialDistrictId,
+      federalConstituencyId: legalCase.federalConstituencyId,
+      lgaId: legalCase.lgaId,
+      wardId: legalCase.wardId,
+      stateConstituencyId: legalCase.stateConstituencyId,
+      pollingUnitId: legalCase.pollingUnitId,
+    },
+    evidenceCount: legalCase.evidenceLinks.length,
+    packageCount: legalCase.packages.length,
+    noteCount: legalCase.notes.length,
+    createdAt: legalCase.createdAt.toISOString(),
+    updatedAt: legalCase.updatedAt.toISOString(),
+    legalConclusion: null,
   };
 }
 
@@ -386,7 +468,203 @@ router.get("/storage/health", requireAuth, async (request, response) => {
       authoritativeEvidenceFilesystem: false,
       originalOverwritePolicy: "DENY_IF_OBJECT_EXISTS",
       signedAccessRequired: true,
+      retentionPolicyFoundation: "ELECTION_EVIDENCE_STRONG_RETENTION_TARGET",
     },
+  });
+});
+
+router.get("/", requireAuth, async (request, response) => {
+  const parsed = evidenceSearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid evidence search filters.", errors: parsed.error.flatten() });
+  }
+
+  const filters = parsed.data;
+  const where: Prisma.EvidenceAssetWhereInput = {
+    ...evidenceWhereForActor(request.authUser!),
+    ...(filters.evidenceType ? { evidenceType: filters.evidenceType as EvidenceType } : {}),
+    ...(filters.classification ? { classification: filters.classification as EvidenceClassification } : {}),
+    ...(filters.reviewStatus ? { reviewStatus: filters.reviewStatus as EvidenceReviewStatus } : {}),
+    ...(filters.pollingUnitId ? { pollingUnitId: filters.pollingUnitId } : {}),
+    ...(filters.incidentId ? { incidentId: filters.incidentId } : {}),
+    ...(filters.electionReportId ? { electionReportId: filters.electionReportId } : {}),
+    ...(filters.uploaderUserId ? { uploaderUserId: filters.uploaderUserId } : {}),
+    ...(filters.sha256 ? { sha256: filters.sha256.toLowerCase() } : {}),
+    ...(filters.dateFrom || filters.dateTo
+      ? {
+          serverReceivedAt: {
+            ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+            ...(filters.dateTo ? { lte: new Date(filters.dateTo) } : {}),
+          },
+        }
+      : {}),
+    ...(filters.search
+      ? {
+          OR: [
+            { id: { contains: filters.search, mode: "insensitive" } },
+            { originalFileName: { contains: filters.search, mode: "insensitive" } },
+            { sha256: { contains: filters.search.toLowerCase(), mode: "insensitive" } },
+            { incidentId: { contains: filters.search, mode: "insensitive" } },
+            { electionReportId: { contains: filters.search, mode: "insensitive" } },
+            { pollingUnitId: { contains: filters.search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [evidence, total, byType, byReviewStatus, byClassification] = await Promise.all([
+    prisma.evidenceAsset.findMany({
+      where,
+      include: { custodyEvents: { orderBy: { createdAt: "asc" } } },
+      orderBy: { serverReceivedAt: "desc" },
+      take: filters.limit,
+    }),
+    prisma.evidenceAsset.count({ where }),
+    prisma.evidenceAsset.groupBy({ by: ["evidenceType"], where, _count: { _all: true } }),
+    prisma.evidenceAsset.groupBy({ by: ["reviewStatus"], where, _count: { _all: true } }),
+    prisma.evidenceAsset.groupBy({ by: ["classification"], where, _count: { _all: true } }),
+  ]);
+
+  return response.json({
+    evidence: evidence.map(serializeEvidence),
+    summary: {
+      total,
+      returned: evidence.length,
+      byType: Object.fromEntries(byType.map((item) => [item.evidenceType, item._count._all])),
+      byReviewStatus: Object.fromEntries(byReviewStatus.map((item) => [item.reviewStatus, item._count._all])),
+      byClassification: Object.fromEntries(byClassification.map((item) => [item.classification, item._count._all])),
+    },
+    accessModel: {
+      privateOriginals: true,
+      signedAccessRequired: true,
+      accessAudited: true,
+    },
+  });
+});
+
+router.get("/aggregation", requireAuth, async (request, response) => {
+  const parsed = aggregationSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid evidence aggregation filters.", errors: parsed.error.flatten() });
+  }
+
+  const filters = parsed.data;
+  const fieldByGroup = {
+    POLLING_UNIT: "pollingUnitId",
+    WARD: "wardId",
+    STATE_CONSTITUENCY: "stateConstituencyId",
+    FEDERAL_CONSTITUENCY: "federalConstituencyId",
+    SENATORIAL_DISTRICT: "senatorialDistrictId",
+  } as const;
+  const groupField = fieldByGroup[filters.groupBy];
+
+  const where: Prisma.EvidenceAssetWhereInput = {
+    ...evidenceWhereForActor(request.authUser!),
+    [groupField]: { not: null },
+    ...(filters.evidenceType ? { evidenceType: filters.evidenceType as EvidenceType } : {}),
+    ...(filters.classification ? { classification: filters.classification as EvidenceClassification } : {}),
+    ...(filters.reviewStatus ? { reviewStatus: filters.reviewStatus as EvidenceReviewStatus } : {}),
+    ...(filters.dateFrom || filters.dateTo
+      ? {
+          serverReceivedAt: {
+            ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+            ...(filters.dateTo ? { lte: new Date(filters.dateTo) } : {}),
+          },
+        }
+      : {}),
+  };
+
+  const assets = await prisma.evidenceAsset.findMany({
+    where,
+    select: {
+      id: true,
+      evidenceType: true,
+      classification: true,
+      reviewStatus: true,
+      pollingUnitId: true,
+      wardId: true,
+      stateConstituencyId: true,
+      federalConstituencyId: true,
+      senatorialDistrictId: true,
+      serverReceivedAt: true,
+    },
+    orderBy: { serverReceivedAt: "desc" },
+    take: 1000,
+  });
+
+  const groups = new Map<
+    string,
+    {
+      territoryKind: string;
+      territoryId: string;
+      evidenceCount: number;
+      latestServerReceivedAt: string | null;
+      byType: Record<string, number>;
+      byReviewStatus: Record<string, number>;
+      byClassification: Record<string, number>;
+    }
+  >();
+
+  for (const asset of assets) {
+    const territoryId = asset[groupField];
+    if (!territoryId) {
+      continue;
+    }
+    const current =
+      groups.get(territoryId) ||
+      {
+        territoryKind: filters.groupBy,
+        territoryId,
+        evidenceCount: 0,
+        latestServerReceivedAt: null,
+        byType: {},
+        byReviewStatus: {},
+        byClassification: {},
+      };
+    current.evidenceCount += 1;
+    current.latestServerReceivedAt = current.latestServerReceivedAt || asset.serverReceivedAt.toISOString();
+    current.byType[asset.evidenceType] = (current.byType[asset.evidenceType] || 0) + 1;
+    current.byReviewStatus[asset.reviewStatus] = (current.byReviewStatus[asset.reviewStatus] || 0) + 1;
+    current.byClassification[asset.classification] = (current.byClassification[asset.classification] || 0) + 1;
+    groups.set(territoryId, current);
+  }
+
+  return response.json({
+    groupBy: filters.groupBy,
+    aggregation: [...groups.values()].sort((left, right) => right.evidenceCount - left.evidenceCount),
+    sourceLimit: 1000,
+  });
+});
+
+router.get("/legal-cases", requireAuth, async (request, response) => {
+  if (!isPrivilegedEvidenceReviewer(request.authUser!)) {
+    return response.status(403).json({ message: "Legal-support workspaces require reviewer access." });
+  }
+
+  const cases = await prisma.legalCase.findMany({
+    where: legalCaseWhereForActor(request.authUser!),
+    include: { evidenceLinks: true, packages: true, notes: true },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return response.json({ legalCases: cases.map(serializeLegalCase), noLegalConclusion: true });
+});
+
+router.post("/exports/verify-manifest", requireAuth, async (request, response) => {
+  if (!isPrivilegedEvidenceReviewer(request.authUser!)) {
+    return response.status(403).json({ message: "Evidence manifest verification requires reviewer access." });
+  }
+  const parsed = manifestVerifySchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid manifest verification payload.", errors: parsed.error.flatten() });
+  }
+
+  const computedSha256 = crypto.createHash("sha256").update(JSON.stringify(parsed.data.manifest)).digest("hex");
+  return response.json({
+    verified: computedSha256 === parsed.data.manifestSha256.toLowerCase(),
+    computedSha256,
+    suppliedSha256: parsed.data.manifestSha256.toLowerCase(),
   });
 });
 
@@ -740,7 +1018,7 @@ router.post("/legal-cases", requireAuth, async (request, response) => {
           })),
         },
       },
-      include: { evidenceLinks: true },
+      include: { evidenceLinks: true, packages: true, notes: true },
     });
     for (const asset of evidence) {
       await transaction.evidenceCustodyEvent.create({
@@ -763,7 +1041,7 @@ router.post("/legal-cases", requireAuth, async (request, response) => {
     return created;
   });
 
-  return response.status(201).json({ legalCase, noLegalConclusion: true });
+  return response.status(201).json({ legalCase: serializeLegalCase(legalCase), noLegalConclusion: true });
 });
 
 router.post("/legal-cases/:legalCaseId/evidence", requireAuth, async (request, response) => {

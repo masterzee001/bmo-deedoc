@@ -28,6 +28,25 @@ import type {
   CoverageInsights,
   ElectionDayReportAssetItem,
   ElectionDayReportItem,
+  ElectionDayConversationItem,
+  ElectionDayMessageItem,
+  ElectionDayOperationalAlertItem,
+  ElectionDaySituationRoomStatus,
+  ElectionDayTimelineItem,
+  ElectionDayWebrtcConfig,
+  ElectionDayCallItem,
+  VoiceCallSignalType,
+  VoiceCallStatus,
+  EvidenceAggregationItem,
+  EvidenceAssetItem,
+  EvidenceClassification,
+  EvidenceDossier,
+  EvidenceExplorerSummary,
+  EvidenceManifest,
+  EvidencePackageItem,
+  EvidenceReviewStatus,
+  EvidenceTimelineItem,
+  EvidenceType,
   PoliticalPartyItem,
   PoliticalPartyPublicProfile,
   PollListItem,
@@ -37,6 +56,7 @@ import type {
   RewardLedgerItem,
   RewardRedemptionItem,
   RewardsSummary,
+  TerritorySummary,
   ReferenceCompletenessReport,
   SenatorialDistrictItem,
   StateItem,
@@ -45,6 +65,8 @@ import type {
   VoterEngagementTaskItem,
   VoterUserItem,
   WardItem,
+  RealtimePresenceEntry,
+  LegalCaseItem,
 } from "@pics-nigeria/shared";
 
 function normalizeBaseUrl(value: string): string {
@@ -107,13 +129,26 @@ export async function registerVoterUser(body: {
   password: string;
   voterCardNumber: string;
   stateId: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  stateConstituencyId?: string;
   lgaId: string;
   wardId: string;
   pollingUnitId: string;
   referredByCode?: string;
   acceptTerms: true;
+  acceptPrivacy?: true;
   contactConsent: true;
+  documentProcessingConsent?: true;
   confirmAdult: true;
+  consentVersion?: string;
+  voterDocument?: {
+    originalStorageKey: string;
+    originalFileName: string;
+    mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    fileSize: number;
+    sha256: string;
+  };
 }): Promise<{ message: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
     method: "POST",
@@ -123,6 +158,159 @@ export async function registerVoterUser(body: {
 
   return readJson<{ message: string; user: AuthUserProfile }>(response);
 }
+
+export type PreElectionVerificationCase = {
+  id: string;
+  memberUserId: string;
+  memberName: string;
+  memberEmail: string;
+  memberPhone: string | null;
+  voterIdentifier: string;
+  status: string;
+  isFlagged: boolean;
+  fraudReason: string | null;
+  submittedAt: string | null;
+  reviewStartedAt: string | null;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewNote: string | null;
+  territory: TerritorySummary | null;
+  documents: Array<{
+    id: string;
+    originalFileName: string;
+    mimeType: string;
+    fileSize: number;
+    sha256: string;
+    storageProvider: string;
+    uploadedAt: string;
+  }>;
+  history: Array<{
+    id: string;
+    fromStatus: string | null;
+    toStatus: string;
+    decision: string;
+    note: string | null;
+    actorName: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type PreElectionReferralItem = {
+  id: string;
+  referredUserId: string;
+  referredName: string;
+  referredEmail: string;
+  referrerUserId: string;
+  referrerName: string;
+  referrerEmail: string;
+  referralCode: string;
+  status: string;
+  wardId: string | null;
+  pollingUnitId: string | null;
+  registeredAt: string;
+  qualifiedAt: string | null;
+  rewardProcessedAt: string | null;
+  flaggedAt: string | null;
+  fraudReason: string | null;
+};
+
+export type PreElectionRewardLedgerEntry = {
+  id: string;
+  userId: string;
+  points: number;
+  category: string;
+  sourceEventType: string;
+  sourceEventId: string;
+  rewardRuleVersionId: string | null;
+  rewardRuleName: string | null;
+  rewardRuleVersion: number | null;
+  relatedUserId: string | null;
+  relatedUserName: string | null;
+  relatedUserEmail: string | null;
+  description: string | null;
+  createdAt: string;
+};
+
+export type PreElectionPayoutAssignment = {
+  id: string;
+  payoutCycleId: string;
+  payoutBatchId: string;
+  payoutOfficerUserId: string;
+  payoutOfficerName: string | null;
+  beneficiaryUserId: string;
+  beneficiaryName: string | null;
+  beneficiaryEmail: string | null;
+  points: number;
+  amount: string;
+  status: string;
+  assignedAt: string;
+  processedAt: string | null;
+  note: string | null;
+  transactions: Array<{
+    id: string;
+    paymentReference: string;
+    pointsRedeemed: number;
+    amountPaid: string;
+    status: string;
+    proofStorageKey: string | null;
+    note: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type PreElectionPayoutBatch = {
+  id: string;
+  payoutCycleId: string;
+  payoutCycleName: string | null;
+  payoutDate: string | null;
+  status: string;
+  createdAt: string;
+  approvedAt: string | null;
+  assignmentCount: number;
+  totalPoints: number;
+  totalAmount: string;
+  assignments: PreElectionPayoutAssignment[];
+};
+
+export type PreElectionStrengthDashboard = {
+  territoryType: string;
+  territoryId: string;
+  latestStrengthSnapshot: {
+    id: string;
+    score: string;
+    trend: string;
+    calculatedAt: string;
+    breakdownJson: unknown;
+  } | null;
+  targetProgress: Array<{
+    targetId: string;
+    metric: string;
+    territoryType: string;
+    territoryId: string;
+    targetValue: number;
+    actualValue: number;
+    percentageAchieved: number;
+    shortfall: number;
+  }>;
+  childSummaries: Array<{
+    territoryType: string;
+    territoryId: string;
+    name: string;
+    latestScore: string | null;
+    latestScoreAt: string | null;
+    verifiedMembers: number;
+    registeredMembers: number;
+  }>;
+  coordinatorPerformance: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    level: string;
+    directRegistrations: number;
+    directVerifiedRegistrations: number;
+    confirmedPoints: number;
+  }>;
+};
 
 export async function fetchPublicStates(): Promise<StateItem[]> {
   const response = await fetch(`${API_BASE_URL}/auth/territories/states`, {
@@ -170,6 +358,335 @@ export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> 
 
   const payload = await readJson<{ user: AuthUserProfile }>(response);
   return payload.user;
+}
+
+export async function fetchPreElectionReferralCode(token: string): Promise<{ referralCode: string; referralLink: string }> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/referral-code`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ referralCode: string; referralLink: string }>(response);
+}
+
+export async function fetchMyPreElectionVerification(token: string): Promise<PreElectionVerificationCase | null> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ verification: PreElectionVerificationCase | null }>(response);
+  return payload.verification;
+}
+
+export async function submitMyPreElectionVerificationDocument(
+  token: string,
+  body: {
+    documentProcessingConsent: true;
+    voterDocument: {
+      originalStorageKey: string;
+      originalFileName: string;
+      mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+      fileSize: number;
+      sha256: string;
+    };
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/me/documents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; verificationId: string; status: string }>(response);
+}
+
+export async function fetchPreElectionVerifications(
+  token: string,
+  query?: { status?: string; flagged?: boolean; search?: string; territoryType?: string; territoryId?: string },
+): Promise<PreElectionVerificationCase[]> {
+  const params = new URLSearchParams();
+  if (query?.status) params.set("status", query.status);
+  if (query?.flagged !== undefined) params.set("flagged", String(query.flagged));
+  if (query?.search) params.set("search", query.search);
+  if (query?.territoryType) params.set("territoryType", query.territoryType);
+  if (query?.territoryId) params.set("territoryId", query.territoryId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ verifications: PreElectionVerificationCase[] }>(response);
+  return payload.verifications;
+}
+
+export async function exportPreElectionVerificationsCsv(token: string, query?: { status?: string; search?: string }) {
+  const params = new URLSearchParams({ export: "csv" });
+  if (query?.status) params.set("status", query.status);
+  if (query?.search) params.set("search", query.search);
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new ApiError("Verification export failed.", response.status);
+  }
+  return response.text();
+}
+
+export async function claimPreElectionVerification(token: string, verificationId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/claim`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ message: string; verificationId: string }>(response);
+}
+
+export async function accessPreElectionVerificationDocument(token: string, verificationId: string, documentId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/documents/${documentId}/access`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ storageProvider: string; storageKey: string; accessToken: string; expiresAt: string }>(response);
+}
+
+export async function decidePreElectionVerification(
+  token: string,
+  verificationId: string,
+  body: { decision: "APPROVE" | "REJECT" | "REQUEST_RESUBMISSION"; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/decision`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; verificationId: string; status: string }>(response);
+}
+
+export async function fetchPreElectionReferrals(
+  token: string,
+  query?: { status?: string; search?: string; territoryType?: string; territoryId?: string },
+) {
+  const params = new URLSearchParams();
+  if (query?.status) params.set("status", query.status);
+  if (query?.search) params.set("search", query.search);
+  if (query?.territoryType) params.set("territoryType", query.territoryType);
+  if (query?.territoryId) params.set("territoryId", query.territoryId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/referrals${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    referrals: PreElectionReferralItem[];
+    summary: Record<string, number>;
+  }>(response);
+}
+
+export async function fetchPreElectionRewardBalance(token: string, userId?: string) {
+  const suffix = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/balance${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    userId: string;
+    confirmedPoints: number;
+    pendingPotentialPoints: number;
+    reservedPayoutPoints: number;
+    availablePoints: number;
+  }>(response);
+}
+
+export async function fetchPreElectionRewardLedger(token: string, userId?: string): Promise<PreElectionRewardLedgerEntry[]> {
+  const suffix = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/ledger${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ rewardLedgerEntries: PreElectionRewardLedgerEntry[] }>(response);
+  return payload.rewardLedgerEntries;
+}
+
+export async function fetchPreElectionPayoutOfficers(token: string): Promise<Array<{ id: string; name: string; email: string }>> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/officers`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutOfficers: Array<{ id: string; name: string; email: string }> }>(response);
+  return payload.payoutOfficers;
+}
+
+export async function createPreElectionPayoutConfiguration(
+  token: string,
+  body: { minimumPoints: number; pointConversionRate: number; frequency: string; nextPayoutDate?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/configurations`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutCycles(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ payoutCycles: Array<{ id: string; name: string; status: string; payoutDate: string; minimumThreshold: number; conversionRate: string }> }>(response);
+}
+
+export async function createPreElectionPayoutCycle(
+  token: string,
+  body: { name: string; opensAt: string; closesAt: string; payoutDate: string; minimumThreshold?: number; conversionRate?: number },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutEligibility(token: string, cycleId?: string) {
+  const suffix = cycleId ? `?cycleId=${encodeURIComponent(cycleId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/eligibility${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    payoutEligibility: Array<{ userId: string; name: string | null; email: string | null; availablePoints: number; amount: string }>;
+    minimumThreshold: number;
+    conversionRate: string;
+  }>(response);
+}
+
+export async function createPreElectionPayoutBatch(
+  token: string,
+  cycleId: string,
+  body: { payoutOfficerUserId: string; beneficiaryUserIds?: string[] },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles/${cycleId}/batches`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutBatches(token: string, status?: string): Promise<PreElectionPayoutBatch[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/batches${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutBatches: PreElectionPayoutBatch[] }>(response);
+  return payload.payoutBatches;
+}
+
+export async function approvePreElectionPayoutBatch(token: string, batchId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/batches/${batchId}/approve`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutAssignments(token: string, status?: string): Promise<PreElectionPayoutAssignment[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/assignments${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutAssignments: PreElectionPayoutAssignment[] }>(response);
+  return payload.payoutAssignments;
+}
+
+export async function updatePreElectionPayoutAssignment(
+  token: string,
+  assignmentId: string,
+  body: { status: "PROCESSING" | "PAID" | "HELD" | "REJECTED"; paymentReference?: string; proofStorageKey?: string; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/assignments/${assignmentId}/status`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionRewardRule(
+  token: string,
+  body: { name: string; directPoints: number; eligibleRole?: string; eligibleCoordinatorLevel?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/reward-rules`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionRewardRules(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/reward-rules`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ rewardRules: Array<{ id: string; name: string; active: boolean; eligibleRole: string; eligibleCoordinatorLevel: string | null; versions: Array<{ version: number; directPoints: number }> }> }>(response);
+}
+
+export async function createPreElectionStrengthMetric(token: string, body: { metric: string; description?: string }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/metrics`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionStrengthWeight(token: string, body: { metric: string; weight: number }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/weights`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionTerritoryTarget(
+  token: string,
+  body: { territoryType: string; territoryId: string; metric: string; targetValue: number; startDate: string; endDate?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/targets`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function calculatePreElectionStrengthSnapshot(token: string, body: { territoryType: string; territoryId: string }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/snapshots/calculate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionStrengthDashboard(
+  token: string,
+  query: { territoryType: string; territoryId: string },
+): Promise<PreElectionStrengthDashboard> {
+  const params = new URLSearchParams(query);
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/dashboard?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ dashboard: PreElectionStrengthDashboard }>(response);
+  return payload.dashboard;
 }
 
 export async function fetchOgunOrganizationTree(token: string): Promise<OgunOrganizationTree> {
@@ -1168,6 +1685,246 @@ export async function fetchAdminElectionDayReportAsset(token: string, assetId: s
   return response.blob();
 }
 
+function appendOptionalParam(params: URLSearchParams, key: string, value: string | undefined) {
+  if (value) {
+    params.set(key, value);
+  }
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return window.btoa(binary);
+}
+
+export async function fetchEvidenceExplorer(
+  token: string,
+  query?: {
+    search?: string;
+    evidenceType?: EvidenceType;
+    classification?: EvidenceClassification;
+    reviewStatus?: EvidenceReviewStatus;
+    pollingUnitId?: string;
+    incidentId?: string;
+    electionReportId?: string;
+    uploaderUserId?: string;
+    sha256?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+  },
+): Promise<{ evidence: EvidenceAssetItem[]; summary: EvidenceExplorerSummary }> {
+  const params = new URLSearchParams();
+  appendOptionalParam(params, "search", query?.search);
+  appendOptionalParam(params, "evidenceType", query?.evidenceType);
+  appendOptionalParam(params, "classification", query?.classification);
+  appendOptionalParam(params, "reviewStatus", query?.reviewStatus);
+  appendOptionalParam(params, "pollingUnitId", query?.pollingUnitId);
+  appendOptionalParam(params, "incidentId", query?.incidentId);
+  appendOptionalParam(params, "electionReportId", query?.electionReportId);
+  appendOptionalParam(params, "uploaderUserId", query?.uploaderUserId);
+  appendOptionalParam(params, "sha256", query?.sha256);
+  appendOptionalParam(params, "dateFrom", query?.dateFrom);
+  appendOptionalParam(params, "dateTo", query?.dateTo);
+  if (query?.limit) {
+    params.set("limit", String(query.limit));
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/evidence${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ evidence: EvidenceAssetItem[]; summary: EvidenceExplorerSummary }>(response);
+}
+
+export async function fetchEvidenceAggregation(
+  token: string,
+  query?: {
+    groupBy?: "POLLING_UNIT" | "WARD" | "STATE_CONSTITUENCY" | "FEDERAL_CONSTITUENCY" | "SENATORIAL_DISTRICT";
+    evidenceType?: EvidenceType;
+    classification?: EvidenceClassification;
+    reviewStatus?: EvidenceReviewStatus;
+    dateFrom?: string;
+    dateTo?: string;
+  },
+): Promise<{ groupBy: string; aggregation: EvidenceAggregationItem[]; sourceLimit: number }> {
+  const params = new URLSearchParams();
+  appendOptionalParam(params, "groupBy", query?.groupBy);
+  appendOptionalParam(params, "evidenceType", query?.evidenceType);
+  appendOptionalParam(params, "classification", query?.classification);
+  appendOptionalParam(params, "reviewStatus", query?.reviewStatus);
+  appendOptionalParam(params, "dateFrom", query?.dateFrom);
+  appendOptionalParam(params, "dateTo", query?.dateTo);
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/evidence/aggregation${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  return readJson<{ groupBy: string; aggregation: EvidenceAggregationItem[]; sourceLimit: number }>(response);
+}
+
+export async function finalizeEvidenceUpload(
+  token: string,
+  body: {
+    evidenceType: EvidenceType;
+    classification: EvidenceClassification;
+    file: File;
+    capturedAt?: string;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    pollingUnitId?: string;
+    incidentId?: string;
+    electionReportId?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<{ message: string; evidence: EvidenceAssetItem }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/uploads/finalize`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      evidenceType: body.evidenceType,
+      classification: body.classification,
+      originalFileName: body.file.name,
+      mimeType: body.file.type || "application/octet-stream",
+      contentBase64: await fileToBase64(body.file),
+      capturedAt: body.capturedAt || undefined,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      accuracyMeters: body.accuracyMeters,
+      pollingUnitId: body.pollingUnitId || undefined,
+      incidentId: body.incidentId || undefined,
+      electionReportId: body.electionReportId || undefined,
+      metadata: body.metadata,
+    }),
+  });
+
+  return readJson<{ message: string; evidence: EvidenceAssetItem }>(response);
+}
+
+export async function updateEvidenceReview(
+  token: string,
+  evidenceAssetId: string,
+  body: { status: EvidenceReviewStatus; classification?: EvidenceClassification; note?: string },
+): Promise<{ message: string; evidence: EvidenceAssetItem }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/${evidenceAssetId}/review`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ message: string; evidence: EvidenceAssetItem }>(response);
+}
+
+export async function createEvidenceAccess(
+  token: string,
+  evidenceAssetId: string,
+  body: { action: "VIEW" | "DOWNLOAD"; expiresInSeconds?: number },
+): Promise<{ access: { signedUrl: string; expiresAt: string; publicUrl: null; storageKey: string } }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/${evidenceAssetId}/access`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ access: { signedUrl: string; expiresAt: string; publicUrl: null; storageKey: string } }>(response);
+}
+
+export async function fetchEvidenceTimeline(token: string, pollingUnitId: string): Promise<EvidenceTimelineItem[]> {
+  const response = await fetch(`${API_BASE_URL}/evidence/polling-units/${encodeURIComponent(pollingUnitId)}/timeline`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ pollingUnitId: string; timeline: EvidenceTimelineItem[] }>(response);
+  return payload.timeline;
+}
+
+export async function fetchEvidenceDossier(token: string, pollingUnitId: string): Promise<EvidenceDossier> {
+  const response = await fetch(`${API_BASE_URL}/evidence/polling-units/${encodeURIComponent(pollingUnitId)}/dossier`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ dossier: EvidenceDossier }>(response);
+  return payload.dossier;
+}
+
+export async function fetchLegalCases(token: string): Promise<LegalCaseItem[]> {
+  const response = await fetch(`${API_BASE_URL}/evidence/legal-cases`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  const payload = await readJson<{ legalCases: LegalCaseItem[] }>(response);
+  return payload.legalCases;
+}
+
+export async function createLegalCase(
+  token: string,
+  body: { title: string; description?: string; pollingUnitId?: string; evidenceAssetIds?: string[]; note?: string },
+): Promise<{ legalCase: LegalCaseItem; noLegalConclusion: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/legal-cases`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ...body, evidenceAssetIds: body.evidenceAssetIds || [] }),
+  });
+
+  return readJson<{ legalCase: LegalCaseItem; noLegalConclusion: boolean }>(response);
+}
+
+export async function createEvidenceManifestExport(
+  token: string,
+  body: { evidenceAssetIds: string[]; legalCaseId?: string; purpose: string },
+): Promise<{ evidencePackage: EvidencePackageItem; manifest: EvidenceManifest }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/exports/manifest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ evidencePackage: EvidencePackageItem; manifest: EvidenceManifest }>(response);
+}
+
+export async function verifyEvidenceManifest(
+  token: string,
+  body: { manifest: EvidenceManifest; manifestSha256: string },
+): Promise<{ verified: boolean; computedSha256: string; suppliedSha256: string }> {
+  const response = await fetch(`${API_BASE_URL}/evidence/exports/verify-manifest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return readJson<{ verified: boolean; computedSha256: string; suppliedSha256: string }>(response);
+}
+
 export async function fetchCandidateProfileEditor(token: string): Promise<CandidateProfileEditorItem> {
   const response = await fetch(`${API_BASE_URL}/candidate/profile`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -1455,6 +2212,258 @@ export async function fetchCandidateMapSummary(token: string): Promise<AdminMapS
 
   const payload = await readJson<{ mapSummary: AdminMapSummary }>(response);
   return payload.mapSummary;
+}
+
+export async function fetchElectionDaySituationRoomStatus(token: string, reportDate?: string): Promise<ElectionDaySituationRoomStatus> {
+  const query = reportDate ? `?reportDate=${encodeURIComponent(reportDate)}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/situation-room/status${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ status: ElectionDaySituationRoomStatus }>(response);
+  return payload.status;
+}
+
+export async function reconcileElectionDayAlerts(
+  token: string,
+  body?: { reportDate?: string },
+): Promise<{ message: string; alerts: ElectionDayOperationalAlertItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts/reconcile`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  return readJson<{ message: string; alerts: ElectionDayOperationalAlertItem[] }>(response);
+}
+
+export async function fetchElectionDayAlerts(
+  token: string,
+  query?: { status?: "OPEN" | "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED"; type?: string; reportDate?: string },
+): Promise<ElectionDayOperationalAlertItem[]> {
+  const params = new URLSearchParams();
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+  if (query?.type) {
+    params.set("type", query.type);
+  }
+  if (query?.reportDate) {
+    params.set("reportDate", query.reportDate);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ alerts: ElectionDayOperationalAlertItem[] }>(response);
+  return payload.alerts;
+}
+
+export async function updateElectionDayAlert(
+  token: string,
+  alertId: string,
+  body: { status: "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED"; note?: string },
+): Promise<{ message: string; alert: ElectionDayOperationalAlertItem }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts/${encodeURIComponent(alertId)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; alert: ElectionDayOperationalAlertItem }>(response);
+}
+
+export async function fetchElectionDayTimeline(token: string, query?: { reportDate?: string; limit?: number }): Promise<ElectionDayTimelineItem[]> {
+  const params = new URLSearchParams();
+  if (query?.reportDate) {
+    params.set("reportDate", query.reportDate);
+  }
+  if (query?.limit) {
+    params.set("limit", String(query.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/timeline${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ timeline: ElectionDayTimelineItem[] }>(response);
+  return payload.timeline;
+}
+
+export async function fetchElectionDayConversations(token: string): Promise<ElectionDayConversationItem[]> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ conversations: ElectionDayConversationItem[] }>(response);
+  return payload.conversations;
+}
+
+export async function createElectionDayConversation(
+  token: string,
+  body: {
+    type: "DIRECT" | "GROUP" | "TERRITORY" | "ELECTION_OPERATION";
+    title?: string;
+    recipientUserId?: string;
+    memberUserIds?: string[];
+    territory?: {
+      stateId?: string;
+      senatorialDistrictId?: string | null;
+      federalConstituencyId?: string | null;
+      stateConstituencyId?: string | null;
+      wardId?: string | null;
+      pollingUnitId?: string | null;
+    };
+  },
+): Promise<{ message: string; conversationId: string }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; conversationId: string }>(response);
+}
+
+export async function fetchElectionDayMessages(token: string, conversationId: string): Promise<ElectionDayMessageItem[]> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ messages: ElectionDayMessageItem[] }>(response);
+  return payload.messages;
+}
+
+export async function createElectionDayMessage(
+  token: string,
+  conversationId: string,
+  body: { body: string; metadata?: Record<string, unknown> },
+): Promise<{ message: string; item: ElectionDayMessageItem }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; item: ElectionDayMessageItem }>(response);
+}
+
+export async function fetchElectionDayPresence(token: string, userIds: string[]): Promise<RealtimePresenceEntry[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const response = await fetch(`${API_BASE_URL}/election-day/presence?userIds=${encodeURIComponent(userIds.join(","))}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ presence: RealtimePresenceEntry[] }>(response);
+  return payload.presence;
+}
+
+export async function fetchElectionDayWebrtcConfig(token: string): Promise<ElectionDayWebrtcConfig> {
+  const response = await fetch(`${API_BASE_URL}/election-day/webrtc/config`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ config: ElectionDayWebrtcConfig }>(response);
+  return payload.config;
+}
+
+export async function initiateElectionDayCall(
+  token: string,
+  body: { targetUserId: string; conversationId?: string },
+): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function acceptElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/accept`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function rejectElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/reject`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function endElectionDayCall(
+  token: string,
+  callId: string,
+  reason?: "COMPLETED" | "CANCELLED" | "FAILED",
+): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/end`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+/** Relays a WebRTC offer/answer/ICE candidate to the peer. Signal bodies are never persisted. */
+export async function sendElectionDayCallSignal(
+  token: string,
+  callId: string,
+  body: { signalType: VoiceCallSignalType; targetUserId: string; signal: unknown },
+): Promise<{ delivered: boolean; transport: string }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/signal`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ delivered: boolean; transport: string }>(response);
+}
+
+export async function fetchElectionDayCalls(
+  token: string,
+  query?: { status?: VoiceCallStatus; limit?: number },
+): Promise<ElectionDayCallItem[]> {
+  const search = new URLSearchParams();
+  if (query?.status) {
+    search.set("status", query.status);
+  }
+  if (query?.limit) {
+    search.set("limit", String(query.limit));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/calls${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ calls: ElectionDayCallItem[] }>(response);
+  return payload.calls;
+}
+
+export async function fetchElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
 }
 
 export async function fetchNotifications(token: string): Promise<NotificationItem[]> {

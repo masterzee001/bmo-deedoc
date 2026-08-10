@@ -236,6 +236,14 @@ export default function AdminElectionReportsPage() {
                   <button className="button secondary" type="button" onClick={() => void openAsset(report.postCountingPhotoAssetId)}>
                     View Post-Counting Photo
                   </button>
+                  <Link href={`/admin/evidence?electionReportId=${encodeURIComponent(report.id)}`}>
+                    Open linked evidence
+                  </Link>
+                  {report.territory.pollingUnitId ? (
+                    <Link href={`/admin/evidence?pollingUnitId=${encodeURIComponent(report.territory.pollingUnitId)}`}>
+                      Open PU dossier
+                    </Link>
+                  ) : null}
                 </div>
                 <label className="field" style={{ marginTop: 12 }}>
                   <span>Review note</span>

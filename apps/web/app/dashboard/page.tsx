@@ -18,7 +18,10 @@ import {
   claimVoterEngagementTask,
   createVoterRedemption,
   fetchCurrentUser,
+  fetchMyPreElectionVerification,
   fetchNotifications,
+  fetchPreElectionRewardBalance,
+  fetchPreElectionRewardLedger,
   fetchVoterEvents,
   fetchVoterEngagementTasks,
   fetchVoterPosts,
@@ -27,7 +30,20 @@ import {
   fetchVoterRewards,
   logoutCurrentUser,
   rsvpToCampaignEvent,
+  submitMyPreElectionVerificationDocument,
 } from "../../lib/api";
+import type { PreElectionVerificationCase } from "../../lib/api";
+
+async function sha256File(file: File) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function safeStorageName(fileName: string) {
+  return fileName.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "voter-document";
+}
 
 export default function DashboardPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -35,6 +51,13 @@ export default function DashboardPage() {
   const [balance, setBalance] = useState<RewardBalanceSummary | null>(null);
   const [redemptions, setRedemptions] = useState<RewardRedemptionItem[]>([]);
   const [rewardHistory, setRewardHistory] = useState<RewardHistoryItem[]>([]);
+  const [preElectionBalance, setPreElectionBalance] = useState<{
+    confirmedPoints: number;
+    pendingPotentialPoints: number;
+    reservedPayoutPoints: number;
+    availablePoints: number;
+  } | null>(null);
+  const [verification, setVerification] = useState<PreElectionVerificationCase | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<PostListItem[]>([]);
   const [events, setEvents] = useState<CampaignEventItem[]>([]);
@@ -42,6 +65,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ pointsRequested: "", amountRequested: "", note: "" });
+  const [documentConsent, setDocumentConsent] = useState(false);
+  const [verificationDocument, setVerificationDocument] = useState<File | null>(null);
   const [message, setMessage] = useState("");
 
   const rewardSourceBreakdown = useMemo(() => {
@@ -57,6 +82,9 @@ export default function DashboardPage() {
       currentUser,
       rewardSummary,
       rewardLedgerData,
+      targetRewardBalance,
+      targetRewardLedger,
+      voterVerification,
       redemptionData,
       notificationItems,
       visiblePosts,
@@ -66,6 +94,9 @@ export default function DashboardPage() {
       fetchCurrentUser(token),
       fetchVoterRewards(token),
       fetchVoterRewardLedger(token),
+      fetchPreElectionRewardBalance(token),
+      fetchPreElectionRewardLedger(token),
+      fetchMyPreElectionVerification(token),
       fetchVoterRedemptions(token),
       fetchNotifications(token),
       fetchVoterPosts(token),
@@ -81,7 +112,22 @@ export default function DashboardPage() {
     setRewards(rewardSummary);
     setBalance(redemptionData.balance);
     setRedemptions(redemptionData.redemptions);
-    setRewardHistory(rewardLedgerData.rewardHistory);
+    setRewardHistory([
+      ...targetRewardLedger.map((entry) => ({
+        id: entry.id,
+        kind: "EARNED" as const,
+        title: entry.category,
+        description: entry.description || entry.rewardRuleName || "Pre-election ledger entry",
+        status: "POSTED" as const,
+        points: entry.points,
+        amount: null,
+        createdAt: entry.createdAt,
+        reviewedAt: null,
+      })),
+      ...rewardLedgerData.rewardHistory,
+    ]);
+    setPreElectionBalance(targetRewardBalance);
+    setVerification(voterVerification);
     setNotifications(notificationItems);
     setPosts(visiblePosts);
     setEvents(visibleEvents);
@@ -132,6 +178,44 @@ export default function DashboardPage() {
       await loadDashboard(token);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Redemption request failed.");
+    }
+  }
+
+  async function handleVerificationDocumentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = localStorage.getItem("picsNigeriaToken");
+    if (!token || !verificationDocument) {
+      setError("Authentication and a voter evidence file are required.");
+      return;
+    }
+    if (!documentConsent) {
+      setError("Document processing consent is required before evidence submission.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(verificationDocument.type)) {
+      setError("Upload a JPG, PNG, WebP, or PDF voter evidence file.");
+      return;
+    }
+
+    setMessage("");
+    setError("");
+    try {
+      const result = await submitMyPreElectionVerificationDocument(token, {
+        documentProcessingConsent: true,
+        voterDocument: {
+          originalStorageKey: `voter-verification/client/${crypto.randomUUID()}-${safeStorageName(verificationDocument.name)}`,
+          originalFileName: verificationDocument.name,
+          mimeType: verificationDocument.type as "image/jpeg" | "image/png" | "image/webp" | "application/pdf",
+          fileSize: verificationDocument.size,
+          sha256: await sha256File(verificationDocument),
+        },
+      });
+      setMessage(result.message);
+      setDocumentConsent(false);
+      setVerificationDocument(null);
+      await loadDashboard(token);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not submit voter evidence.");
     }
   }
 
@@ -231,21 +315,85 @@ export default function DashboardPage() {
 
       <section className="grid stats">
         <article className="panel card">
-          <h2>Total Points</h2>
-          <div className="value">{rewards.totalPoints}</div>
+          <h2>Confirmed Points</h2>
+          <div className="value">{preElectionBalance?.confirmedPoints ?? rewards.totalPoints}</div>
         </article>
         <article className="panel card">
-          <h2>Participation</h2>
-          <div className="value">{rewards.totalParticipationPoints}</div>
+          <h2>Pending Potential</h2>
+          <div className="value">{preElectionBalance?.pendingPotentialPoints ?? 0}</div>
         </article>
         <article className="panel card">
-          <h2>Referral</h2>
-          <div className="value">{rewards.totalReferralPoints}</div>
+          <h2>Reserved Payout</h2>
+          <div className="value">{preElectionBalance?.reservedPayoutPoints ?? balance.reservedPoints}</div>
         </article>
         <article className="panel card">
           <h2>Available Balance</h2>
-          <div className="value">{balance.availablePoints}</div>
+          <div className="value">{preElectionBalance?.availablePoints ?? balance.availablePoints}</div>
         </article>
+      </section>
+
+      {error ? <p className="error" style={{ marginTop: 16 }}>{error}</p> : null}
+      {message ? <p className="feedback-banner success" style={{ marginTop: 16 }}>{message}</p> : null}
+
+      <section className="panel card" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <div>
+            <h2>Voter Verification</h2>
+            <p className="muted">
+              Voter-registration verification gates referral rewards. Rewards never depend on vote choice, ballot proof, or proof of voting for any candidate.
+            </p>
+          </div>
+          <span className={`status-pill ${verification?.status === "VERIFIED" ? "active" : verification?.status === "REJECTED" ? "inactive" : ""}`}>
+            {verification?.status || "NOT_SUBMITTED"}
+          </span>
+        </div>
+
+        {verification?.reviewNote ? <p className="muted">Latest reviewer note: {verification.reviewNote}</p> : null}
+        {verification?.isFlagged ? <p className="error">Flagged for review: {verification.fraudReason || "Additional validator review required."}</p> : null}
+
+        {verification && ["NOT_SUBMITTED", "RESUBMISSION_REQUIRED", "PENDING"].includes(verification.status) ? (
+          <form className="form" onSubmit={handleVerificationDocumentSubmit} style={{ marginBottom: 18 }}>
+            <label className="field">
+              <span>{verification.status === "RESUBMISSION_REQUIRED" ? "Resubmit Voter Evidence" : "Submit Voter Evidence"}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onChange={(event) => setVerificationDocument(event.target.files?.[0] || null)}
+              />
+              <small className="muted">Accepted formats: JPG, PNG, WebP, or PDF. Files are represented by private storage metadata.</small>
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={documentConsent}
+                onChange={(event) => setDocumentConsent(event.target.checked)}
+                required
+              />
+              <span>I consent to private processing of this voter-registration evidence by authorized validators.</span>
+            </label>
+            <button className="button secondary" type="submit" disabled={!verificationDocument || !documentConsent}>
+              Submit evidence
+            </button>
+          </form>
+        ) : null}
+
+        {verification?.history.length ? (
+          <div className="reward-list">
+            {verification.history.slice(0, 5).map((entry) => (
+              <article key={entry.id} className="reward-item">
+                <strong>{entry.decision}</strong>
+                <p>{entry.fromStatus || "NEW"} to {entry.toStatus}</p>
+                {entry.note ? <p className="muted">{entry.note}</p> : null}
+                <p className="muted">
+                  {new Date(entry.createdAt).toLocaleString()}
+                  {entry.actorName ? ` by ${entry.actorName}` : ""}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No verification history is available yet.</p>
+        )}
       </section>
 
       <section className="panel card" style={{ marginTop: 24 }}>

@@ -2,31 +2,61 @@ import { Router } from "express";
 import {
   AgentActivityType,
   BroadcastAudience,
+  ConversationType,
+  FieldTaskPriority,
+  FieldTaskStatus,
   IncidentSeverity,
   IncidentStatus,
   IncidentType,
+  MessageReceiptStatus,
   NotificationType,
+  OperationalAlertSeverity,
+  OperationalAlertStatus,
   Prisma,
+  VoiceCallEndReason,
+  VoiceCallEventType,
+  VoiceCallParticipantStatus,
+  VoiceCallStatus,
 } from "@prisma/client";
 import {
+  ELECTION_DAY_REALTIME_EVENT_TYPES,
   OGUN_STATE_ID,
+  VOICE_CALL_SIGNAL_TYPES,
+  canTransitionVoiceCall,
   type AuthUserProfile,
+  type ElectionDayCallEventItem,
+  type ElectionDayCallItem,
+  type ElectionDayCallParticipantItem,
+  type ElectionDayConversationItem,
   type ElectionDayLocationEvaluation,
+  type ElectionDayMessageItem,
+  type ElectionDayOperationalAlertItem,
   type ElectionDayPollingUnitStatus,
   type ElectionDaySituationRoomStatus,
+  type ElectionDayTimelineItem,
+  type ElectionDayWebrtcConfig,
   type OperationalTerritory,
   type PollingUnitOperationalStatus,
+  type RealtimePresenceEntry,
 } from "@pics-nigeria/shared";
 import { z } from "zod";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
+import { getAuthUserProfile } from "../auth/profile";
 import { createAuditLog } from "../lib/audit";
+import { canContactUser, contactTerritoryForUser, messagingCommandScope } from "../lib/messaging-permissions";
 import { createNotification } from "../lib/notifications";
 import { serializeBroadcastMessageItem, serializeIncidentItem } from "../lib/serializers";
 import { validateTerritoryReferences } from "../lib/territory";
 import { requireAuth, requirePollingUnitFieldCapability } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { createElectionDayRealtimeEvent } from "../realtime/events";
-import { getRealtimeGatewayStatus, publishRealtimeEvent } from "../realtime/gateway";
+import { env } from "../env";
+import {
+  getPresenceSnapshot,
+  getRealtimeGatewayStatus,
+  publishRealtimeEvent,
+  publishRealtimeEventToUsers,
+} from "../realtime/gateway";
 
 const router = Router();
 
@@ -56,6 +86,65 @@ const territoryMessageSchema = z.object({
 
 const statusQuerySchema = z.object({
   reportDate: z.string().date().optional(),
+});
+
+const alertQuerySchema = z.object({
+  status: z.nativeEnum(OperationalAlertStatus).optional(),
+  type: z.string().trim().max(80).optional(),
+  reportDate: z.string().date().optional(),
+});
+
+const alertLifecycleSchema = z.object({
+  status: z.enum(["ACKNOWLEDGED", "ESCALATED", "RESOLVED"]),
+  note: z.string().trim().max(500).optional(),
+});
+
+const conversationCreateSchema = z.object({
+  type: z.enum(["DIRECT", "GROUP", "TERRITORY", "ELECTION_OPERATION"]).default("DIRECT"),
+  title: z.string().trim().min(3).max(120).optional(),
+  recipientUserId: z.string().trim().optional(),
+  memberUserIds: z.array(z.string().trim()).min(1).max(100).optional(),
+  territory: z
+    .object({
+      stateId: z.string().trim().optional(),
+      senatorialDistrictId: z.string().trim().nullable().optional(),
+      federalConstituencyId: z.string().trim().nullable().optional(),
+      stateConstituencyId: z.string().trim().nullable().optional(),
+      wardId: z.string().trim().nullable().optional(),
+      pollingUnitId: z.string().trim().nullable().optional(),
+    })
+    .optional(),
+});
+
+const messageCreateSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const timelineQuerySchema = z.object({
+  reportDate: z.string().date().optional(),
+  limit: z.coerce.number().int().min(10).max(200).default(80),
+});
+
+const callInitiateSchema = z.object({
+  targetUserId: z.string().trim().min(1),
+  conversationId: z.string().trim().optional(),
+});
+
+const callEndSchema = z.object({
+  reason: z.enum(["COMPLETED", "CANCELLED", "FAILED"]).optional(),
+});
+
+const callSignalSchema = z.object({
+  signalType: z.enum(VOICE_CALL_SIGNAL_TYPES),
+  targetUserId: z.string().trim().min(1),
+  /** Relayed verbatim to the peer and never persisted. */
+  signal: z.unknown(),
+});
+
+const callHistoryQuerySchema = z.object({
+  status: z.nativeEnum(VoiceCallStatus).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 type AgentProfileForOperation = {
@@ -198,6 +287,341 @@ function buildGeodataGatedEvaluation(accuracyMeters?: number | null): ElectionDa
     distanceMeters: null,
     accuracyMeters: accuracyMeters ?? null,
   };
+}
+
+function serializeAlert(alert: {
+  id: string;
+  type: string;
+  status: OperationalAlertStatus;
+  severity: OperationalAlertSeverity;
+  message: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  actorUserId: string | null;
+  acknowledgedByUserId: string | null;
+  resolvedByUserId: string | null;
+  stateId: string;
+  senatorialDistrictId: string | null;
+  federalConstituencyId: string | null;
+  stateConstituencyId: string | null;
+  wardId: string | null;
+  pollingUnitId: string | null;
+  metadataJson: Prisma.JsonValue | null;
+  detectedAt: Date;
+  acknowledgedAt: Date | null;
+  escalatedAt: Date | null;
+  resolvedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): ElectionDayOperationalAlertItem {
+  return {
+    id: alert.id,
+    type: alert.type,
+    status: alert.status,
+    severity: alert.severity,
+    message: alert.message,
+    sourceType: alert.sourceType,
+    sourceId: alert.sourceId,
+    actorUserId: alert.actorUserId,
+    acknowledgedByUserId: alert.acknowledgedByUserId,
+    resolvedByUserId: alert.resolvedByUserId,
+    territory: {
+      stateId: alert.stateId,
+      senatorialDistrictId: alert.senatorialDistrictId,
+      federalConstituencyId: alert.federalConstituencyId,
+      stateConstituencyId: alert.stateConstituencyId,
+      wardId: alert.wardId,
+      pollingUnitId: alert.pollingUnitId,
+    },
+    metadata: alert.metadataJson && typeof alert.metadataJson === "object" && !Array.isArray(alert.metadataJson)
+      ? alert.metadataJson as Record<string, unknown>
+      : null,
+    detectedAt: alert.detectedAt.toISOString(),
+    acknowledgedAt: alert.acknowledgedAt?.toISOString() || null,
+    escalatedAt: alert.escalatedAt?.toISOString() || null,
+    resolvedAt: alert.resolvedAt?.toISOString() || null,
+    createdAt: alert.createdAt.toISOString(),
+    updatedAt: alert.updatedAt.toISOString(),
+  };
+}
+
+function serializeMessage(message: {
+  id: string;
+  conversationId: string;
+  senderUserId: string;
+  body: string;
+  metadataJson: Prisma.JsonValue | null;
+  createdAt: Date;
+  editedAt: Date | null;
+  deletedAt: Date | null;
+  senderUser: { name: string };
+  receipts: Array<{
+    userId: string;
+    status: MessageReceiptStatus;
+    deliveredAt: Date | null;
+    readAt: Date | null;
+  }>;
+  attachments: Array<{
+    id: string;
+    evidenceAssetId: string | null;
+    fileName: string | null;
+    mimeType: string | null;
+    fileSize: number | null;
+    sha256: string | null;
+  }>;
+}): ElectionDayMessageItem {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderUserId: message.senderUserId,
+    senderName: message.senderUser.name,
+    body: message.deletedAt ? "" : message.body,
+    metadata: message.metadataJson && typeof message.metadataJson === "object" && !Array.isArray(message.metadataJson)
+      ? message.metadataJson as Record<string, unknown>
+      : null,
+    createdAt: message.createdAt.toISOString(),
+    editedAt: message.editedAt?.toISOString() || null,
+    deletedAt: message.deletedAt?.toISOString() || null,
+    receipts: message.receipts.map((receipt) => ({
+      userId: receipt.userId,
+      status: receipt.status,
+      deliveredAt: receipt.deliveredAt?.toISOString() || null,
+      readAt: receipt.readAt?.toISOString() || null,
+    })),
+    attachments: message.attachments.map((attachment) => ({
+      id: attachment.id,
+      evidenceAssetId: attachment.evidenceAssetId,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      fileSize: attachment.fileSize,
+      sha256: attachment.sha256,
+    })),
+  };
+}
+
+function serializeConversation(
+  conversation: {
+    id: string;
+    type: ConversationType;
+    title: string | null;
+    createdByUserId: string;
+    stateId: string;
+    senatorialDistrictId: string | null;
+    federalConstituencyId: string | null;
+    stateConstituencyId: string | null;
+    wardId: string | null;
+    pollingUnitId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    members: Array<{
+      userId: string;
+      roleLabel: string | null;
+      lastReadAt: Date | null;
+      user: { name: string; role: string };
+    }>;
+    messages: Array<Parameters<typeof serializeMessage>[0]>;
+  },
+  presence: RealtimePresenceEntry[],
+  actorUserId: string,
+): ElectionDayConversationItem {
+  const presenceByUserId = new Map(presence.map((entry) => [entry.userId, entry]));
+  const lastMessage = conversation.messages[0] ? serializeMessage(conversation.messages[0]) : null;
+  const actorMember = conversation.members.find((member) => member.userId === actorUserId);
+  const unreadCount = actorMember?.lastReadAt
+    ? conversation.messages.filter((message) => message.senderUserId !== actorUserId && message.createdAt > actorMember.lastReadAt!).length
+    : conversation.messages.filter((message) => message.senderUserId !== actorUserId).length;
+
+  return {
+    id: conversation.id,
+    type: conversation.type,
+    title: conversation.title,
+    territory: {
+      stateId: conversation.stateId,
+      senatorialDistrictId: conversation.senatorialDistrictId,
+      federalConstituencyId: conversation.federalConstituencyId,
+      stateConstituencyId: conversation.stateConstituencyId,
+      wardId: conversation.wardId,
+      pollingUnitId: conversation.pollingUnitId,
+    },
+    createdByUserId: conversation.createdByUserId,
+    createdAt: conversation.createdAt.toISOString(),
+    updatedAt: conversation.updatedAt.toISOString(),
+    members: conversation.members.map((member) => {
+      const entry = presenceByUserId.get(member.userId);
+      return {
+        userId: member.userId,
+        name: member.user.name,
+        role: member.user.role,
+        roleLabel: member.roleLabel,
+        presence: entry?.state || "OFFLINE",
+        lastSeenAt: entry?.lastSeenAt || null,
+        lastReadAt: member.lastReadAt?.toISOString() || null,
+      };
+    }),
+    lastMessage,
+    unreadCount,
+  };
+}
+
+async function persistAndPublishRealtimeEvent(event: ReturnType<typeof createElectionDayRealtimeEvent>) {
+  await prisma.realtimeEventOutbox
+    .create({
+      data: {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        eventVersion: event.eventVersion,
+        idempotencyKey: event.idempotencyKey,
+        payloadJson: event.payload as Prisma.InputJsonValue,
+        territoryJson: event.territory as Prisma.InputJsonValue,
+        stateId: event.territory?.stateId || null,
+        senatorialDistrictId: event.territory?.senatorialDistrictId || null,
+        federalConstituencyId: event.territory?.federalConstituencyId || null,
+        stateConstituencyId: event.territory?.stateConstituencyId || null,
+        wardId: event.territory?.wardId || null,
+        pollingUnitId: event.territory?.pollingUnitId || null,
+      },
+    })
+    .catch((error) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return null;
+      }
+      throw error;
+    });
+
+  const published = publishRealtimeEvent(event);
+  if (published) {
+    await prisma.realtimeEventOutbox
+      .update({
+        where: { idempotencyKey: event.idempotencyKey },
+        data: { status: "PUBLISHED", publishedAt: new Date(), attempts: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
+  return published;
+}
+
+function severityForAlert(type: string): OperationalAlertSeverity {
+  if (type === "TRACKING_STOPPED" || type === "GPS_PERMISSION_DISABLED") {
+    return "HIGH";
+  }
+  if (type === "NO_CHECK_IN" || type === "REPORT_OVERDUE" || type === "LOCATION_STALE") {
+    return "MEDIUM";
+  }
+  return "LOW";
+}
+
+function alertMessageForStatus(status: ElectionDayPollingUnitStatus, type: string) {
+  const name = status.pollingUnitName || status.pollingUnitId;
+  if (type === "NO_CHECK_IN") {
+    return `${name} has an assigned coordinator but no Election Day check-in.`;
+  }
+  if (type === "REPORT_OVERDUE") {
+    return `${name} has checked in but has not submitted the structured Election Day report.`;
+  }
+  if (type === "LOCATION_STALE") {
+    return `${name} has stale GPS tracking; the last location is older than the allowed threshold.`;
+  }
+  return `${name} requires Election Day operational review.`;
+}
+
+async function upsertOpenAlert(input: {
+  type: string;
+  pollingUnit: ElectionDayPollingUnitStatus;
+  territory: OperationalTerritory;
+  actorUserId: string;
+  sourceType: string;
+  sourceId: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const existing = await prisma.operationalAlert.findFirst({
+    where: {
+      type: input.type,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      status: { in: [OperationalAlertStatus.OPEN, OperationalAlertStatus.ACKNOWLEDGED, OperationalAlertStatus.ESCALATED] },
+    },
+  });
+  if (existing) {
+    return { alert: existing, created: false };
+  }
+
+  const alert = await prisma.operationalAlert.create({
+    data: {
+      type: input.type,
+      status: OperationalAlertStatus.OPEN,
+      severity: severityForAlert(input.type),
+      message: alertMessageForStatus(input.pollingUnit, input.type),
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      actorUserId: input.actorUserId,
+      stateId: input.territory.stateId,
+      senatorialDistrictId: input.territory.senatorialDistrictId || null,
+      federalConstituencyId: input.territory.federalConstituencyId || null,
+      stateConstituencyId: input.territory.stateConstituencyId || null,
+      wardId: input.territory.wardId || null,
+      pollingUnitId: input.pollingUnit.pollingUnitId,
+      metadataJson: (input.metadata || {}) as Prisma.InputJsonObject,
+    },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId: input.actorUserId,
+    action: "ELECTION_DAY_ALERT_CREATED",
+    targetType: "OperationalAlert",
+    targetId: alert.id,
+    territory: alert,
+    metadata: { type: alert.type, sourceType: alert.sourceType, sourceId: alert.sourceId },
+  });
+
+  return { alert, created: true };
+}
+
+function getPollingUnitTerritory(status: ElectionDayPollingUnitStatus, scope: OperationalTerritory): OperationalTerritory {
+  return {
+    stateId: scope.stateId,
+    senatorialDistrictId: scope.senatorialDistrictId || null,
+    federalConstituencyId: scope.federalConstituencyId || null,
+    stateConstituencyId: scope.stateConstituencyId || null,
+    wardId: scope.wardId || null,
+    pollingUnitId: status.pollingUnitId,
+  };
+}
+
+async function targetTerritoryForUser(userId: string): Promise<OperationalTerritory | null> {
+  const profile = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      role: true,
+      coordinatorProfile: true,
+      agentProfile: true,
+      voterProfile: true,
+      isActive: true,
+      accountStatus: true,
+    },
+  });
+  if (!profile?.isActive || profile.accountStatus !== "ACTIVE") {
+    return null;
+  }
+  const territory = profile.coordinatorProfile || profile.agentProfile || profile.voterProfile;
+  if (!territory?.stateId) {
+    return profile.role === "SUPER_ADMIN" || profile.role === "STATE_OFFICER" ? { stateId: OGUN_STATE_ID } : null;
+  }
+  return {
+    stateId: territory.stateId,
+    senatorialDistrictId: territory.senatorialDistrictId || null,
+    federalConstituencyId: territory.federalConstituencyId || null,
+    stateConstituencyId: territory.stateConstituencyId || null,
+    wardId: territory.wardId || null,
+    pollingUnitId: territory.pollingUnitId || null,
+  };
+}
+
+/**
+ * Messaging and voice calling share one contact rule, so both delegate to the
+ * same helper that the realtime gateway uses.
+ */
+async function canMessageUser(actor: AuthUserProfile, targetUserId: string) {
+  return canContactUser(actor, targetUserId);
 }
 
 async function createFieldActivity(
@@ -495,7 +919,7 @@ async function buildSituationRoomStatus(scope: OperationalTerritory, reportDate?
   const completedPollingUnits = pollingUnitStatuses.filter((item) => item.operationalStatus === "COMPLETED").length;
   const reportsOutstanding = Math.max(pollingUnits.length - reportsReceived, 0);
 
-  const alerts = pollingUnitStatuses
+  const alerts: ElectionDaySituationRoomStatus["alerts"] = pollingUnitStatuses
     .filter((item) => item.coordinatorUserId && !item.checkedInAt)
     .map((item) => ({
       type: "NO_CHECK_IN" as const,
@@ -504,6 +928,30 @@ async function buildSituationRoomStatus(scope: OperationalTerritory, reportDate?
       message: `${item.pollingUnitName || "Polling Unit"} has an assigned coordinator but no check-in for the selected date.`,
       detectedAt: new Date().toISOString(),
     }));
+
+  const durableAlerts = await prisma.operationalAlert.findMany({
+    where: {
+      ...baseTerritoryFilter,
+      status: { in: [OperationalAlertStatus.OPEN, OperationalAlertStatus.ACKNOWLEDGED, OperationalAlertStatus.ESCALATED] },
+    },
+    orderBy: [{ severity: "desc" }, { detectedAt: "desc" }],
+    take: 50,
+  });
+  const alertKeys = new Set(alerts.map((alert) => `${alert.type}:${alert.pollingUnitId}`));
+  for (const alert of durableAlerts) {
+    const type = alert.type as "NO_CHECK_IN" | "TRACKING_STOPPED" | "LOCATION_STALE" | "LOCATION_MISMATCH" | "GPS_PERMISSION_DISABLED" | "DEVICE_SESSION_CHANGED" | "REPORT_OVERDUE";
+    const key = `${type}:${alert.pollingUnitId || ""}`;
+    if (alertKeys.has(key)) {
+      continue;
+    }
+    alerts.push({
+      type,
+      status: alert.status as "OPEN" | "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED",
+      pollingUnitId: alert.pollingUnitId || "",
+      message: alert.message,
+      detectedAt: alert.detectedAt.toISOString(),
+    });
+  }
 
   const realtimeStatus = getRealtimeGatewayStatus();
 
@@ -800,6 +1248,1186 @@ router.get("/situation-room/status", requireAuth, async (request, response) => {
   return response.json({ status });
 });
 
+router.post("/alerts/reconcile", requireAuth, async (request, response) => {
+  const parsed = statusQuerySchema.safeParse(request.body || {});
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid alert reconciliation payload.", errors: parsed.error.flatten() });
+  }
+
+  const scope = await requireCommandScope(request.authUser!);
+  if (!scope) {
+    return response.status(403).json({ message: "Election Day command scope is required." });
+  }
+
+  const status = await buildSituationRoomStatus(scope, parsed.data.reportDate);
+  const staleThresholdMs = 45 * 60_000;
+  const now = Date.now();
+  const createdAlerts = [];
+
+  for (const pollingUnit of status.pollingUnits) {
+    const territory = getPollingUnitTerritory(pollingUnit, scope);
+    if (pollingUnit.coordinatorUserId && !pollingUnit.checkedInAt) {
+      const result = await upsertOpenAlert({
+        type: "NO_CHECK_IN",
+        pollingUnit,
+        territory,
+        actorUserId: request.authUser!.id,
+        sourceType: "PollingUnit",
+        sourceId: pollingUnit.pollingUnitId,
+        metadata: { reportDate: parsed.data.reportDate || null },
+      });
+      if (result.created) {
+        createdAlerts.push(result.alert);
+      }
+    }
+
+    if (pollingUnit.checkedInAt && pollingUnit.reportStatus === "NOT_SUBMITTED") {
+      const result = await upsertOpenAlert({
+        type: "REPORT_OVERDUE",
+        pollingUnit,
+        territory,
+        actorUserId: request.authUser!.id,
+        sourceType: "PollingUnitReport",
+        sourceId: `${pollingUnit.pollingUnitId}:${parsed.data.reportDate || todayUtcRange().day}`,
+        metadata: { checkedInAt: pollingUnit.checkedInAt },
+      });
+      if (result.created) {
+        createdAlerts.push(result.alert);
+      }
+    }
+
+    if (pollingUnit.lastSeenAt && now - new Date(pollingUnit.lastSeenAt).getTime() > staleThresholdMs) {
+      const result = await upsertOpenAlert({
+        type: "LOCATION_STALE",
+        pollingUnit,
+        territory,
+        actorUserId: request.authUser!.id,
+        sourceType: "AgentActivity",
+        sourceId: `${pollingUnit.pollingUnitId}:${pollingUnit.lastSeenAt}`,
+        metadata: { lastSeenAt: pollingUnit.lastSeenAt, staleThresholdMinutes: 45 },
+      });
+      if (result.created) {
+        createdAlerts.push(result.alert);
+      }
+    }
+  }
+
+  for (const alert of createdAlerts) {
+    await persistAndPublishRealtimeEvent(
+      createElectionDayRealtimeEvent({
+        eventType: alert.type === "LOCATION_STALE" ? "election.tracking.stale" : "election.alert.created",
+        actorUserId: request.authUser!.id,
+        territory: {
+          stateId: alert.stateId,
+          senatorialDistrictId: alert.senatorialDistrictId,
+          federalConstituencyId: alert.federalConstituencyId,
+          stateConstituencyId: alert.stateConstituencyId,
+          wardId: alert.wardId,
+          pollingUnitId: alert.pollingUnitId,
+        },
+        idempotencyKey: `alert:${alert.id}`,
+        payload: { alertId: alert.id, type: alert.type, status: alert.status, pollingUnitId: alert.pollingUnitId },
+      }),
+    );
+  }
+
+  return response.status(201).json({
+    message: `Alert reconciliation complete. ${createdAlerts.length} new alert${createdAlerts.length === 1 ? "" : "s"} created.`,
+    alerts: createdAlerts.map(serializeAlert),
+  });
+});
+
+router.get("/alerts", requireAuth, async (request, response) => {
+  const parsed = alertQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid alert query.", errors: parsed.error.flatten() });
+  }
+
+  const scope = await requireCommandScope(request.authUser!);
+  if (!scope) {
+    return response.status(403).json({ message: "Election Day command scope is required." });
+  }
+
+  const { start, end } = todayUtcRange(parsed.data.reportDate);
+  const alerts = await prisma.operationalAlert.findMany({
+    where: {
+      ...territoryFilter(scope),
+      status: parsed.data.status,
+      type: parsed.data.type,
+      detectedAt: { gte: start, lt: end },
+    },
+    orderBy: [{ status: "asc" }, { severity: "desc" }, { detectedAt: "desc" }],
+    take: 100,
+  });
+
+  return response.json({ alerts: alerts.map(serializeAlert) });
+});
+
+router.patch("/alerts/:alertId", requireAuth, async (request, response) => {
+  const parsed = alertLifecycleSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid alert lifecycle payload.", errors: parsed.error.flatten() });
+  }
+
+  const scope = await requireCommandScope(request.authUser!);
+  if (!scope) {
+    return response.status(403).json({ message: "Election Day command scope is required." });
+  }
+
+  const alertId = Array.isArray(request.params.alertId) ? request.params.alertId[0] : request.params.alertId;
+  const alert = await prisma.operationalAlert.findUnique({ where: { id: alertId } });
+  if (!alert) {
+    return response.status(404).json({ message: "Operational alert was not found." });
+  }
+
+  const alertTerritory = await resolveOperationalTerritory(prisma, {
+    stateId: alert.stateId,
+    senatorialDistrictId: alert.senatorialDistrictId,
+    federalConstituencyId: alert.federalConstituencyId,
+    stateConstituencyId: alert.stateConstituencyId,
+    wardId: alert.wardId,
+    pollingUnitId: alert.pollingUnitId,
+  });
+  if (!authorizeAction(request.authUser!, "VIEW_TERRITORY", alertTerritory)) {
+    return response.status(403).json({ message: "You cannot update an alert outside your command scope." });
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (transaction) => {
+    const next = await transaction.operationalAlert.update({
+      where: { id: alert.id },
+      data: {
+        status: parsed.data.status,
+        acknowledgedByUserId: parsed.data.status === "ACKNOWLEDGED" ? request.authUser!.id : alert.acknowledgedByUserId,
+        acknowledgedAt: parsed.data.status === "ACKNOWLEDGED" ? now : alert.acknowledgedAt,
+        escalatedAt: parsed.data.status === "ESCALATED" ? now : alert.escalatedAt,
+        resolvedByUserId: parsed.data.status === "RESOLVED" ? request.authUser!.id : alert.resolvedByUserId,
+        resolvedAt: parsed.data.status === "RESOLVED" ? now : alert.resolvedAt,
+        metadataJson: {
+          ...((alert.metadataJson && typeof alert.metadataJson === "object" && !Array.isArray(alert.metadataJson)
+            ? alert.metadataJson as Record<string, unknown>
+            : {})),
+          lifecycleNote: parsed.data.note || null,
+          lifecycleUpdatedByUserId: request.authUser!.id,
+        },
+      },
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_ALERT_STATUS_UPDATED",
+      targetType: "OperationalAlert",
+      targetId: next.id,
+      territory: next,
+      metadata: { status: next.status, note: parsed.data.note || null },
+    });
+    return next;
+  });
+
+  await persistAndPublishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "election.alert.updated",
+      actorUserId: request.authUser!.id,
+      territory: {
+        stateId: updated.stateId,
+        senatorialDistrictId: updated.senatorialDistrictId,
+        federalConstituencyId: updated.federalConstituencyId,
+        stateConstituencyId: updated.stateConstituencyId,
+        wardId: updated.wardId,
+        pollingUnitId: updated.pollingUnitId,
+      },
+      idempotencyKey: `alert-updated:${updated.id}:${updated.updatedAt.toISOString()}`,
+      payload: { alertId: updated.id, type: updated.type, status: updated.status, pollingUnitId: updated.pollingUnitId },
+    }),
+  );
+
+  return response.json({ message: "Operational alert updated.", alert: serializeAlert(updated) });
+});
+
+router.get("/timeline", requireAuth, async (request, response) => {
+  const parsed = timelineQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid timeline query.", errors: parsed.error.flatten() });
+  }
+
+  const scope = await requireCommandScope(request.authUser!);
+  if (!scope) {
+    return response.status(403).json({ message: "Election Day command scope is required." });
+  }
+
+  const { start, end } = todayUtcRange(parsed.data.reportDate);
+  const baseFilter = territoryFilter(scope);
+  const [activities, incidents, reports, alerts, messages, events] = await Promise.all([
+    prisma.agentActivity.findMany({
+      where: { ...baseFilter, createdAt: { gte: start, lt: end } },
+      orderBy: { createdAt: "desc" },
+      take: parsed.data.limit,
+      include: { agentUser: { select: { name: true } } },
+    }),
+    prisma.incident.findMany({
+      where: { ...baseFilter, createdAt: { gte: start, lt: end } },
+      orderBy: { createdAt: "desc" },
+      take: parsed.data.limit,
+    }),
+    prisma.electionDayReport.findMany({
+      where: { ...baseFilter, createdAt: { gte: start, lt: end } },
+      orderBy: { createdAt: "desc" },
+      take: parsed.data.limit,
+      include: { agentUser: { select: { name: true } } },
+    }),
+    prisma.operationalAlert.findMany({
+      where: { ...baseFilter, detectedAt: { gte: start, lt: end } },
+      orderBy: { detectedAt: "desc" },
+      take: parsed.data.limit,
+    }),
+    prisma.message.findMany({
+      where: {
+        createdAt: { gte: start, lt: end },
+        conversation: { ...baseFilter },
+      },
+      orderBy: { createdAt: "desc" },
+      take: parsed.data.limit,
+      include: { senderUser: { select: { name: true } } },
+    }),
+    prisma.realtimeEventOutbox.findMany({
+      where: { ...baseFilter, committedAt: { gte: start, lt: end } },
+      orderBy: { committedAt: "desc" },
+      take: parsed.data.limit,
+    }),
+  ]);
+
+  const items: ElectionDayTimelineItem[] = [
+    ...activities.map((activity) => ({
+      id: activity.id,
+      type: "ACTIVITY" as const,
+      title: `${activity.type.replaceAll("_", " ")} by ${activity.agentUser.name}`,
+      detail: activity.note || activity.pollingUnitId || "Polling Unit activity",
+      severity: null,
+      pollingUnitId: activity.pollingUnitId,
+      actorUserId: activity.agentUserId,
+      occurredAt: activity.createdAt.toISOString(),
+      metadata: { latitude: activity.latitude, longitude: activity.longitude, accuracyMeters: activity.accuracyMeters },
+    })),
+    ...incidents.map((incident) => ({
+      id: incident.id,
+      type: "INCIDENT" as const,
+      title: incident.title,
+      detail: `${incident.type} | ${incident.status}`,
+      severity: incident.severity,
+      pollingUnitId: incident.pollingUnitId,
+      actorUserId: incident.reportedByUserId,
+      occurredAt: incident.createdAt.toISOString(),
+      metadata: { incidentId: incident.id },
+    })),
+    ...reports.map((report) => ({
+      id: report.id,
+      type: "REPORT" as const,
+      title: `Report submitted by ${report.agentUser.name}`,
+      detail: `${report.openingStatus} | ${report.status}`,
+      severity: null,
+      pollingUnitId: report.pollingUnitId,
+      actorUserId: report.agentUserId,
+      occurredAt: report.createdAt.toISOString(),
+      metadata: { reportId: report.id, resultSubmitted: hasResult(report as ReportRow) },
+    })),
+    ...alerts.map((alert) => ({
+      id: alert.id,
+      type: "ALERT" as const,
+      title: alert.type.replaceAll("_", " "),
+      detail: alert.message,
+      severity: alert.severity,
+      pollingUnitId: alert.pollingUnitId,
+      actorUserId: alert.actorUserId,
+      occurredAt: alert.detectedAt.toISOString(),
+      metadata: alert.metadataJson && typeof alert.metadataJson === "object" && !Array.isArray(alert.metadataJson)
+        ? alert.metadataJson as Record<string, unknown>
+        : null,
+    })),
+    ...messages.map((message) => ({
+      id: message.id,
+      type: "MESSAGE" as const,
+      title: `Message from ${message.senderUser.name}`,
+      detail: message.body,
+      severity: null,
+      pollingUnitId: null,
+      actorUserId: message.senderUserId,
+      occurredAt: message.createdAt.toISOString(),
+      metadata: { conversationId: message.conversationId },
+    })),
+    ...events.map((event) => ({
+      id: event.id,
+      type: "REALTIME_EVENT" as const,
+      title: event.eventType,
+      detail: event.status,
+      severity: null,
+      pollingUnitId: event.pollingUnitId,
+      actorUserId: null,
+      occurredAt: event.committedAt.toISOString(),
+      metadata: { eventId: event.eventId, publishedAt: event.publishedAt?.toISOString() || null },
+    })),
+  ].sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()).slice(0, parsed.data.limit);
+
+  return response.json({ timeline: items });
+});
+
+router.get("/presence", requireAuth, async (request, response) => {
+  const userIds = String(request.query.userIds || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, 100);
+
+  if (userIds.length === 0) {
+    return response.json({ presence: [] });
+  }
+
+  const allowed: string[] = [];
+  for (const userId of userIds) {
+    if (await canMessageUser(request.authUser!, userId)) {
+      allowed.push(userId);
+    }
+  }
+
+  return response.json({ presence: getPresenceSnapshot(allowed) });
+});
+
+router.get("/webrtc/config", requireAuth, async (_request, response) => {
+  const iceServers: ElectionDayWebrtcConfig["iceServers"] = env.WEBRTC_STUN_URLS.length
+    ? [{ urls: env.WEBRTC_STUN_URLS }]
+    : [];
+  if (env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL) {
+    iceServers.push({
+      urls: env.TURN_URL,
+      username: env.TURN_USERNAME,
+      credential: env.TURN_CREDENTIAL,
+    });
+  }
+
+  const config: ElectionDayWebrtcConfig = {
+    signalling: {
+      transport: "socket.io",
+      path: env.REALTIME_PATH,
+      events: ELECTION_DAY_REALTIME_EVENT_TYPES.filter((eventType) => eventType.startsWith("call.")),
+      restLifecyclePath: "/election-day/calls",
+    },
+    iceServers,
+    turnConfigured: Boolean(env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL),
+    recording: "DISABLED",
+    durableCallHistory: "AVAILABLE",
+  };
+
+  return response.json({ config });
+});
+
+type VoiceCallWithRelations = Prisma.VoiceCallGetPayload<{
+  include: {
+    initiatorUser: { select: { name: true } };
+    participants: { include: { user: { select: { name: true; role: true } } } };
+    events: true;
+  };
+}>;
+
+const voiceCallInclude = {
+  initiatorUser: { select: { name: true } },
+  participants: { include: { user: { select: { name: true, role: true } } } },
+  events: { orderBy: { occurredAt: "asc" } },
+} satisfies Prisma.VoiceCallInclude;
+
+function serializeCall(call: VoiceCallWithRelations, presence: RealtimePresenceEntry[]): ElectionDayCallItem {
+  const presenceByUser = new Map(presence.map((entry) => [entry.userId, entry]));
+  const participants: ElectionDayCallParticipantItem[] = call.participants.map((participant) => ({
+    userId: participant.userId,
+    name: participant.user.name,
+    role: participant.user.role,
+    isInitiator: participant.isInitiator,
+    status: participant.status,
+    invitedAt: participant.invitedAt.toISOString(),
+    ringingAt: participant.ringingAt?.toISOString() || null,
+    answeredAt: participant.answeredAt?.toISOString() || null,
+    leftAt: participant.leftAt?.toISOString() || null,
+    presence: presenceByUser.get(participant.userId)?.state || "OFFLINE",
+  }));
+
+  const events: ElectionDayCallEventItem[] = call.events.map((event) => ({
+    id: event.id,
+    type: event.type,
+    actorUserId: event.actorUserId,
+    targetUserId: event.targetUserId,
+    signalType: event.signalType,
+    fromStatus: event.fromStatus,
+    toStatus: event.toStatus,
+    occurredAt: event.occurredAt.toISOString(),
+  }));
+
+  return {
+    id: call.id,
+    conversationId: call.conversationId,
+    initiatorUserId: call.initiatorUserId,
+    initiatorName: call.initiatorUser.name,
+    status: call.status,
+    endReason: call.endReason,
+    territory: {
+      stateId: call.stateId,
+      senatorialDistrictId: call.senatorialDistrictId,
+      federalConstituencyId: call.federalConstituencyId,
+      stateConstituencyId: call.stateConstituencyId,
+      wardId: call.wardId,
+      pollingUnitId: call.pollingUnitId,
+    },
+    startedAt: call.startedAt.toISOString(),
+    ringingAt: call.ringingAt?.toISOString() || null,
+    connectedAt: call.connectedAt?.toISOString() || null,
+    endedAt: call.endedAt?.toISOString() || null,
+    durationSeconds: call.durationSeconds,
+    endedByUserId: call.endedByUserId,
+    recording: "DISABLED",
+    participants,
+    events,
+  };
+}
+
+async function loadCallForParticipant(callId: string, userId: string) {
+  const call = await prisma.voiceCall.findUnique({ where: { id: callId }, include: voiceCallInclude });
+  if (!call || !call.participants.some((participant) => participant.userId === userId)) {
+    return null;
+  }
+  return call;
+}
+
+/** Publishes a call lifecycle event to the participants only, never to a territory room. */
+async function publishCallEvent(
+  eventType: "call.initiated" | "call.ringing" | "call.accepted" | "call.rejected" | "call.connected" | "call.ended" | "call.missed",
+  call: VoiceCallWithRelations,
+  actorUserId: string,
+  extraPayload: Record<string, unknown> = {},
+) {
+  const event = createElectionDayRealtimeEvent({
+    eventType,
+    actorUserId,
+    territory: {
+      stateId: call.stateId,
+      senatorialDistrictId: call.senatorialDistrictId,
+      federalConstituencyId: call.federalConstituencyId,
+      stateConstituencyId: call.stateConstituencyId,
+      wardId: call.wardId,
+      pollingUnitId: call.pollingUnitId,
+    },
+    idempotencyKey: `call:${call.id}:${eventType}`,
+    payload: {
+      callId: call.id,
+      conversationId: call.conversationId,
+      initiatorUserId: call.initiatorUserId,
+      status: call.status,
+      participantUserIds: call.participants.map((participant) => participant.userId),
+      recording: "DISABLED",
+      ...extraPayload,
+    },
+  });
+
+  await prisma.realtimeEventOutbox
+    .create({
+      data: {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        eventVersion: event.eventVersion,
+        idempotencyKey: event.idempotencyKey,
+        payloadJson: event.payload as Prisma.InputJsonValue,
+        territoryJson: event.territory as Prisma.InputJsonValue,
+        stateId: call.stateId,
+        senatorialDistrictId: call.senatorialDistrictId,
+        federalConstituencyId: call.federalConstituencyId,
+        stateConstituencyId: call.stateConstituencyId,
+        wardId: call.wardId,
+        pollingUnitId: call.pollingUnitId,
+      },
+    })
+    .catch((error) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return null;
+      }
+      throw error;
+    });
+
+  const published = publishRealtimeEventToUsers(
+    event,
+    call.participants.map((participant) => participant.userId),
+  );
+  if (published) {
+    await prisma.realtimeEventOutbox
+      .update({
+        where: { idempotencyKey: event.idempotencyKey },
+        data: { status: "PUBLISHED", publishedAt: new Date(), attempts: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
+  return published;
+}
+
+router.post("/calls", requireAuth, async (request, response) => {
+  const parsed = callInitiateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call payload.", errors: parsed.error.flatten() });
+  }
+
+  if (parsed.data.targetUserId === request.authUser!.id) {
+    return response.status(400).json({ message: "You cannot call yourself." });
+  }
+
+  if (!(await canContactUser(request.authUser!, parsed.data.targetUserId))) {
+    return response.status(403).json({ message: "You cannot call this user outside your operational relationship." });
+  }
+
+  const callTerritory = (await contactTerritoryForUser(parsed.data.targetUserId)) || messagingCommandScope(request.authUser!);
+  if (!callTerritory) {
+    return response.status(403).json({ message: "Election Day call scope is required." });
+  }
+
+  if (parsed.data.conversationId) {
+    const membership = await prisma.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId: parsed.data.conversationId, userId: request.authUser!.id } },
+    });
+    if (!membership || membership.leftAt) {
+      return response.status(403).json({ message: "You are not a member of this conversation." });
+    }
+  }
+
+  // One live call per pair keeps the durable lifecycle unambiguous.
+  const existing = await prisma.voiceCall.findFirst({
+    where: {
+      status: { not: VoiceCallStatus.ENDED },
+      participants: { some: { userId: request.authUser!.id } },
+      AND: [{ participants: { some: { userId: parsed.data.targetUserId } } }],
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return response.status(409).json({ message: "A call with this user is already in progress.", callId: existing.id });
+  }
+
+  const created = await prisma.$transaction(async (transaction) => {
+    const call = await transaction.voiceCall.create({
+      data: {
+        conversationId: parsed.data.conversationId || null,
+        initiatorUserId: request.authUser!.id,
+        status: VoiceCallStatus.RINGING,
+        ringingAt: new Date(),
+        stateId: callTerritory.stateId,
+        senatorialDistrictId: callTerritory.senatorialDistrictId || null,
+        federalConstituencyId: callTerritory.federalConstituencyId || null,
+        stateConstituencyId: callTerritory.stateConstituencyId || null,
+        wardId: callTerritory.wardId || null,
+        pollingUnitId: callTerritory.pollingUnitId || null,
+        recordingPolicy: "DISABLED",
+        participants: {
+          create: [
+            { userId: request.authUser!.id, isInitiator: true, status: VoiceCallParticipantStatus.CALLING },
+            {
+              userId: parsed.data.targetUserId,
+              isInitiator: false,
+              status: VoiceCallParticipantStatus.RINGING,
+              ringingAt: new Date(),
+            },
+          ],
+        },
+        events: {
+          create: [
+            {
+              type: VoiceCallEventType.INITIATED,
+              actorUserId: request.authUser!.id,
+              targetUserId: parsed.data.targetUserId,
+              toStatus: VoiceCallStatus.INITIATED,
+            },
+            {
+              type: VoiceCallEventType.RINGING,
+              actorUserId: request.authUser!.id,
+              targetUserId: parsed.data.targetUserId,
+              fromStatus: VoiceCallStatus.INITIATED,
+              toStatus: VoiceCallStatus.RINGING,
+            },
+          ],
+        },
+      },
+      include: voiceCallInclude,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_INITIATED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: call,
+      metadata: { targetUserId: parsed.data.targetUserId, recording: "DISABLED" },
+    });
+    return call;
+  });
+
+  await publishCallEvent("call.ringing", created, request.authUser!.id, { targetUserId: parsed.data.targetUserId });
+
+  return response.status(201).json({
+    message: "Election Day call initiated.",
+    item: serializeCall(created, getPresenceSnapshot(created.participants.map((participant) => participant.userId))),
+  });
+});
+
+router.post("/calls/:callId/accept", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  const participant = call.participants.find((entry) => entry.userId === request.authUser!.id)!;
+  if (participant.isInitiator) {
+    return response.status(403).json({ message: "The initiator cannot accept their own call." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "CONNECTED")) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be accepted.` });
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.update({
+      where: { callId_userId: { callId: call.id, userId: request.authUser!.id } },
+      data: { status: VoiceCallParticipantStatus.ACCEPTED, answeredAt: now },
+    });
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, isInitiator: true },
+      data: { status: VoiceCallParticipantStatus.ACCEPTED, answeredAt: now },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.CONNECTED,
+        connectedAt: now,
+        events: {
+          create: [
+            {
+              type: VoiceCallEventType.ACCEPTED,
+              actorUserId: request.authUser!.id,
+              fromStatus: call.status,
+              toStatus: VoiceCallStatus.CONNECTED,
+            },
+            {
+              type: VoiceCallEventType.CONNECTED,
+              actorUserId: request.authUser!.id,
+              fromStatus: call.status,
+              toStatus: VoiceCallStatus.CONNECTED,
+            },
+          ],
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_ACCEPTED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { recording: "DISABLED" },
+    });
+    return next;
+  });
+
+  await publishCallEvent("call.connected", updated, request.authUser!.id);
+
+  return response.json({
+    message: "Election Day call connected.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/reject", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  const participant = call.participants.find((entry) => entry.userId === request.authUser!.id)!;
+  if (participant.isInitiator) {
+    return response.status(403).json({ message: "The initiator cannot reject their own call; end it instead." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "ENDED") || call.status === VoiceCallStatus.CONNECTED) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be rejected.` });
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.update({
+      where: { callId_userId: { callId: call.id, userId: request.authUser!.id } },
+      data: { status: VoiceCallParticipantStatus.REJECTED, leftAt: now },
+    });
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, isInitiator: true },
+      data: { status: VoiceCallParticipantStatus.LEFT, leftAt: now },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.ENDED,
+        endReason: VoiceCallEndReason.REJECTED,
+        endedAt: now,
+        endedByUserId: request.authUser!.id,
+        durationSeconds: 0,
+        events: {
+          create: {
+            type: VoiceCallEventType.REJECTED,
+            actorUserId: request.authUser!.id,
+            fromStatus: call.status,
+            toStatus: VoiceCallStatus.ENDED,
+          },
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_REJECTED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { endReason: "REJECTED" },
+    });
+    return next;
+  });
+
+  await publishCallEvent("call.rejected", updated, request.authUser!.id);
+
+  return response.json({
+    message: "Election Day call rejected.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/end", requireAuth, async (request, response) => {
+  const parsed = callEndSchema.safeParse(request.body || {});
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call end payload.", errors: parsed.error.flatten() });
+  }
+
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "ENDED")) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be ended.` });
+  }
+
+  const now = new Date();
+  // A call that never connected and is ended by the initiator was missed by the
+  // recipient; ended by anyone else before connecting it was cancelled.
+  const endReason: VoiceCallEndReason = call.connectedAt
+    ? VoiceCallEndReason[parsed.data.reason || "COMPLETED"]
+    : call.initiatorUserId === request.authUser!.id
+      ? VoiceCallEndReason.MISSED
+      : VoiceCallEndReason.CANCELLED;
+  const durationSeconds = call.connectedAt ? Math.max(0, Math.round((now.getTime() - call.connectedAt.getTime()) / 1000)) : 0;
+
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, leftAt: null },
+      data: {
+        status: endReason === VoiceCallEndReason.MISSED ? VoiceCallParticipantStatus.MISSED : VoiceCallParticipantStatus.LEFT,
+        leftAt: now,
+      },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.ENDED,
+        endReason,
+        endedAt: now,
+        endedByUserId: request.authUser!.id,
+        durationSeconds,
+        events: {
+          create: {
+            type: endReason === VoiceCallEndReason.MISSED ? VoiceCallEventType.MISSED : VoiceCallEventType.ENDED,
+            actorUserId: request.authUser!.id,
+            fromStatus: call.status,
+            toStatus: VoiceCallStatus.ENDED,
+            metadataJson: { endReason, durationSeconds } as Prisma.InputJsonObject,
+          },
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_ENDED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { endReason, durationSeconds },
+    });
+    return next;
+  });
+
+  await publishCallEvent(endReason === VoiceCallEndReason.MISSED ? "call.missed" : "call.ended", updated, request.authUser!.id, {
+    endReason,
+    durationSeconds,
+  });
+
+  return response.json({
+    message: "Election Day call ended.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/signal", requireAuth, async (request, response) => {
+  const parsed = callSignalSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid signal payload.", errors: parsed.error.flatten() });
+  }
+
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  if (call.status === VoiceCallStatus.ENDED) {
+    return response.status(409).json({ message: "This call has already ended." });
+  }
+
+  if (
+    !call.participants.some((participant) => participant.userId === parsed.data.targetUserId) ||
+    !(await canContactUser(request.authUser!, parsed.data.targetUserId))
+  ) {
+    return response.status(403).json({ message: "Signal denied for this call." });
+  }
+
+  // Only the signal type is recorded; the SDP/ICE body is relayed and discarded.
+  await prisma.voiceCallEvent.create({
+    data: {
+      callId: call.id,
+      type: VoiceCallEventType.SIGNAL_RELAYED,
+      actorUserId: request.authUser!.id,
+      targetUserId: parsed.data.targetUserId,
+      signalType: parsed.data.signalType,
+    },
+  });
+
+  const delivered = publishRealtimeEventToUsers(
+    createElectionDayRealtimeEvent({
+      eventType: "call.signal",
+      actorUserId: request.authUser!.id,
+      territory: {
+        stateId: call.stateId,
+        senatorialDistrictId: call.senatorialDistrictId,
+        federalConstituencyId: call.federalConstituencyId,
+        stateConstituencyId: call.stateConstituencyId,
+        wardId: call.wardId,
+        pollingUnitId: call.pollingUnitId,
+      },
+      payload: {
+        callId: call.id,
+        fromUserId: request.authUser!.id,
+        targetUserId: parsed.data.targetUserId,
+        signalType: parsed.data.signalType,
+        signal: parsed.data.signal ?? null,
+        recording: "DISABLED",
+      },
+    }),
+    [parsed.data.targetUserId],
+  );
+
+  return response.status(202).json({
+    message: "Signal relayed.",
+    delivered,
+    transport: delivered ? "socket.io" : "REST_ONLY_REALTIME_UNAVAILABLE",
+  });
+});
+
+router.get("/calls", requireAuth, async (request, response) => {
+  const parsed = callHistoryQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call history query.", errors: parsed.error.flatten() });
+  }
+
+  const calls = await prisma.voiceCall.findMany({
+    where: {
+      participants: { some: { userId: request.authUser!.id } },
+      status: parsed.data.status || undefined,
+    },
+    include: voiceCallInclude,
+    orderBy: { startedAt: "desc" },
+    take: parsed.data.limit,
+  });
+
+  const presence = getPresenceSnapshot(
+    Array.from(new Set(calls.flatMap((call) => call.participants.map((participant) => participant.userId)))),
+  );
+
+  return response.json({ calls: calls.map((call) => serializeCall(call, presence)) });
+});
+
+router.get("/calls/:callId", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  return response.json({
+    item: serializeCall(call, getPresenceSnapshot(call.participants.map((participant) => participant.userId))),
+  });
+});
+
+router.get("/conversations", requireAuth, async (request, response) => {
+  const conversations = await prisma.conversation.findMany({
+    where: { members: { some: { userId: request.authUser!.id, leftAt: null } } },
+    include: {
+      members: {
+        where: { leftAt: null },
+        include: { user: { select: { name: true, role: true } } },
+      },
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        include: {
+          senderUser: { select: { name: true } },
+          receipts: true,
+          attachments: true,
+        },
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 50,
+  });
+
+  const memberUserIds = Array.from(new Set(conversations.flatMap((conversation) => conversation.members.map((member) => member.userId))));
+  const presence = getPresenceSnapshot(memberUserIds);
+  return response.json({
+    conversations: conversations.map((conversation) => serializeConversation(conversation, presence, request.authUser!.id)),
+  });
+});
+
+router.post("/conversations", requireAuth, async (request, response) => {
+  const parsed = conversationCreateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid conversation payload.", errors: parsed.error.flatten() });
+  }
+
+  const actorScope =
+    commandScopeForActor(request.authUser!) ||
+    (request.authUser!.agentProfile?.stateId
+      ? operationalTerritoryFromProfile({ ...request.authUser!.agentProfile, stateId: request.authUser!.agentProfile.stateId })
+      : null);
+  if (!actorScope) {
+    return response.status(403).json({ message: "Election Day messaging scope is required." });
+  }
+
+  let conversationTerritory = actorScope;
+  let memberUserIds: string[] = [request.authUser!.id];
+
+  if (parsed.data.type === "DIRECT") {
+    if (!parsed.data.recipientUserId || !(await canMessageUser(request.authUser!, parsed.data.recipientUserId))) {
+      return response.status(403).json({ message: "You cannot message this user outside your operational relationship." });
+    }
+    const targetTerritory = await targetTerritoryForUser(parsed.data.recipientUserId);
+    conversationTerritory = targetTerritory || actorScope;
+    memberUserIds.push(parsed.data.recipientUserId);
+  } else if (parsed.data.type === "GROUP") {
+    const requestedMembers = parsed.data.memberUserIds || [];
+    for (const userId of requestedMembers) {
+      if (!(await canMessageUser(request.authUser!, userId))) {
+        return response.status(403).json({ message: "Group contains a user outside your operational relationship." });
+      }
+    }
+    memberUserIds.push(...requestedMembers);
+  } else {
+    const requestedTerritory = {
+      stateId: parsed.data.territory?.stateId || actorScope.stateId,
+      senatorialDistrictId: parsed.data.territory?.senatorialDistrictId || actorScope.senatorialDistrictId || null,
+      federalConstituencyId: parsed.data.territory?.federalConstituencyId || actorScope.federalConstituencyId || null,
+      stateConstituencyId: parsed.data.territory?.stateConstituencyId || actorScope.stateConstituencyId || null,
+      wardId: parsed.data.territory?.wardId || actorScope.wardId || null,
+      pollingUnitId: parsed.data.territory?.pollingUnitId || actorScope.pollingUnitId || null,
+    };
+    const resolved = await resolveOperationalTerritory(prisma, requestedTerritory);
+    if (!authorizeAction(request.authUser!, "VIEW_TERRITORY", resolved)) {
+      return response.status(403).json({ message: "You cannot create a territory conversation outside your command scope." });
+    }
+    conversationTerritory = requestedTerritory;
+    const recipients = await prisma.agentProfile.findMany({
+      where: { ...territoryFilter(conversationTerritory), pollingUnitId: { not: null }, user: { isActive: true, accountStatus: "ACTIVE" } },
+      select: { userId: true },
+      take: 500,
+    });
+    memberUserIds.push(...recipients.map((recipient) => recipient.userId));
+  }
+
+  memberUserIds = Array.from(new Set(memberUserIds));
+  const conversation = await prisma.$transaction(async (transaction) => {
+    const created = await transaction.conversation.create({
+      data: {
+        type: parsed.data.type as ConversationType,
+        title: parsed.data.title || (parsed.data.type === "DIRECT" ? null : "Election Operations Chat"),
+        createdByUserId: request.authUser!.id,
+        stateId: conversationTerritory.stateId,
+        senatorialDistrictId: conversationTerritory.senatorialDistrictId || null,
+        federalConstituencyId: conversationTerritory.federalConstituencyId || null,
+        stateConstituencyId: conversationTerritory.stateConstituencyId || null,
+        wardId: conversationTerritory.wardId || null,
+        pollingUnitId: conversationTerritory.pollingUnitId || null,
+        members: {
+          create: memberUserIds.map((userId) => ({
+            userId,
+            roleLabel: userId === request.authUser!.id ? "CREATOR" : null,
+          })),
+        },
+      },
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CONVERSATION_CREATED",
+      targetType: "Conversation",
+      targetId: created.id,
+      territory: created,
+      metadata: { type: created.type, memberCount: memberUserIds.length },
+    });
+    return created;
+  });
+
+  return response.status(201).json({ message: "Election Day conversation created.", conversationId: conversation.id });
+});
+
+router.get("/conversations/:conversationId/messages", requireAuth, async (request, response) => {
+  const conversationId = Array.isArray(request.params.conversationId) ? request.params.conversationId[0] : request.params.conversationId;
+  const membership = await prisma.conversationMember.findUnique({
+    where: { conversationId_userId: { conversationId, userId: request.authUser!.id } },
+  });
+  if (!membership || membership.leftAt) {
+    return response.status(403).json({ message: "You are not a member of this conversation." });
+  }
+
+  const messages = await prisma.message.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+    include: {
+      senderUser: { select: { name: true } },
+      receipts: true,
+      attachments: true,
+    },
+  });
+
+  await prisma.conversationMember.update({
+    where: { conversationId_userId: { conversationId, userId: request.authUser!.id } },
+    data: { lastReadAt: new Date() },
+  });
+
+  return response.json({ messages: messages.map(serializeMessage) });
+});
+
+router.post("/conversations/:conversationId/messages", requireAuth, async (request, response) => {
+  const parsed = messageCreateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid message payload.", errors: parsed.error.flatten() });
+  }
+
+  const conversationId = Array.isArray(request.params.conversationId) ? request.params.conversationId[0] : request.params.conversationId;
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    include: { members: { where: { leftAt: null }, include: { user: { select: { name: true, role: true } } } } },
+  });
+  if (!conversation || !conversation.members.some((member) => member.userId === request.authUser!.id)) {
+    return response.status(403).json({ message: "You are not a member of this conversation." });
+  }
+
+  const message = await prisma.$transaction(async (transaction) => {
+    const created = await transaction.message.create({
+      data: {
+        conversationId,
+        senderUserId: request.authUser!.id,
+        body: parsed.data.body,
+        metadataJson: (parsed.data.metadata || {}) as Prisma.InputJsonObject,
+        stateId: conversation.stateId,
+        receipts: {
+          create: conversation.members
+            .filter((member) => member.userId !== request.authUser!.id)
+            .map((member) => ({
+              userId: member.userId,
+              status: MessageReceiptStatus.DELIVERED,
+              deliveredAt: new Date(),
+            })),
+        },
+      },
+      include: {
+        senderUser: { select: { name: true } },
+        receipts: true,
+        attachments: true,
+      },
+    });
+    await transaction.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+    await transaction.conversationMember.update({
+      where: { conversationId_userId: { conversationId, userId: request.authUser!.id } },
+      data: { lastReadAt: new Date() },
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_MESSAGE_CREATED",
+      targetType: "Message",
+      targetId: created.id,
+      territory: conversation,
+      metadata: { conversationId, realtimeEvent: "message.created", attachmentCount: 0 },
+    });
+    return created;
+  });
+
+  await persistAndPublishRealtimeEvent(
+    createElectionDayRealtimeEvent({
+      eventType: "message.created",
+      actorUserId: request.authUser!.id,
+      territory: {
+        stateId: conversation.stateId,
+        senatorialDistrictId: conversation.senatorialDistrictId,
+        federalConstituencyId: conversation.federalConstituencyId,
+        stateConstituencyId: conversation.stateConstituencyId,
+        wardId: conversation.wardId,
+        pollingUnitId: conversation.pollingUnitId,
+      },
+      idempotencyKey: `message:${message.id}`,
+      payload: {
+        messageId: message.id,
+        conversationId,
+        senderUserId: message.senderUserId,
+        createdAt: message.createdAt.toISOString(),
+      },
+    }),
+  );
+
+  return response.status(201).json({ message: "Election Day message sent.", item: serializeMessage(message) });
+});
+
+router.post("/conversations/:conversationId/read", requireAuth, async (request, response) => {
+  const conversationId = Array.isArray(request.params.conversationId) ? request.params.conversationId[0] : request.params.conversationId;
+  const membership = await prisma.conversationMember.findUnique({
+    where: { conversationId_userId: { conversationId, userId: request.authUser!.id } },
+  });
+  if (!membership || membership.leftAt) {
+    return response.status(403).json({ message: "You are not a member of this conversation." });
+  }
+
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.conversationMember.update({
+      where: { conversationId_userId: { conversationId, userId: request.authUser!.id } },
+      data: { lastReadAt: now },
+    }),
+    prisma.messageReceipt.updateMany({
+      where: { userId: request.authUser!.id, message: { conversationId }, status: MessageReceiptStatus.DELIVERED },
+      data: { status: MessageReceiptStatus.READ, readAt: now },
+    }),
+  ]);
+
+  return response.json({ message: "Conversation marked as read." });
+});
+
 router.post("/messages/territory", requireAuth, async (request, response) => {
   const parsed = territoryMessageSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -853,7 +2481,7 @@ router.post("/messages/territory", requireAuth, async (request, response) => {
     return created;
   });
 
-  publishRealtimeEvent(
+  await persistAndPublishRealtimeEvent(
     createElectionDayRealtimeEvent({
       eventType: "message.created",
       actorUserId: request.authUser!.id,

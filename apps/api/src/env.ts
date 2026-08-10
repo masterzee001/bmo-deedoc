@@ -74,6 +74,10 @@ const envSchema = z
     REALTIME_CONNECTION_STATE_RECOVERY_MS: z.coerce.number().int().min(0).default(2 * 60 * 1000),
     REALTIME_PRESENCE_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(90),
     REALTIME_REDIS_REQUIRED: booleanString,
+    WEBRTC_STUN_URLS: z.string().default("stun:stun.l.google.com:19302"),
+    TURN_URL: z.string().default(""),
+    TURN_USERNAME: z.string().default(""),
+    TURN_CREDENTIAL: z.string().default(""),
   })
   .superRefine((value, context) => {
     if (value.STORAGE_DRIVER === "s3") {
@@ -115,6 +119,14 @@ const envSchema = z
         message: "Production CORS_ALLOWED_ORIGINS must contain at least one explicit origin.",
       });
     }
+
+    if (!value.TURN_URL.trim() || !value.TURN_USERNAME.trim() || !value.TURN_CREDENTIAL.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_URL"],
+        message: "Production WebRTC voice requires TURN_URL, TURN_USERNAME, and TURN_CREDENTIAL.",
+      });
+    }
   });
 
 const parsed = envSchema.safeParse(process.env);
@@ -131,5 +143,8 @@ export const env = {
     .filter(Boolean),
   REALTIME_ALLOWED_ORIGINS: parsed.data.REALTIME_ALLOWED_ORIGINS.split(",")
     .map((origin) => origin.trim())
+    .filter(Boolean),
+  WEBRTC_STUN_URLS: parsed.data.WEBRTC_STUN_URLS.split(",")
+    .map((url) => url.trim())
     .filter(Boolean),
 };
