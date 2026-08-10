@@ -23,5 +23,11 @@
   "devDependencies": {
     "@types/node": "^22.13.10",
     "tsx": "^4.19.3"
+  },
+  "optionalDependencies": {
+    "@img/sharp-linux-x64": "0.34.5",
+    "@img/sharp-linuxmusl-x64": "0.34.5",
+    "@img/sharp-win32-x64": "0.34.5",
+    "@img/sharp-darwin-arm64": "0.34.5"
   }
 }
