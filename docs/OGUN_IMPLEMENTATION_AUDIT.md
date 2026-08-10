@@ -1,7 +1,24 @@
-# Ogun Implementation Audit
+# Ogun Implementation Audit — SUPERSEDED (Phase 1 historical record)
 
-- **Audit date:** 2026-08-09
-- **Repository baseline:** `f2be582` on `main`
+> **This document is historical. It is not the current implementation status.**
+>
+> **Current audit:** [`docs/SPRINT_4_FINAL_AUDIT.md`](SPRINT_4_FINAL_AUDIT.md) —
+> baseline `main @ c41d23ad87189331680723d4a30ef10a22d30717`,
+> **13 COMPLETE / 123 PARTIAL / 4 BLOCKED**.
+>
+> What follows describes the repository as it stood at Phase 1 (`f2be582`),
+> before Sprints 2, 3 and 4 merged. Its taxonomy
+> (`COMPLETE`/`PARTIAL`/`REFACTOR`/`NEW`/`BLOCKED`) and its counts
+> (15/43/26/53/3) are Phase-1 measurements against a Phase-1 tree.
+>
+> It is retained deliberately: it records the provenance research on Ogun
+> reference data and the Phase 1 architecture decisions, which remain the
+> evidence base for the external data blockers that are still open. Do not cite
+> its feature statuses as current, and do not delete it.
+
+- **Audit date:** 2026-08-09 *(historical)*
+- **Repository baseline:** `f2be582` on `main` *(historical)*
+- **Superseded by:** `docs/SPRINT_4_FINAL_AUDIT.md`
 - **Functional source:** `docs/MASTER_FEATURES.md`
 - **Technical source:** `docs/TECHNICAL.md`
 

@@ -20,14 +20,27 @@ export default function AdminLoginPage() {
     try {
       const data = await loginUser(email, password);
 
-      const hasCommandAccess = ["ADMIN", "SUPER_ADMIN", "STATE_OFFICER", "COORDINATOR"].includes(data.user.role);
-      if (!hasCommandAccess) {
-        setError("This login page is for authorized command users only.");
+      // VALIDATOR and PAYOUT_OFFICER are specialist roles: they hold no command
+      // territory, but they own the verification queue and the payout queue
+      // respectively. Omitting them here left /admin/pre-election reachable only
+      // by roles the API then rejects, so the decision buttons were dead UI for
+      // the only roles permitted to press them.
+      const hasWorkspaceAccess = ["ADMIN", "SUPER_ADMIN", "STATE_OFFICER", "COORDINATOR", "VALIDATOR", "PAYOUT_OFFICER"].includes(
+        data.user.role,
+      );
+      if (!hasWorkspaceAccess) {
+        setError("This login page is for authorized command and specialist users only.");
         return;
       }
 
       localStorage.setItem("picsNigeriaAdminToken", data.token);
-      router.push(data.user.role === "ADMIN" || data.user.role === "SUPER_ADMIN" ? "/admin/dashboard" : "/platform");
+      const destination =
+        data.user.role === "ADMIN" || data.user.role === "SUPER_ADMIN"
+          ? "/admin/dashboard"
+          : data.user.role === "VALIDATOR" || data.user.role === "PAYOUT_OFFICER"
+            ? "/admin/pre-election"
+            : "/platform";
+      router.push(destination);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Login failed.");
     } finally {

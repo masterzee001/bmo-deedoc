@@ -64,7 +64,12 @@ const envSchema = z
     JWT_AUDIENCE: z.string().min(1).default("ogun-election-operations-web"),
     PORT: z.coerce.number().int().min(1).max(65535).default(4000),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
-    API_JSON_BODY_LIMIT: z.string().regex(sizePattern, "API_JSON_BODY_LIMIT must be a size such as 1mb.").default("1mb"),
+    // Evidence originals are posted as base64 JSON, and the evidence route
+    // accepts decoded payloads up to 8MB. Base64 inflates by roughly a third,
+    // so a 1mb parser ceiling rejected any photo over ~750KB with a bare 413
+    // before the route's own validation ran: the route promised a size the
+    // parser forbade. 12mb covers the advertised 8MB original.
+    API_JSON_BODY_LIMIT: z.string().regex(sizePattern, "API_JSON_BODY_LIMIT must be a size such as 12mb.").default("12mb"),
     CORS_ALLOWED_ORIGINS: z.string().default(""),
     AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(15 * 60 * 1000),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
