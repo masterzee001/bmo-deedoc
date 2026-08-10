@@ -15,9 +15,9 @@ implemented does not mean a server is running.
 | PostgreSQL | Implemented Prisma provider; disposable PostgreSQL 16 Docker service for development/tests | No production instance |
 | Realtime | Implemented — Socket.IO gateway attached to the API HTTP server (`apps/api/src/realtime/gateway.ts`), with authenticated handshake, territory-scoped subscriptions, presence, and durable event outbox | Not deployed |
 | Redis | Implemented — `@socket.io/redis-adapter` client and presence writes; degrades to `DEGRADED_NO_REDIS` when `REDIS_URL` is unset, and `REALTIME_REDIS_REQUIRED` fails closed in production | No Redis server provisioned |
-| Worker | **Not implemented** — no BullMQ dependency, no queue code, no `apps/worker` | Not deployed |
+| Worker | Implemented — `apps/worker` runs BullMQ across three queues, backed by a durable `BackgroundJob` outbox in PostgreSQL, with dead-lettering, stale-job recovery, and a health endpoint | Not deployed |
 | Private object storage | Implemented — `S3CompatibleEvidenceObjectStorage` with AWS SigV4 signing, overwrite denial, server-generated SHA-256, and presigned reads; production env validation forces `STORAGE_DRIVER=s3` | No bucket provisioned |
-| STUN/TURN | Signalling and ICE configuration implemented; STUN default configured; TURN credentials validated as required in production | **Coturn server not operational** |
+| STUN/TURN | Signalling and ICE configuration implemented; deployable Coturn configuration with a hardened peer deny list and an explicit TLS policy; `turnConfigured` is reported only for a valid `turn:`/`turns:` URI with credentials | **No TURN host running** |
 
 `docker-compose.dev.yml` intentionally contains PostgreSQL only and remains the
 development/test database service.
@@ -43,7 +43,7 @@ Target production topology:
 Internet
    |
    v
-Nginx / Caddy
+Caddy
    |
    v
 Docker / Docker Compose
@@ -63,7 +63,7 @@ Private S3-compatible object storage may remain external or separately hosted, b
 
 WebRTC STUN/TURN may later be provided by a dedicated TURN service such as Coturn.
 
-GitHub Actions `CI / validate` remains the repository validation gate and is separate from production hosting. Existing Render/Vercel files may remain temporarily for legacy compatibility, but they are legacy/non-target deployment paths.
+GitHub Actions `CI / validate` remains the repository validation gate and is separate from production hosting. The Render and Vercel configuration files have been deleted: `render.yaml` carried `autoDeploy: true`, which was a live path to a non-target provider. `verify:repository` now fails if any such artifact reappears anywhere in the tree.
 
 ## Service Contracts
 
@@ -82,18 +82,21 @@ GitHub Actions `CI / validate` remains the repository validation gate and is sep
 
 BullMQ plus Redis is the target asynchronous job platform. Candidate jobs include reward/bonus processing, payout eligibility, notifications, evidence hashing verification, thumbnails, video derivatives, exports, analytics snapshots, and cleanup. Producers emit a typed `PlatformEventEnvelope`; consumers require idempotency keys, bounded retries, timeout, dead-letter handling, and observable outcomes.
 
-No route enqueues a BullMQ job. There is no BullMQ dependency, no queue code, and
-no worker service in the repository. Adding a Redis environment variable does not
-constitute queue implementation.
+Implemented. Evidence upload enqueues a durable `BackgroundJob` row inside the
+same transaction as the asset, and the worker sweeps those rows into BullMQ. The
+API never contacts Redis to accept work, so losing Redis delays background
+processing rather than dropping it. Derivative generation, realtime outbox
+replay, and maintenance sweeps run on this path today.
 
 ## Realtime Direction
 
 Socket.IO plus Socket.IO Redis Adapter plus Redis is the target. Rooms are authorized from current backend role and territory assignments, never from client claims. PostgreSQL remains authoritative. A reconnecting client obtains a durable cursor/snapshot from the API and then resumes live events; transient presence can be rebuilt.
 
 Status: the Situation Room, the authenticated websocket gateway, territory-scoped
-rooms, presence, and the durable realtime event outbox are implemented. The Redis
-adapter that enables multi-instance fan-out is implemented in code but has no
-Redis server provisioned, so live delivery currently runs single-instance and
+rooms, presence, the durable realtime event outbox, and cursor-based reconnect
+replay are implemented. The Redis adapter enabling multi-instance fan-out is
+implemented and was verified running under the production compose topology,
+though no production Redis is provisioned, so a deployment without it runs
 reports `DEGRADED_NO_REDIS`.
 
 ## Evidence Direction

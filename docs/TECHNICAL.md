@@ -72,7 +72,8 @@ Target-state note:
 This diagram is the intended target architecture. Application code and provisioned infrastructure differ.
 The checked-in repo implements the Next.js web app, Express API, Prisma database package, and shared package.
 Also implemented: the Socket.IO realtime gateway (inside the API process, not a separate service), its Redis adapter and presence writes, the WebRTC signalling and call-lifecycle contract, and the private S3-compatible object-storage pipeline for evidence.
-Still TARGET: the background worker runtime (no BullMQ dependency or queue code), a separately deployed realtime service, and the repo-wide production Docker topology.
+Also implemented: the BullMQ background worker in apps/worker, and the production Docker topology (compose, Dockerfiles, Caddy, Coturn) under deploy/.
+Still TARGET: a separately deployed realtime service, and video derivative transcoding.
 No production runtime is deployed. Implemented code does not mean a running Redis, bucket, TURN server, or container.
 ```
 
@@ -137,7 +138,7 @@ Recommended structure:
 TARGET architecture note:
 - apps/web and apps/api exist today.
 - The realtime gateway is implemented, but it runs inside apps/api on the shared HTTP server. Extracting it into a standalone apps/realtime service is target structure.
-- apps/worker is not implemented: there is no BullMQ dependency and no queue code in the current checkout.
+- apps/worker is implemented: BullMQ across three queues, backed by a durable BackgroundJob outbox in PostgreSQL.
 - packages/auth and packages/config are also target structure until added to the repo.
 ```
 

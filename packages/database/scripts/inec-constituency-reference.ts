@@ -56,6 +56,9 @@ function isHeaderRow(firstCell: string) {
 }
 
 function readWorkbook(): WorkbookData {
+  // Enforced before the parser ever sees the bytes.
+  assertApprovedInecWorkbook();
+
   const workbook = XLSX.readFile(workbookPath);
   const senate = parseSenateSheet(workbook.Sheets["SEN. DIST."]);
   const federal = parseFederalSheet(workbook.Sheets["FED. CONST."]);
@@ -66,6 +69,35 @@ function readWorkbook(): WorkbookData {
 
 export function getInecConstituencyWorkbookSha256() {
   return createHash("sha256").update(readFileSync(workbookPath)).digest("hex");
+}
+
+/**
+ * SHA-256 of the approved INEC constituency workbook checked into this
+ * repository, as recorded in docs/OGUN_REFERENCE_DATA_READINESS.md.
+ */
+export const APPROVED_INEC_WORKBOOK_SHA256 = "a094e8cadd3f7a47986ed546a1a6d9fb3707feaa879492f43f33fa9c116d751b";
+
+/**
+ * Refuses to parse a workbook that is not the approved file.
+ *
+ * The spreadsheet library carries prototype-pollution and ReDoS advisories with
+ * no upstream fix. Those are acceptable here only because the input is a fixed,
+ * version-controlled file rather than anything a user supplies — so that
+ * assumption is enforced rather than assumed. A swapped or corrupted workbook
+ * fails closed instead of being handed to the parser.
+ *
+ * It also protects the reference data itself: silently importing altered
+ * electoral boundaries would be worse than refusing to import at all.
+ */
+export function assertApprovedInecWorkbook() {
+  const actual = getInecConstituencyWorkbookSha256();
+  if (actual !== APPROVED_INEC_WORKBOOK_SHA256) {
+    throw new Error(
+      `INEC constituency workbook hash mismatch. Expected ${APPROVED_INEC_WORKBOOK_SHA256}, found ${actual}. ` +
+        "Refusing to parse an unapproved reference workbook.",
+    );
+  }
+  return actual;
 }
 
 export function getOgunConstituencyWorkbookSummary() {

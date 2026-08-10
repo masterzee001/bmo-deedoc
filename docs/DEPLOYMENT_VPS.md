@@ -162,11 +162,20 @@ DATABASE_URL="postgresql://..." npx prisma migrate deploy --config packages/data
 
 Reference data and the Super Admin are seeded by an explicit one-off command, deliberately **not** part of container startup. A restart never re-seeds and never mutates existing records.
 
+Run it in the **`migrate` image, not `api`**. Bootstrap needs the reference-data
+scripts and their tooling — `tsx`, the Prisma CLI, and the spreadsheet parser —
+all of which are development dependencies deliberately excluded from the API
+runtime image. Pointing this at `api` fails with missing modules.
+
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm \
   -e SUPER_ADMIN_EMAIL=... -e SUPER_ADMIN_PASSWORD=... \
-  api npm run deploy:bootstrap
+  migrate npm run deploy:bootstrap
 ```
+
+The reference import refuses to parse an INEC workbook whose SHA-256 does not
+match the approved file, so a swapped or corrupted source fails closed rather
+than silently importing altered electoral boundaries.
 
 There is no demo or fixture seeding path in production.
 
@@ -279,6 +288,30 @@ Browser-side check: open the call panel, start a call, and confirm an ICE candid
 
 `recording` is always `DISABLED`. No call media is captured or persisted anywhere in this topology.
 
+## 15a. Pre-deploy rehearsals
+
+Run these before any production deploy. Each spins its own disposable PostgreSQL
+container and never touches a real database.
+
+```bash
+npm run rehearse:production      # all three
+```
+
+| Rehearsal | What it proves |
+|---|---|
+| `npm run rehearse:migration` | **Schema additivity only.** Pending migrations apply to a **populated** database; no table or column removed, no type changed, no column tightened to `NOT NULL`, no default removed; idempotent on re-apply. Reports forward duration. Does **not** prove the previous image still serves — see §16a. |
+| `npm run verify:backup-restore` | The documented `pg_dump`/`pg_restore` commands recreate the database after **total loss**. Seeds data, dumps, **drops the database**, creates an empty one, restores into it, requires `pg_restore` exit 0 under `--exit-on-error`, then compares both content and schema fingerprints. |
+| `npm run verify:load-recovery` | Under concurrency: no job lost on enqueue, replaying every idempotency key creates nothing new, contended claims are exclusive (exactly one winner per row), and stranded jobs all return to `PENDING`. |
+
+The migration rehearsal accepts a real dump for the highest-fidelity run:
+
+```bash
+npm run rehearse:migration -- --from-dump backup-20260810.dump
+```
+
+Rehearsing against empty tables proves very little — table rewrites, `NOT NULL`
+additions, and unique-index creation only fail with rows present.
+
 ## 16. Rollback
 
 Images are tagged by `IMAGE_TAG`. To roll back application code:
@@ -287,9 +320,46 @@ Images are tagged by `IMAGE_TAG`. To roll back application code:
 IMAGE_TAG=<previous-tag> docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
-**Migrations do not roll back automatically.** The stream is additive by policy — new tables, columns, and enum values only — so a previous application image continues to run against a newer schema. That is the intended rollback path.
+**Migrations do not roll back automatically.** The stream is additive by policy — new tables, columns, and enum values only — so a previous application image is *expected* to keep running against a newer schema. That is the intended rollback path.
 
 If a migration itself must be reversed, restore the database from backup (§12) and redeploy the matching image. Never hand-edit an applied migration: checksums are locked and `verify:migrations` will fail the next deploy.
+
+### 16a. Previous-image rollback test — required before production
+
+`npm run rehearse:migration` proves **schema additivity only**: nothing removed,
+nothing retyped, nothing tightened, idempotent on re-apply. That is a *necessary*
+condition for rollback, not a sufficient one.
+
+It cannot prove the previous image still serves correctly. Runtime compatibility
+depends on query shapes, Prisma client expectations, enum handling, and
+constraint interactions — none of which a schema comparison can establish. A
+migration can be perfectly additive and still break the previous image, for
+example by adding a `NOT NULL` column with a default that older insert paths do
+not supply, or by adding a unique constraint that older write paths violate.
+
+The real test runs on staging, against a production-shaped database, and is
+**outstanding** — no VPS exists yet:
+
+```text
+1. Restore a production-shaped dump into the staging database.
+2. Deploy the NEW image and run the migration stream against it.
+3. Smoke-test the NEW image: login, verification decision, referral/reward,
+   payout assignment, PU check-in, incident, evidence upload, dashboard,
+   Situation Room, and a voice call.
+4. Switch the application containers to the PREVIOUS image, leaving the
+   migrated schema in place:
+       IMAGE_TAG=<previous> docker compose -f docker-compose.prod.yml \
+         --env-file .env.production up -d web api worker
+   Do NOT re-run migrations.
+5. Re-run the same smoke tests against the PREVIOUS image on the NEW schema.
+   Any failure here means the migration is not truly rollback-safe, regardless
+   of what the additivity rehearsal reported.
+6. Switch back to the NEW image and confirm the smoke tests pass again.
+```
+
+Record the result against the specific migration range tested. Until step 5 has
+passed on staging, rollback safety for that release is **unverified**, and the
+additivity rehearsal must not be cited as evidence of it.
 
 ---
 

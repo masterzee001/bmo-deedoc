@@ -43,7 +43,11 @@
     "db:dev:destroy": "docker compose -f docker-compose.dev.yml down --volumes --remove-orphans",
     "deploy:migrate": "npm run verify:migrations && npm run prisma:migrate:deploy",
     "deploy:bootstrap": "npm run prisma:ensure-production && npm run bootstrap:reference-data && npm run bootstrap:super-admin && npm run verify:production",
-    "verify:deployment": "node scripts/verify-deployment-assets.mjs"
+    "verify:deployment": "node scripts/verify-deployment-assets.mjs",
+    "rehearse:migration": "node scripts/rehearse-production-migration.mjs",
+    "verify:backup-restore": "node scripts/verify-backup-restore.mjs",
+    "verify:load-recovery": "node scripts/verify-load-recovery.mjs",
+    "rehearse:production": "npm run rehearse:migration && npm run verify:backup-restore && npm run verify:load-recovery"
   },
   "devDependencies": {
     "concurrently": "9.2.4",
