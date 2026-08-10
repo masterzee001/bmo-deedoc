@@ -1,0 +1,94 @@
+# Coturn configuration template.
+#
+# Placeholders are substituted at container start by entrypoint.sh. No
+# credential is committed: TURN_USERNAME and TURN_CREDENTIAL come from the
+# deployment environment.
+
+listening-port=__TURN_PORT__
+
+# TLS policy is resolved at render time and injected here: either a real
+# certificate pair, or an explicit no-tls/no-dtls. See entrypoint.sh.
+__TLS_SECTION__
+
+# The address clients are told to send relayed media to. On a VPS behind a
+# provider NAT this must be the public address, not the interface address, or
+# every relayed candidate will be unreachable.
+external-ip=__TURN_EXTERNAL_IP__
+
+realm=__TURN_REALM__
+server-name=__TURN_REALM__
+
+# Long-term credentials. Anonymous relay is never enabled: an open TURN server
+# is abused within hours of being reachable.
+lt-cred-mech
+user=__TURN_USERNAME__:__TURN_CREDENTIAL__
+
+# Relay port range. Must match the UDP range opened on the VPS firewall.
+min-port=__TURN_MIN_PORT__
+max-port=__TURN_MAX_PORT__
+
+fingerprint
+no-multicast-peers
+
+# ---------------------------------------------------------------------------
+# Peer deny list.
+#
+# A TURN server relays to whatever peer address a client asks for. Without this
+# list an authenticated client could use the relay to reach anything the VPS can
+# reach: the Docker bridge networks, PostgreSQL and Redis on the internal
+# compose network, the host itself, and cloud instance-metadata endpoints. That
+# is a server-side request forgery primitive, so every non-public range is
+# denied and only genuinely routable internet peers remain allowed.
+#
+# Note for local verification: this also blocks relaying to Docker bridge
+# addresses (172.16.0.0/12), which is why a relay data-path test must run on a
+# real host rather than through a bridged container network.
+# ---------------------------------------------------------------------------
+
+# "This network" / unspecified
+denied-peer-ip=0.0.0.0-0.255.255.255
+# Loopback
+denied-peer-ip=127.0.0.0-127.255.255.255
+# RFC1918 private ranges — Docker networks, LANs, and the compose backplane
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+# Carrier-grade NAT
+denied-peer-ip=100.64.0.0-100.127.255.255
+# Link-local, including the 169.254.169.254 cloud metadata endpoint
+denied-peer-ip=169.254.0.0-169.254.255.255
+# IETF protocol assignments and benchmarking
+denied-peer-ip=192.0.0.0-192.0.0.255
+denied-peer-ip=198.18.0.0-198.19.255.255
+# Documentation ranges
+denied-peer-ip=192.0.2.0-192.0.2.255
+denied-peer-ip=198.51.100.0-198.51.100.255
+denied-peer-ip=203.0.113.0-203.0.113.255
+# Multicast and reserved
+denied-peer-ip=224.0.0.0-239.255.255.255
+denied-peer-ip=240.0.0.0-255.255.255.255
+
+# IPv6 equivalents
+denied-peer-ip=::
+denied-peer-ip=::1
+# IPv4-mapped IPv6 — otherwise ::ffff:10.0.0.1 bypasses the IPv4 rules above
+denied-peer-ip=::ffff:0.0.0.0-::ffff:255.255.255.255
+# Unique local addresses
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+# Link-local
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+# Multicast
+denied-peer-ip=ff00::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+# CLI administration is disabled; configuration changes ship as a redeploy.
+no-cli
+
+# Quotas keep a single client from exhausting relay capacity on a small VPS.
+user-quota=12
+total-quota=1200
+
+# Verbose logging is deliberately off: TURN logs would otherwise record who
+# called whom at high volume. Errors still surface on stdout.
+log-file=stdout
+no-stdout-log=false
+simple-log

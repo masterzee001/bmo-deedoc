@@ -1654,7 +1654,17 @@ router.get("/webrtc/config", requireAuth, async (_request, response) => {
   const iceServers: ElectionDayWebrtcConfig["iceServers"] = env.WEBRTC_STUN_URLS.length
     ? [{ urls: env.WEBRTC_STUN_URLS }]
     : [];
-  if (env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL) {
+
+  // TURN is advertised only when the URI is a usable turn:/turns: endpoint and
+  // both credentials are present. A half-configured relay must never be
+  // reported as configured: clients would assume field devices behind
+  // carrier-grade NAT are reachable when they are not.
+  const turnConfigured =
+    /^turns?:[^\s:]+(:\d{1,5})?(\?transport=(udp|tcp))?$/i.test(env.TURN_URL.trim()) &&
+    Boolean(env.TURN_USERNAME.trim()) &&
+    Boolean(env.TURN_CREDENTIAL.trim());
+
+  if (turnConfigured) {
     iceServers.push({
       urls: env.TURN_URL,
       username: env.TURN_USERNAME,
@@ -1670,7 +1680,7 @@ router.get("/webrtc/config", requireAuth, async (_request, response) => {
       restLifecyclePath: "/election-day/calls",
     },
     iceServers,
-    turnConfigured: Boolean(env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL),
+    turnConfigured,
     recording: "DISABLED",
     durableCallHistory: "AVAILABLE",
   };

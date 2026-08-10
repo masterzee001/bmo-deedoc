@@ -19,14 +19,19 @@ implemented does not mean a server is running.
 | Private object storage | Implemented — `S3CompatibleEvidenceObjectStorage` with AWS SigV4 signing, overwrite denial, server-generated SHA-256, and presigned reads; production env validation forces `STORAGE_DRIVER=s3` | No bucket provisioned |
 | STUN/TURN | Signalling and ICE configuration implemented; STUN default configured; TURN credentials validated as required in production | **Coturn server not operational** |
 
-`docker-compose.dev.yml` intentionally contains PostgreSQL only. There is no
-repo-wide production Docker topology: web, api, worker, Redis, and reverse-proxy
-container assets, health checks, restart policies, and deployment configuration
-do not exist yet and must not be represented as available.
+`docker-compose.dev.yml` intentionally contains PostgreSQL only and remains the
+development/test database service.
 
-Realtime and object storage are implemented in application code but have no
-provisioned runtime. Neither may be described as running until a Redis server
-and an S3-compatible bucket are actually deployed and health-checked.
+The production topology now exists as committed, locally validated assets:
+`docker-compose.prod.yml`, production Dockerfiles for web/api/worker under
+`deploy/docker/`, the Caddy reverse proxy, and the Coturn configuration.
+Operations procedures are in `docs/DEPLOYMENT_VPS.md`.
+
+**Assets existing is not the same as a running system.** No VPS is provisioned,
+no domain resolves, no TLS certificate has been issued, no S3-compatible bucket
+exists, and no TURN server is running. Nothing in this repository has been
+deployed. Realtime, object storage, queues, and TURN may only be described as
+operational once a host actually runs them and their health checks pass.
 
 ## Production Deployment Target
 

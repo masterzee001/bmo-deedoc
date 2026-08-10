@@ -1,0 +1,267 @@
+# Locked production topology for a single Linux VPS.
+#
+#   Internet -> Caddy -> { web, api (+Socket.IO), worker } -> { postgres, redis }
+#
+# Evidence originals are NOT stored here. They live in a private S3-compatible
+# service configured through STORAGE_*; no bind mount or volume in this file is
+# an authoritative store for evidence or voter documents.
+#
+# Bring up with:  docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+name: bmo-deedoc-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # ---------------------------------------------------------------- data tier
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ogun_production}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Deterministic collation so index ordering cannot shift between hosts.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Never published to the host: reachable only on the internal network.
+    networks: [backplane]
+    logging: *default-logging
+    shm_size: 256mb
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-1g}
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    # Redis carries queues, Socket.IO fan-out, and transient presence. It is
+    # never authoritative business truth, so AOF here protects in-flight jobs,
+    # not records. An empty Redis is a recoverable state.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      # Queue state must never be silently evicted; refuse writes instead.
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - "900 1"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [backplane]
+    logging: *default-logging
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY_LIMIT:-384m}
+
+  # ------------------------------------------------------------- migration
+  # One-shot, run-to-completion. Every long-running service waits on this
+  # completing successfully, so no two containers can ever race the migration
+  # stream. It verifies checksums first and refuses to deploy a modified
+  # migration. It does not seed demo data.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+      # The migrate target carries the Prisma CLI and the checksum verifier,
+      # which are deliberately absent from the API runtime image.
+      target: migrate
+    image: bmo-deedoc/migrate:${IMAGE_TAG:-latest}
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      # prisma.config.ts disables dotenv loading, so DATABASE_URL must be
+      # present in the process environment exactly as passed here.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backplane]
+    logging: *default-logging
+
+  # ------------------------------------------------------------ application
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    image: bmo-deedoc/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env.production]
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # Exactly one proxy hop (Caddy) sits in front of the API.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Production realtime fails closed rather than silently degrading to
+      # single-instance delivery.
+      REALTIME_REDIS_REQUIRED: ${REALTIME_REDIS_REQUIRED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [backplane]
+    logging: *default-logging
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEMORY_LIMIT:-768m}
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    image: bmo-deedoc/worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env.production]
+    environment:
+      NODE_ENV: production
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      WORKER_HEALTH_PORT: 4100
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [backplane]
+    logging: *default-logging
+    # Long enough for an in-flight derivative job to finish and record its
+    # outcome before the process is killed.
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${WORKER_MEMORY_LIMIT:-768m}
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?NEXT_PUBLIC_API_BASE_URL is required}
+        NEXT_PUBLIC_REALTIME_URL: ${NEXT_PUBLIC_REALTIME_URL:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+    image: bmo-deedoc/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [backplane]
+    logging: *default-logging
+    stop_grace_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEMORY_LIMIT:-512m}
+
+  # ------------------------------------------------------------------ edge
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The only service publishing ports for HTTP traffic. Coturn is also
+    # internet-facing, but reaches the network directly through host networking
+    # rather than a published port mapping.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS is required}
+      TLS_CONTACT_EMAIL: ${TLS_CONTACT_EMAIL:?TLS_CONTACT_EMAIL is required}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [backplane]
+    logging: *default-logging
+    stop_grace_period: 20s
+
+  # WebRTC relay. Host networking is used deliberately: TURN allocates from a
+  # wide UDP range and rewrites candidate addresses, and publishing thousands of
+  # ports through the bridge NAT is both slow to start and unreliable for relay.
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_REALM: ${TURN_REALM:?TURN_REALM is required}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:?TURN_EXTERNAL_IP is required}
+      TURN_USERNAME: ${TURN_USERNAME:?TURN_USERNAME is required}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:?TURN_CREDENTIAL is required}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
+      TURN_MAX_PORT: ${TURN_MAX_PORT:-49200}
+      # TURN TLS is opt-in: empty cert/key means the TLS and DTLS listeners are
+      # explicitly disabled rather than advertised without a certificate.
+      TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
+      TURN_TLS_CERT: ${TURN_TLS_CERT:-}
+      TURN_TLS_KEY: ${TURN_TLS_KEY:-}
+    volumes:
+      - ./deploy/coturn/turnserver.conf.template:/etc/coturn/turnserver.conf.template:ro
+      - ./deploy/coturn/entrypoint.sh:/usr/local/bin/coturn-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/coturn-entrypoint.sh"]
+    healthcheck:
+      # Confirms the listener is accepting connections, not merely that the
+      # config parsed.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 $${TURN_PORT:-3478} || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging: *default-logging
+
+networks:
+  # Internal only. Nothing here is reachable from the host except through Caddy.
+  backplane:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
