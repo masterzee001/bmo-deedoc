@@ -5,18 +5,60 @@
 
 ## Implementation Status
 
-| Service | Status |
-|---|---|
-| Web | Implemented as Next.js |
-| API | Implemented as Express |
-| PostgreSQL | Implemented Prisma provider; disposable PostgreSQL 16 Docker service added for development/tests |
-| Realtime | TARGET only |
-| Worker | TARGET only |
-| Redis | TARGET only |
-| Private object storage | TARGET only |
-| STUN/TURN | TARGET only |
+Application code and provisioned infrastructure are tracked separately. Code being
+implemented does not mean a server is running.
 
-`docker-compose.dev.yml` intentionally contains PostgreSQL only. Dockerized API/web, Redis, workers, realtime, object storage, and WebRTC services must not be represented as available until code, health checks, tests, and deployment configuration exist.
+| Service | Application code | Provisioned/running |
+|---|---|---|
+| Web | Implemented as Next.js | Not deployed |
+| API | Implemented as Express | Not deployed |
+| PostgreSQL | Implemented Prisma provider; disposable PostgreSQL 16 Docker service for development/tests | No production instance |
+| Realtime | Implemented — Socket.IO gateway attached to the API HTTP server (`apps/api/src/realtime/gateway.ts`), with authenticated handshake, territory-scoped subscriptions, presence, and durable event outbox | Not deployed |
+| Redis | Implemented — `@socket.io/redis-adapter` client and presence writes; degrades to `DEGRADED_NO_REDIS` when `REDIS_URL` is unset, and `REALTIME_REDIS_REQUIRED` fails closed in production | No Redis server provisioned |
+| Worker | **Not implemented** — no BullMQ dependency, no queue code, no `apps/worker` | Not deployed |
+| Private object storage | Implemented — `S3CompatibleEvidenceObjectStorage` with AWS SigV4 signing, overwrite denial, server-generated SHA-256, and presigned reads; production env validation forces `STORAGE_DRIVER=s3` | No bucket provisioned |
+| STUN/TURN | Signalling and ICE configuration implemented; STUN default configured; TURN credentials validated as required in production | **Coturn server not operational** |
+
+`docker-compose.dev.yml` intentionally contains PostgreSQL only. There is no
+repo-wide production Docker topology: web, api, worker, Redis, and reverse-proxy
+container assets, health checks, restart policies, and deployment configuration
+do not exist yet and must not be represented as available.
+
+Realtime and object storage are implemented in application code but have no
+provisioned runtime. Neither may be described as running until a Redis server
+and an S3-compatible bucket are actually deployed and health-checked.
+
+## Production Deployment Target
+
+The locked production deployment target is **VPS**.
+
+Target production topology:
+
+```text
+Internet
+   |
+   v
+Nginx / Caddy
+   |
+   v
+Docker / Docker Compose
+   |
+   +-- Next.js Web
+   +-- Express API + Socket.IO
+   +-- BullMQ Worker
+   +-- PostgreSQL
+   +-- Redis
+```
+
+Docker is the service-packaging standard. Docker Compose may be used initially for single-VPS production orchestration after the target services, production secrets handling, persistent volumes, backups, health checks, restart policies, logging, and monitoring are implemented.
+
+Nginx or Caddy terminates HTTPS and reverse-proxies HTTP/WebSocket traffic to the application containers. PostgreSQL requires persistent storage, backups, restore tests, monitoring, and migration controls. Redis requires persistence and configuration appropriate to its queue, realtime, rate-coordination, cache, and transient-presence workloads.
+
+Private S3-compatible object storage may remain external or separately hosted, but it is independent from the application filesystem. Application containers must not rely on ephemeral local filesystem storage for voter documents or election evidence.
+
+WebRTC STUN/TURN may later be provided by a dedicated TURN service such as Coturn.
+
+GitHub Actions `CI / validate` remains the repository validation gate and is separate from production hosting. Existing Render/Vercel files may remain temporarily for legacy compatibility, but they are legacy/non-target deployment paths.
 
 ## Service Contracts
 
@@ -35,19 +77,29 @@
 
 BullMQ plus Redis is the target asynchronous job platform. Candidate jobs include reward/bonus processing, payout eligibility, notifications, evidence hashing verification, thumbnails, video derivatives, exports, analytics snapshots, and cleanup. Producers emit a typed `PlatformEventEnvelope`; consumers require idempotency keys, bounded retries, timeout, dead-letter handling, and observable outcomes.
 
-No Phase 0 route enqueues a BullMQ job. Adding a Redis environment variable does not constitute queue implementation.
+No route enqueues a BullMQ job. There is no BullMQ dependency, no queue code, and
+no worker service in the repository. Adding a Redis environment variable does not
+constitute queue implementation.
 
 ## Realtime Direction
 
 Socket.IO plus Socket.IO Redis Adapter plus Redis is the target. Rooms are authorized from current backend role and territory assignments, never from client claims. PostgreSQL remains authoritative. A reconnecting client obtains a durable cursor/snapshot from the API and then resumes live events; transient presence can be rebuilt.
 
-No Election Situation Room, websocket gateway, presence service, or multi-instance fan-out is implemented in Phase 0.
+Status: the Situation Room, the authenticated websocket gateway, territory-scoped
+rooms, presence, and the durable realtime event outbox are implemented. The Redis
+adapter that enables multi-instance fan-out is implemented in code but has no
+Redis server provisioned, so live delivery currently runs single-instance and
+reports `DEGRADED_NO_REDIS`.
 
 ## Evidence Direction
 
 Evidence originals use private S3-compatible object storage with unique non-guessable keys, overwrite denial, server-generated SHA-256, object versioning, custody/access audit, separate derivatives, and Object Lock/WORM where supported and legally approved. PostgreSQL stores metadata and links; the object store stores bytes. Clients never choose final object keys or authoritative hashes.
 
-Private storage, hashing workers, derivatives, custody, dossier, export, and legal-workspace implementation remains TARGET architecture.
+Private S3-compatible storage, server-side SHA-256 hashing, custody, PU dossier,
+controlled manifest export, and the legal-support workspace are implemented and
+covered by integration tests. Derivative generation and any queue-driven hashing
+worker remain TARGET architecture, blocked on the unimplemented worker runtime
+and media processing infrastructure.
 
 ## Canonical Code Homes
 

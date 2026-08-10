@@ -3,13 +3,18 @@
 - **Roadmap baseline:** 2026-08-09
 - **Functional source:** `docs/MASTER_FEATURES.md`
 - **Implementation evidence:** `docs/OGUN_IMPLEMENTATION_AUDIT.md`
+- **Production deployment target:** VPS
 
 ## Delivery Principles
 
 - Reuse, refactor, extend, replace only where necessary, then harden.
 - Preserve production-compatible data and existing IDs through additive migrations, backfills, dual reads, and explicit cutovers.
 - No developer independently renames legacy enums, deletes models/migrations, or rewrites shared territory authorization.
-- Docker, realtime, workers, WebRTC, and object storage remain TARGET architecture until code, configuration, tests, and deployment assets are committed.
+- VPS is the locked production deployment target; Render and Vercel are legacy/non-target production paths.
+- Docker is the service-packaging standard; Docker Compose may be used initially for single-VPS production orchestration after production assets are implemented.
+- Realtime (Socket.IO + Redis adapter), WebRTC signalling and call lifecycle, and private S3-compatible object storage are implemented in application code with tests. They still have no provisioned runtime, so they must not be described as running.
+- The background worker runtime (BullMQ), the repo-wide production Docker topology, and the Coturn TURN server remain TARGET architecture until code, configuration, tests, and deployment assets are committed.
+- Private S3-compatible object storage remains independent from the application filesystem; containers must not store voter documents or election evidence on ephemeral local disks.
 - A UI is not complete without backend authorization, validation, database constraints, audit behavior, tests, and mobile acceptance.
 - Every merged task must identify its locked feature numbers and migration/rollback impact.
 
@@ -32,6 +37,7 @@
 - Shared contract changes land before dependent domain implementations. Consumers import the canonical shared definition rather than copying it.
 - A domain owner may reject an incompatible event/storage/financial payload; the Platform Lead resolves cross-domain sequencing.
 - Target-only services must remain labelled TARGET until their runtime, health checks, failure behavior, tests, and deployment assets are present.
+- Production deployment tasks target Nginx or Caddy in front of Docker/Docker Compose on VPS. Existing Render/Vercel files are legacy compatibility only.
 - CI must pass on the exact commit merged. A local pass does not override a failed or skipped protected check.
 - Developers do not load invented Ogun electoral data. Missing authoritative data is a blocker and is escalated with provenance requirements.
 
@@ -236,8 +242,8 @@ Phase 0 storage/security decisions
 | Add financial reconciliation, invariant monitors, concurrent reward/payout tests, and operator runbooks. | 037, 040-058, 090 | Developer 2 | Phase 3 complete |
 | Run multi-instance Election Day simulation for check-ins, location bursts, alerts, reports, incidents, map fan-out, messages, and signalling failures. | 091-120 | Developer 3 | Phases 5-7 complete |
 | Test evidence upload concurrency, hash verification, worker retries, exports, retention/holds, backup/restore, and object-store failure. | 121-140 | Developer 4 | Phases 8-9 complete |
-| Add structured logs, metrics, traces, queue depth, database/Redis/object-store health, security alerts, backups, recovery, and operations dashboards. | 089-090, 091-140 | Developers 1 and 3 | Deployment topology |
-| Add incremental Docker assets for postgres, redis, api, realtime, worker, and minio without replacing the current Node/Vercel workflow until parity is proven. | 089-090, 092, 106, 110, 125-127 | Developers 1, 3, and 4 | Services implemented first |
+| Add structured logs, metrics, traces, queue depth, database/Redis/object-store health, security alerts, backups, recovery, and operations dashboards. | 089-090, 091-140 | Developers 1 and 3 | VPS deployment topology |
+| Add production VPS/Docker assets for Nginx or Caddy, web, api, realtime, worker, PostgreSQL, Redis, persistent volumes, backups, health checks, restart policies, logs, and monitoring. | 089-090, 092, 106, 110, 125-127 | Developers 1, 3, and 4 | Services implemented first |
 | Conduct mobile/device/network field simulation, accessibility testing, incident drills, and signed readiness review. | 089, 091-120 | All developers | All functional gates complete |
 
 **Exit gate:** security review has no unresolved critical/high findings; migration and rollback are rehearsed; load/error budgets pass; backup restoration and evidence integrity are demonstrated; field simulation is accepted; production runbooks and named on-call ownership exist.
