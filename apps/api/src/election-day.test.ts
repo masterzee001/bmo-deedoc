@@ -427,6 +427,27 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       assert.equal(config.turnConfigured, false);
       assert.equal(config.recording, "DISABLED");
       assert.equal(config.durableCallHistory, "AVAILABLE");
+
+      // A half-configured or malformed relay must never be advertised as
+      // working. Browsers discard invalid ICE server entries silently, so
+      // reporting turnConfigured=true would claim relay coverage that does not
+      // exist. Only a well-formed turn:/turns: URI with both credentials counts.
+      const turnUriPattern = /^turns?:[^\s:]+(:\d{1,5})?(\?transport=(udp|tcp))?$/i;
+      const turnShapes = [
+        { url: "turn:relay.example.org:3478", username: "u", credential: "c", expected: true },
+        { url: "turns:relay.example.org:5349", username: "u", credential: "c", expected: true },
+        { url: "turn:relay.example.org:3478?transport=udp", username: "u", credential: "c", expected: true },
+        { url: "turn:relay.example.org:3478", username: "", credential: "c", expected: false },
+        { url: "turn:relay.example.org:3478", username: "u", credential: "", expected: false },
+        { url: "relay.example.org:3478", username: "u", credential: "c", expected: false },
+        { url: "https://relay.example.org", username: "u", credential: "c", expected: false },
+        { url: "", username: "u", credential: "c", expected: false },
+      ];
+      for (const shape of turnShapes) {
+        const evaluated =
+          turnUriPattern.test(shape.url.trim()) && Boolean(shape.username.trim()) && Boolean(shape.credential.trim());
+        assert.equal(evaluated, shape.expected, `TURN shape misjudged: ${JSON.stringify(shape)}`);
+      }
     },
   },
   {

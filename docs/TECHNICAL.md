@@ -1629,24 +1629,34 @@ The exact scripts should be standardized before implementation begins.
 # 60. Docker Files
 
 ```text
-TARGET architecture note:
-The following files are planned artifacts, not files that currently exist in this repository.
+STATUS:
+These files exist and build. Nothing is deployed: no VPS is provisioned, and no
+image has been published or run outside local validation.
 ```
 
-Recommended:
+Implemented:
 
 ```text
-/apps/web/Dockerfile
-/apps/api/Dockerfile
-/apps/realtime/Dockerfile
-/apps/worker/Dockerfile
+deploy/docker/web.Dockerfile
+deploy/docker/api.Dockerfile
+deploy/docker/worker.Dockerfile
 
-docker-compose.yml
-docker-compose.prod.yml
-docker-compose.dev.yml
-deploy/nginx.conf or deploy/Caddyfile
+docker-compose.dev.yml      PostgreSQL only, development/test
+docker-compose.prod.yml     full single-VPS production topology
+deploy/caddy/Caddyfile
+deploy/coturn/turnserver.conf.template
+deploy/coturn/entrypoint.sh
 .dockerignore
 ```
+
+There is deliberately no `apps/realtime` Dockerfile. Socket.IO runs inside the
+API process, so the realtime gateway ships in the API image. Extracting it into
+a standalone service remains target structure, not current topology.
+
+Images are Debian slim rather than Alpine: the Prisma engines and sharp are
+native, glibc-linked builds, and the musl variants buy only image size.
+
+Operations procedures are documented in `docs/DEPLOYMENT_VPS.md`.
 
 ---
 

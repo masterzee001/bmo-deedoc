@@ -34,6 +34,16 @@ const booleanString = z
   .string()
   .default("false")
   .transform((value) => ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()));
+/**
+ * A TURN URI is usable only if it names the turn/turns scheme and a host.
+ * Presence of a non-empty string is not enough: browsers discard malformed ICE
+ * server entries silently, which would leave the platform reporting relay
+ * coverage it does not have.
+ */
+function isUsableTurnUrl(value: string): boolean {
+  return /^turns?:[^\s:]+(:\d{1,5})?(\?transport=(udp|tcp))?$/i.test(value.trim());
+}
+
 const insecureJwtSecrets = new Set([
   "change-me",
   "changeme",
@@ -126,6 +136,18 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ["TURN_URL"],
         message: "Production WebRTC voice requires TURN_URL, TURN_USERNAME, and TURN_CREDENTIAL.",
+      });
+    }
+  })
+  .superRefine((value, context) => {
+    // A TURN URL that is merely non-empty is not usable. Reject anything that is
+    // not a turn:/turns: URI so the platform cannot report TURN as configured
+    // while handing browsers an ICE server they will silently ignore.
+    if (value.TURN_URL.trim() && !isUsableTurnUrl(value.TURN_URL)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["TURN_URL"],
+        message: "TURN_URL must be a turn: or turns: URI, for example turn:relay.example.org:3478.",
       });
     }
   });

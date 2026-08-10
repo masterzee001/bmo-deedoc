@@ -1,0 +1,53 @@
+# Local verification overlay for the production topology.
+#
+# This is NOT a deployment configuration. It exists so the full stack can be
+# brought up on a workstation to prove the services actually start, pass their
+# health checks, and talk to each other.
+#
+#   docker compose -f docker-compose.prod.yml -f deploy/docker-compose.verify.yml \
+#     --env-file .env.verify up -d
+#
+# Differences from production, all of them deliberate:
+#   - Caddy serves plain HTTP on a local port; there is no public DNS name to
+#     obtain a certificate for.
+#   - Coturn uses bridge networking with an explicit narrow relay range, because
+#     host networking is not available on Docker Desktop.
+#   - Storage points at nothing real. Evidence upload is expected to fail here;
+#     that path is covered by the integration suite against the memory driver.
+
+services:
+  caddy:
+    ports: !override
+      - "8080:80"
+    environment:
+      SITE_ADDRESS: ":80"
+      TLS_CONTACT_EMAIL: "verify@localhost"
+
+  api:
+    # The production compose pins env_file to .env.production; verification runs
+    # against its own file, so it must be replaced rather than merged.
+    env_file: !override [.env.verify]
+    ports:
+      - "4000:4000"
+
+  worker:
+    env_file: !override [.env.verify]
+    ports:
+      - "4100:4100"
+
+  web:
+    ports:
+      - "3000:3000"
+
+  coturn:
+    network_mode: !reset null
+    networks: [backplane]
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      # A deliberately tiny relay range: enough to prove allocation works
+      # without publishing thousands of ports on a workstation.
+      - "49160-49165:49160-49165/udp"
+    environment:
+      TURN_MIN_PORT: 49160
+      TURN_MAX_PORT: 49165

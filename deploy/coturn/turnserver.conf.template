@@ -1,0 +1,49 @@
+# Coturn configuration template.
+#
+# Placeholders are substituted at container start by entrypoint.sh. No
+# credential is committed: TURN_USERNAME and TURN_CREDENTIAL come from the
+# deployment environment.
+
+listening-port=__TURN_PORT__
+tls-listening-port=__TURN_TLS_PORT__
+
+# The address clients are told to send relayed media to. On a VPS behind a
+# provider NAT this must be the public address, not the interface address, or
+# every relayed candidate will be unreachable.
+external-ip=__TURN_EXTERNAL_IP__
+
+realm=__TURN_REALM__
+server-name=__TURN_REALM__
+
+# Long-term credentials. Anonymous relay is never enabled: an open TURN server
+# is abused within hours of being reachable.
+lt-cred-mech
+user=__TURN_USERNAME__:__TURN_CREDENTIAL__
+
+# Relay port range. Must match the UDP range opened on the VPS firewall.
+min-port=__TURN_MIN_PORT__
+max-port=__TURN_MAX_PORT__
+
+fingerprint
+no-multicast-peers
+
+# Deny relaying to loopback and link-local ranges so TURN cannot be used to
+# reach services on the host or inside the private network.
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=::1
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+# CLI administration is disabled; configuration changes ship as a redeploy.
+no-cli
+
+# Quotas keep a single client from exhausting relay capacity on a small VPS.
+user-quota=12
+total-quota=1200
+
+# Verbose logging is deliberately off: TURN logs would otherwise record who
+# called whom at high volume. Errors still surface on stdout.
+log-file=stdout
+no-stdout-log=false
+simple-log

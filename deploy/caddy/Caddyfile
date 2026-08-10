@@ -1,0 +1,83 @@
+# Reverse proxy for the Ogun Election Operations platform.
+#
+# Caddy is preferred over Nginx here because it obtains and renews TLS
+# automatically, which removes a whole class of manual certificate work from a
+# single-VPS deployment. It also proxies WebSocket upgrades without extra
+# directives.
+#
+# HTTP is redirected to HTTPS automatically by Caddy whenever a site address is
+# a real hostname; no explicit redirect block is required.
+
+{
+	email {$TLS_CONTACT_EMAIL}
+	# Admin API is bound to localhost inside the container and used only by the
+	# container healthcheck.
+	admin 127.0.0.1:2019
+	servers {
+		# Caddy terminates TLS and is the only hop in front of the API, which
+		# runs with TRUST_PROXY_HOPS=1.
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Socket.IO must be matched before the API prefix. The handshake begins as
+	# HTTP polling and upgrades to WebSocket; Caddy proxies both, and the long
+	# transport timeout keeps idle field connections from being cut.
+	@socketio path /socket.io/*
+	handle @socketio {
+		reverse_proxy api:4000 {
+			transport http {
+				read_timeout 24h
+				write_timeout 24h
+			}
+		}
+	}
+
+	# The browser bundle builds absolute URLs from NEXT_PUBLIC_API_BASE_URL. That
+	# is set to https://<host>/api, so the prefix is stripped before the request
+	# reaches Express, whose routes are mounted at the root.
+	handle_path /api/* {
+		reverse_proxy api:4000 {
+			# Evidence originals are posted as base64 JSON and can be large, so
+			# the response/read window must accommodate a slow field upload.
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	# Orchestration probe that does not depend on the web container.
+	handle /healthz {
+		reverse_proxy api:4000 {
+			rewrite /health
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# Body ceiling sits above the API's own API_JSON_BODY_LIMIT so the
+	# application returns its structured 413 rather than the proxy cutting the
+	# connection mid-upload.
+	request_body {
+		max_size {$MAX_REQUEST_BODY:12MB}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
