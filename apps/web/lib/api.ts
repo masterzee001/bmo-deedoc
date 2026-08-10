@@ -28,6 +28,12 @@ import type {
   CoverageInsights,
   ElectionDayReportAssetItem,
   ElectionDayReportItem,
+  ElectionDayConversationItem,
+  ElectionDayMessageItem,
+  ElectionDayOperationalAlertItem,
+  ElectionDaySituationRoomStatus,
+  ElectionDayTimelineItem,
+  ElectionDayWebrtcConfig,
   PoliticalPartyItem,
   PoliticalPartyPublicProfile,
   PollListItem,
@@ -46,6 +52,7 @@ import type {
   VoterEngagementTaskItem,
   VoterUserItem,
   WardItem,
+  RealtimePresenceEntry,
 } from "@pics-nigeria/shared";
 
 function normalizeBaseUrl(value: string): string {
@@ -1951,6 +1958,170 @@ export async function fetchCandidateMapSummary(token: string): Promise<AdminMapS
 
   const payload = await readJson<{ mapSummary: AdminMapSummary }>(response);
   return payload.mapSummary;
+}
+
+export async function fetchElectionDaySituationRoomStatus(token: string, reportDate?: string): Promise<ElectionDaySituationRoomStatus> {
+  const query = reportDate ? `?reportDate=${encodeURIComponent(reportDate)}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/situation-room/status${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ status: ElectionDaySituationRoomStatus }>(response);
+  return payload.status;
+}
+
+export async function reconcileElectionDayAlerts(
+  token: string,
+  body?: { reportDate?: string },
+): Promise<{ message: string; alerts: ElectionDayOperationalAlertItem[] }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts/reconcile`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body || {}),
+  });
+  return readJson<{ message: string; alerts: ElectionDayOperationalAlertItem[] }>(response);
+}
+
+export async function fetchElectionDayAlerts(
+  token: string,
+  query?: { status?: "OPEN" | "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED"; type?: string; reportDate?: string },
+): Promise<ElectionDayOperationalAlertItem[]> {
+  const params = new URLSearchParams();
+  if (query?.status) {
+    params.set("status", query.status);
+  }
+  if (query?.type) {
+    params.set("type", query.type);
+  }
+  if (query?.reportDate) {
+    params.set("reportDate", query.reportDate);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ alerts: ElectionDayOperationalAlertItem[] }>(response);
+  return payload.alerts;
+}
+
+export async function updateElectionDayAlert(
+  token: string,
+  alertId: string,
+  body: { status: "ACKNOWLEDGED" | "ESCALATED" | "RESOLVED"; note?: string },
+): Promise<{ message: string; alert: ElectionDayOperationalAlertItem }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/alerts/${encodeURIComponent(alertId)}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; alert: ElectionDayOperationalAlertItem }>(response);
+}
+
+export async function fetchElectionDayTimeline(token: string, query?: { reportDate?: string; limit?: number }): Promise<ElectionDayTimelineItem[]> {
+  const params = new URLSearchParams();
+  if (query?.reportDate) {
+    params.set("reportDate", query.reportDate);
+  }
+  if (query?.limit) {
+    params.set("limit", String(query.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/timeline${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ timeline: ElectionDayTimelineItem[] }>(response);
+  return payload.timeline;
+}
+
+export async function fetchElectionDayConversations(token: string): Promise<ElectionDayConversationItem[]> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ conversations: ElectionDayConversationItem[] }>(response);
+  return payload.conversations;
+}
+
+export async function createElectionDayConversation(
+  token: string,
+  body: {
+    type: "DIRECT" | "GROUP" | "TERRITORY" | "ELECTION_OPERATION";
+    title?: string;
+    recipientUserId?: string;
+    memberUserIds?: string[];
+    territory?: {
+      stateId?: string;
+      senatorialDistrictId?: string | null;
+      federalConstituencyId?: string | null;
+      stateConstituencyId?: string | null;
+      wardId?: string | null;
+      pollingUnitId?: string | null;
+    };
+  },
+): Promise<{ message: string; conversationId: string }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; conversationId: string }>(response);
+}
+
+export async function fetchElectionDayMessages(token: string, conversationId: string): Promise<ElectionDayMessageItem[]> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ messages: ElectionDayMessageItem[] }>(response);
+  return payload.messages;
+}
+
+export async function createElectionDayMessage(
+  token: string,
+  conversationId: string,
+  body: { body: string; metadata?: Record<string, unknown> },
+): Promise<{ message: string; item: ElectionDayMessageItem }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; item: ElectionDayMessageItem }>(response);
+}
+
+export async function fetchElectionDayPresence(token: string, userIds: string[]): Promise<RealtimePresenceEntry[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const response = await fetch(`${API_BASE_URL}/election-day/presence?userIds=${encodeURIComponent(userIds.join(","))}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ presence: RealtimePresenceEntry[] }>(response);
+  return payload.presence;
+}
+
+export async function fetchElectionDayWebrtcConfig(token: string): Promise<ElectionDayWebrtcConfig> {
+  const response = await fetch(`${API_BASE_URL}/election-day/webrtc/config`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ config: ElectionDayWebrtcConfig }>(response);
+  return payload.config;
 }
 
 export async function fetchNotifications(token: string): Promise<NotificationItem[]> {

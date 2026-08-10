@@ -255,6 +255,40 @@ function registerHandlers(socket: AuthenticatedSocket) {
     acknowledge?.({ ok: true, state });
   });
 
+  socket.on("call.signal", async (payload?: {
+    conversationId?: string;
+    targetUserId?: string;
+    callId?: string;
+    signalType?: "offer" | "answer" | "candidate" | "ringing" | "connected" | "ended" | "declined" | "failed";
+    signal?: unknown;
+  }, acknowledge?: (response: Record<string, unknown>) => void) => {
+    if (!payload?.targetUserId || !payload.signalType) {
+      acknowledge?.({ ok: false, message: "targetUserId and signalType are required." });
+      return;
+    }
+
+    const eventName =
+      payload.signalType === "ringing"
+        ? "call.ringing"
+        : payload.signalType === "connected"
+          ? "call.connected"
+          : payload.signalType === "ended" || payload.signalType === "declined" || payload.signalType === "failed"
+            ? "call.ended"
+            : "call.signal";
+
+    ioServer?.to(userPresenceRoom(payload.targetUserId)).emit(eventName, {
+      callId: payload.callId || `${socket.data.authUser.id}:${payload.targetUserId}:${Date.now()}`,
+      conversationId: payload.conversationId || null,
+      fromUserId: socket.data.authUser.id,
+      targetUserId: payload.targetUserId,
+      signalType: payload.signalType,
+      signal: payload.signal ?? null,
+      occurredAt: new Date().toISOString(),
+      recording: "DISABLED",
+    });
+    acknowledge?.({ ok: true, eventName, recording: "DISABLED" });
+  });
+
   socket.on("disconnect", () => {
     void publishPresence(socket, "OFFLINE", -1);
   });
@@ -325,6 +359,19 @@ export function publishRealtimeEvent(event: ElectionDayRealtimeEnvelope): boolea
 
 export function getRealtimeGatewayStatus(): RealtimeGatewayStatus {
   return gatewayStatus;
+}
+
+export function getPresenceSnapshot(userIds: string[]) {
+  const now = new Date().toISOString();
+  return userIds.map((userId) => {
+    const entry = localPresence.get(userId);
+    return {
+      userId,
+      state: entry?.state || "OFFLINE",
+      lastSeenAt: entry?.lastSeenAt || now,
+      socketCount: entry?.socketCount || 0,
+    };
+  });
 }
 
 export async function closeRealtimeGateway() {

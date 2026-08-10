@@ -290,6 +290,75 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       assert.ok(broadcasts.some((broadcast) => broadcast.title === "Missing reports"));
     },
   },
+  {
+    name: "alert reconciliation creates durable alert lifecycle events",
+    run: async () => {
+      const stateToken = await login(stateOfficerEmail);
+      const reconciled = await apiRequest("/election-day/alerts/reconcile", {
+        token: stateToken,
+        method: "POST",
+        body: { reportDate: today },
+      });
+      assert.equal(reconciled.status, 201, JSON.stringify(reconciled.payload));
+
+      const alerts = await apiRequest(`/election-day/alerts?reportDate=${today}`, { token: stateToken });
+      assert.equal(alerts.status, 200, JSON.stringify(alerts.payload));
+      const visibleAlerts = alerts.payload.alerts as Array<{ id: string; type: string; status: string }>;
+      const noCheckIn = visibleAlerts.find((alert) => alert.type === "NO_CHECK_IN");
+      assert.ok(noCheckIn);
+
+      const updated = await apiRequest(`/election-day/alerts/${noCheckIn.id}`, {
+        token: stateToken,
+        method: "PATCH",
+        body: { status: "ACKNOWLEDGED", note: "Calling coordinator now." },
+      });
+      assert.equal(updated.status, 200, JSON.stringify(updated.payload));
+      assert.equal((updated.payload.alert as { status: string }).status, "ACKNOWLEDGED");
+
+      const outboxCount = await prisma.realtimeEventOutbox.count({
+        where: { eventType: { in: ["election.alert.created", "election.alert.updated"] } },
+      });
+      assert.ok(outboxCount >= 2);
+    },
+  },
+  {
+    name: "direct Election Operations messaging is permission scoped and durable",
+    run: async () => {
+      const stateToken = await login(stateOfficerEmail);
+      const puc = await prisma.user.findUniqueOrThrow({ where: { email: pucEmail }, select: { id: true } });
+      const created = await apiRequest("/election-day/conversations", {
+        token: stateToken,
+        method: "POST",
+        body: { type: "DIRECT", recipientUserId: puc.id, title: "PU check-in desk" },
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.payload));
+      const conversationId = created.payload.conversationId as string;
+
+      const sent = await apiRequest(`/election-day/conversations/${conversationId}/messages`, {
+        token: stateToken,
+        method: "POST",
+        body: { body: "Confirm PU status and report ETA." },
+      });
+      assert.equal(sent.status, 201, JSON.stringify(sent.payload));
+
+      const pucToken = await login(pucEmail);
+      const conversations = await apiRequest("/election-day/conversations", { token: pucToken });
+      assert.equal(conversations.status, 200, JSON.stringify(conversations.payload));
+      assert.ok((conversations.payload.conversations as Array<{ id: string }>).some((item) => item.id === conversationId));
+
+      const messages = await apiRequest(`/election-day/conversations/${conversationId}/messages`, { token: pucToken });
+      assert.equal(messages.status, 200, JSON.stringify(messages.payload));
+      assert.equal((messages.payload.messages as Array<{ body: string }>)[0].body, "Confirm PU status and report ETA.");
+
+      const memberToken = await login(memberEmail);
+      const denied = await apiRequest(`/election-day/conversations/${conversationId}/messages`, {
+        token: memberToken,
+        method: "POST",
+        body: { body: "Unauthorized message" },
+      });
+      assert.equal(denied.status, 403);
+    },
+  },
 ];
 
 async function setup() {
@@ -307,6 +376,12 @@ async function setup() {
 async function teardown() {
   await prisma.auditLog.deleteMany({ where: { actorUser: { email: { startsWith: "election-day-test-" } } } });
   await prisma.notification.deleteMany({ where: { user: { email: { startsWith: "election-day-test-" } } } });
+  await prisma.messageReceipt.deleteMany({ where: { user: { email: { startsWith: "election-day-test-" } } } });
+  await prisma.message.deleteMany({ where: { senderUser: { email: { startsWith: "election-day-test-" } } } });
+  await prisma.conversationMember.deleteMany({ where: { user: { email: { startsWith: "election-day-test-" } } } });
+  await prisma.conversation.deleteMany({ where: { createdByUser: { email: { startsWith: "election-day-test-" } } } });
+  await prisma.operationalAlert.deleteMany({ where: { pollingUnitId: { startsWith: "election-day-test-" } } });
+  await prisma.realtimeEventOutbox.deleteMany({ where: { OR: [{ idempotencyKey: { startsWith: "alert:" } }, { idempotencyKey: { startsWith: "alert-updated:" } }, { idempotencyKey: { startsWith: "message:" } }] } });
   await prisma.broadcastMessage.deleteMany({ where: { createdByUser: { email: { startsWith: "election-day-test-" } } } });
   await prisma.agentActivity.deleteMany({ where: { agentUser: { email: { startsWith: "election-day-test-" } } } });
   await prisma.incident.deleteMany({ where: { reportedByUser: { email: { startsWith: "election-day-test-" } } } });
