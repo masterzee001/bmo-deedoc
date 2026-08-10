@@ -1,14 +1,35 @@
 /**
- * Production migration rehearsal.
+ * Schema additivity rehearsal for the production migration stream.
  *
- * Answers the question a deploy actually depends on: will this migration stream
- * apply cleanly to a database that already holds production-shaped data, and can
- * the previous application image keep serving afterwards?
- *
- * It rehearses against a disposable PostgreSQL container, never a real database.
+ * Rehearses against a disposable PostgreSQL container, never a real database.
  *
  *   node scripts/rehearse-production-migration.mjs
  *   node scripts/rehearse-production-migration.mjs --from-dump backup.dump
+ *
+ * WHAT THIS PROVES
+ *   - the pending migrations actually applied to a populated database, verified
+ *     by counting newly applied rows in _prisma_migrations rather than trusting
+ *     an exit code that is also 0 when nothing was pending
+ *   - no existing application table was removed
+ *   - no existing column was removed
+ *   - no existing column changed data type
+ *   - no existing column became more restrictive (nullable -> NOT NULL)
+ *   - no existing column lost a default
+ *   - no existing column was narrowed in length, precision or scale
+ *   - no enum label was removed
+ *   - no UNIQUE / CHECK / FOREIGN KEY constraint or unique index was added over
+ *     existing data
+ *   - re-running `migrate deploy` is idempotent, compared in both directions
+ *
+ * WHAT THIS DOES NOT PROVE
+ *   It does not prove the previous application image can continue serving after
+ *   the migration. That depends on runtime behaviour — queries, Prisma client
+ *   expectations, enum handling, constraint interactions — which no schema
+ *   comparison can establish. Additivity is a necessary condition for rollback,
+ *   not a sufficient one.
+ *
+ *   Previous-image runtime compatibility is verified separately during VPS
+ *   staging rollback testing. See docs/DEPLOYMENT_VPS.md.
  *
  * Phases:
  *   1. Baseline   — apply every migration except the new ones, so the starting
@@ -16,12 +37,11 @@
  *   2. Seed       — load a dump if supplied, otherwise generate representative
  *                   rows so the forward migration runs against non-empty tables.
  *   3. Forward    — apply the pending migrations and time them.
- *   4. Additivity — confirm no existing column or table was dropped or retyped,
- *                   which is what makes rolling the application back safe.
+ *   4. Additivity — compare the column contract before and after.
  *   5. Rerun      — apply again to prove the stream is idempotent.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { readdirSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import os from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -43,10 +63,18 @@ const composeFile = path.join(repoRoot, "docker-compose.dev.yml");
 
 const env = { ...process.env, NODE_ENV: "test", DATABASE_URL: databaseUrl, OGUN_POSTGRES_PORT: port };
 
+/**
+ * Runs a subprocess and throws on any non-zero status.
+ *
+ * `tolerateFailure` exists only for teardown, where a failure is reported but
+ * must not decide the verdict. No validation step may use it: swallowing a
+ * migration or restore error is precisely how a broken rehearsal reports PASS.
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: options.cwd || repoRoot, env, stdio: options.quiet ? "pipe" : "inherit", input: options.input });
-  if (result.status !== 0 && !options.allowFailure) {
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+  if (result.status !== 0 && !options.tolerateFailure) {
+    const detail = options.quiet ? String(result.stderr || "").trim() : "";
+    throw new Error(`${command} ${args.join(" ")} exited ${result.status ?? 1}${detail ? `: ${detail}` : ""}`);
   }
   return result;
 }
@@ -54,7 +82,7 @@ function run(command, args, options = {}) {
 function psql(sql) {
   const result = spawnSync(
     dockerCommand,
-    ["compose", "-p", project, "-f", composeFile, "exec", "-T", "postgres", "psql", "-U", "ogun_test", "-d", "ogun_phase0_test", "-t", "-A", "-c", sql],
+    ["compose", "-p", project, "-f", composeFile, "exec", "-T", "postgres", "psql", "-U", "ogun_test", "-d", "ogun_phase0_test", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql],
     { cwd: repoRoot, env, encoding: "utf8" },
   );
   if (result.status !== 0) {
@@ -63,13 +91,174 @@ function psql(sql) {
   return result.stdout.trim();
 }
 
-/** Column fingerprint of every application table, used to prove additivity. */
-function columnFingerprint() {
+/**
+ * Column contract of every application table.
+ *
+ * Captures type, nullability and default, because a migration can break a
+ * previous image without dropping anything: tightening a nullable column to
+ * NOT NULL, or removing a default, makes inserts from older code fail even
+ * though every column still exists.
+ */
+function columnContract() {
   const rows = psql(
-    "SELECT table_name||'.'||column_name||':'||data_type FROM information_schema.columns " +
+    "SELECT table_name||'.'||column_name" +
+      "||E'	'||'type='||data_type" +
+      "||E'	'||'udt='||udt_name" +
+      "||E'	'||'nullable='||is_nullable" +
+      "||E'	'||'default='||coalesce(column_default,'<none>')" +
+      // Length and precision matter: narrowing varchar(255) to varchar(50), or
+      // numeric(12,2) to numeric(6,2), rejects or truncates existing values
+      // without changing data_type or udt_name.
+      "||E'	'||'maxlen='||coalesce(character_maximum_length::text,'-')" +
+      "||E'	'||'precision='||coalesce(numeric_precision::text,'-')" +
+      "||E'	'||'scale='||coalesce(numeric_scale::text,'-') " +
+      "FROM information_schema.columns " +
       "WHERE table_schema='public' AND table_name NOT LIKE '\\_prisma%' ORDER BY 1;",
   );
-  return new Set(rows.split("\n").filter(Boolean));
+
+  const contract = new Map();
+  for (const line of rows.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+    const [identity, ...attributes] = line.split("	");
+    const parsed = Object.fromEntries(attributes.map((attribute) => attribute.split("=")).map(([key, ...rest]) => [key, rest.join("=")]));
+    contract.set(identity, parsed);
+  }
+  return contract;
+}
+
+/** Tables present, so a dropped table is reported distinctly from dropped columns. */
+function tableSet() {
+  const rows = psql(
+    "SELECT table_name FROM information_schema.tables WHERE table_schema='public' " +
+      "AND table_type='BASE TABLE' AND table_name NOT LIKE '\\_prisma%' ORDER BY 1;",
+  );
+  return new Set(rows.split("\n").map((entry) => entry.trim()).filter(Boolean));
+}
+
+/**
+ * Constraints that restrict what an existing writer may store. A UNIQUE or
+ * CHECK constraint added over existing data changes no column attribute, so the
+ * column contract alone is blind to it — yet it can reject writes a previous
+ * image performs happily.
+ */
+function constraintSet() {
+  const rows = psql(
+    "SELECT c.conrelid::regclass::text||' '||c.conname||' '||pg_get_constraintdef(c.oid) " +
+      "FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace " +
+      "WHERE n.nspname='public' AND c.contype IN ('p','f','u','c') " +
+      "AND c.conrelid::regclass::text NOT LIKE '%_prisma%' ORDER BY 1;",
+  );
+  return new Set(rows.split("\n").map((entry) => entry.trim()).filter(Boolean));
+}
+
+/** Unique indexes, which restrict writes exactly as a unique constraint does. */
+function uniqueIndexSet() {
+  const rows = psql(
+    "SELECT tablename||' '||indexname||' '||indexdef FROM pg_indexes " +
+      "WHERE schemaname='public' AND indexdef LIKE 'CREATE UNIQUE%' " +
+      "AND tablename NOT LIKE '%_prisma%' ORDER BY 1;",
+  );
+  return new Set(rows.split("\n").map((entry) => entry.trim()).filter(Boolean));
+}
+
+/**
+ * Enum labels per type. Removing a label breaks a previous image that still
+ * writes it, and information_schema hides this completely: the column keeps
+ * data_type='USER-DEFINED' and the same udt_name.
+ */
+function enumLabels() {
+  const rows = psql(
+    "SELECT t.typname||'.'||e.enumlabel FROM pg_enum e " +
+      "JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace " +
+      "WHERE n.nspname='public' ORDER BY 1;",
+  );
+  return new Set(rows.split("\n").map((entry) => entry.trim()).filter(Boolean));
+}
+
+function narrowed(previousValue, currentValue) {
+  if (previousValue === "-" || currentValue === "-") {
+    return false;
+  }
+  const previousNumber = Number(previousValue);
+  const currentNumber = Number(currentValue);
+  return Number.isFinite(previousNumber) && Number.isFinite(currentNumber) && currentNumber < previousNumber;
+}
+
+/** Full schema snapshot used for the additivity comparison. */
+function schemaSnapshot() {
+  return {
+    columns: columnContract(),
+    tables: tableSet(),
+    constraints: constraintSet(),
+    uniqueIndexes: uniqueIndexSet(),
+    enumLabels: enumLabels(),
+  };
+}
+
+/** Migrations Prisma records as applied, used to detect a no-op forward step. */
+function appliedMigrationCount() {
+  return Number(psql('SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL;'));
+}
+
+/**
+ * Every backward-incompatible schema change between two snapshots.
+ *
+ * Additions are ignored: a new column, a relaxed constraint, or a new enum
+ * label cannot break code that predates it. What is reported is anything that
+ * removes or restricts what an existing writer could previously do.
+ */
+function backwardIncompatibleChanges(before, after) {
+  const problems = [];
+
+  for (const [identity, previous] of before.columns) {
+    const current = after.columns.get(identity);
+    if (!current) {
+      problems.push(`column removed: ${identity}`);
+      continue;
+    }
+    if (current.type !== previous.type || current.udt !== previous.udt) {
+      problems.push(`column type changed: ${identity} ${previous.type}/${previous.udt} -> ${current.type}/${current.udt}`);
+    }
+    if (previous.nullable === "YES" && current.nullable === "NO") {
+      problems.push(`column tightened to NOT NULL: ${identity} (inserts from a previous image would fail)`);
+    }
+    if (previous.default !== "<none>" && current.default === "<none>") {
+      problems.push(`column default removed: ${identity} (was ${previous.default})`);
+    }
+    if (narrowed(previous.maxlen, current.maxlen)) {
+      problems.push(`column length narrowed: ${identity} ${previous.maxlen} -> ${current.maxlen}`);
+    }
+    if (narrowed(previous.precision, current.precision) || narrowed(previous.scale, current.scale)) {
+      problems.push(
+        `column numeric range narrowed: ${identity} ${previous.precision},${previous.scale} -> ${current.precision},${current.scale}`,
+      );
+    }
+  }
+
+  for (const table of before.tables) {
+    if (!after.tables.has(table)) {
+      problems.push(`table removed: ${table}`);
+    }
+  }
+
+  for (const label of before.enumLabels) {
+    if (!after.enumLabels.has(label)) {
+      problems.push(`enum label removed: ${label} (a previous image may still write it)`);
+    }
+  }
+
+  // Newly restrictive constraints are reported; newly relaxed ones are not.
+  for (const constraint of after.constraints) {
+    if (!before.constraints.has(constraint) && /UNIQUE|CHECK|FOREIGN KEY/.test(constraint)) {
+      problems.push(`constraint added over existing data: ${constraint}`);
+    }
+  }
+  for (const index of after.uniqueIndexes) {
+    if (!before.uniqueIndexes.has(index)) {
+      problems.push(`unique index added over existing data: ${index}`);
+    }
+  }
+
+  return problems;
 }
 
 const allMigrations = readdirSync(migrationRoot, { withFileTypes: true })
@@ -77,21 +266,55 @@ const allMigrations = readdirSync(migrationRoot, { withFileTypes: true })
   .map((entry) => entry.name)
   .sort();
 
-// "Pending" means migrations not yet present on origin/main. Falls back to the
-// newest one so the rehearsal still exercises a forward step on a clean branch.
-const mergedBase = spawnSync("git", ["ls-tree", "--name-only", "origin/main", "packages/database/prisma/ogun-migrations/"], {
+// "Pending" means migrations not yet present on the shipped base ref.
+//
+// A failure to read that ref must abort. An unreadable ref produces empty
+// stdout, which is indistinguishable from "the base has no migrations" — and
+// that would make every migration "pending", leave the baseline empty, and turn
+// the whole additivity comparison into a vacuous pass. A shallow or
+// single-branch checkout (the default for many CI providers) has no
+// refs/remotes/origin/main, so this is a realistic condition, not a theoretical
+// one.
+const baseRef = process.env.REHEARSAL_BASE_REF || "origin/main";
+const mergedBase = spawnSync("git", ["ls-tree", "--name-only", baseRef, "packages/database/prisma/ogun-migrations/"], {
   cwd: repoRoot,
   encoding: "utf8",
 });
+if (mergedBase.error || mergedBase.status !== 0) {
+  const detail = mergedBase.error
+    ? mergedBase.error.message
+    : String(mergedBase.stderr || "").trim() || `git exited ${mergedBase.status}`;
+  console.error(
+    `FAIL could not read the shipped migration set from ${baseRef}: ${detail}\n` +
+      "Refusing to rehearse against an unknown baseline. Run `git fetch origin main`, " +
+      "or set REHEARSAL_BASE_REF to a ref that exists locally.",
+  );
+  process.exit(1);
+}
 const baseNames = new Set(
   (mergedBase.stdout || "")
     .split("\n")
     .map((line) => line.trim().replace(/\/$/, "").split("/").pop())
     .filter(Boolean),
 );
+if (baseNames.size === 0) {
+  console.error(
+    `FAIL ${baseRef} reports no migrations under packages/database/prisma/ogun-migrations/. ` +
+      "An empty baseline would make the additivity comparison vacuous.",
+  );
+  process.exit(1);
+}
 const pending = allMigrations.filter((name) => !baseNames.has(name));
 const rehearsed = pending.length > 0 ? pending : allMigrations.slice(-1);
 const baseline = allMigrations.filter((name) => !rehearsed.includes(name));
+
+if (baseline.length === 0) {
+  console.error(
+    "FAIL the rehearsal baseline is empty, so there is no prior schema to compare against. " +
+      "Every migration was classified as pending; check the base ref.",
+  );
+  process.exit(1);
+}
 
 console.log(`rehearsal_migrations_total=${allMigrations.length}`);
 console.log(`rehearsal_baseline=${baseline.length}`);
@@ -121,14 +344,12 @@ try {
   }
 
   run(process.execPath, [prismaCli, "migrate", "deploy", "--config", "prisma.config.ts"], { cwd: databaseWorkspace });
-  const before = columnFingerprint();
-  console.log(`rehearsal_baseline_columns=${before.size}`);
 
   // ---- Phase 2: representative data ---------------------------------------
   if (fromDump) {
     console.log(`rehearsal_seed=dump:${fromDump}`);
-    run(dockerCommand, ["compose", "-p", project, "-f", composeFile, "exec", "-T", "postgres", "pg_restore", "-U", "ogun_test", "-d", "ogun_phase0_test", "--clean", "--if-exists"], {
-      input: require("node:fs").readFileSync(fromDump),
+    run(dockerCommand, ["compose", "-p", project, "-f", composeFile, "exec", "-T", "postgres", "pg_restore", "-U", "ogun_test", "-d", "ogun_phase0_test", "--clean", "--if-exists", "--exit-on-error", "--no-owner", "--no-privileges"], {
+      input: readFileSync(fromDump),
     });
   } else {
     // A migration that applies to empty tables proves very little: rewrites,
@@ -142,6 +363,23 @@ try {
     console.log(`rehearsal_seed=synthetic rows=${psql('SELECT count(*) FROM "User";')}`);
   }
 
+  // The baseline snapshot is taken AFTER seeding, not before. With --from-dump,
+  // pg_restore --clean replaces the schema wholesale, so a snapshot taken
+  // earlier would describe a schema that no longer exists and the comparison
+  // would be against the wrong starting point.
+  const before = schemaSnapshot();
+  const appliedBefore = appliedMigrationCount();
+  console.log(`rehearsal_baseline_columns=${before.columns.size}`);
+  console.log(`rehearsal_baseline_tables=${before.tables.size}`);
+  console.log(`rehearsal_baseline_constraints=${before.constraints.size}`);
+  console.log(`rehearsal_baseline_enum_labels=${before.enumLabels.size}`);
+  console.log(`rehearsal_baseline_applied_migrations=${appliedBefore}`);
+
+  // A degenerate baseline would make every comparison below vacuously true.
+  if (before.columns.size === 0 || before.tables.size === 0) {
+    throw new Error("Baseline schema snapshot is empty; the additivity comparison would prove nothing.");
+  }
+
   // ---- Phase 3: forward ----------------------------------------------------
   for (const name of movedAside) {
     renameSync(path.join(holdingArea, name), path.join(migrationRoot, name));
@@ -152,42 +390,104 @@ try {
   const elapsedMs = Date.now() - startedAt;
   console.log(`rehearsal_forward_ms=${elapsedMs}`);
 
-  // ---- Phase 4: additivity -------------------------------------------------
-  const after = columnFingerprint();
-  const removed = [...before].filter((column) => !after.has(column));
-  if (removed.length > 0) {
-    console.error("FAIL migration is not additive; the previous application image could not run against this schema:");
-    for (const column of removed) {
-      console.error(`  removed or retyped: ${column}`);
+  // `migrate deploy` exits 0 while printing "No pending migrations to apply",
+  // so a forward step that did nothing must be detected explicitly. Without
+  // this, every check below would pass while nothing was ever rehearsed.
+  const appliedAfter = appliedMigrationCount();
+  const newlyApplied = appliedAfter - appliedBefore;
+  console.log(`rehearsal_forward_applied=${newlyApplied}`);
+  if (newlyApplied !== rehearsed.length) {
+    throw new Error(
+      `Forward step applied ${newlyApplied} migrations but ${rehearsed.length} were pending. ` +
+        "Refusing to report a rehearsal that did not exercise the migration under test.",
+    );
+  }
+
+  // ---- Phase 4: schema additivity ------------------------------------------
+  const after = schemaSnapshot();
+  const incompatible = backwardIncompatibleChanges(before, after);
+
+  if (incompatible.length > 0) {
+    console.error("FAIL migration is not schema-additive:");
+    for (const problem of incompatible) {
+      console.error(`  ${problem}`);
     }
     process.exitCode = 1;
   } else {
-    console.log(`rehearsal_additive=ok added_columns=${after.size - before.size}`);
+    console.log("rehearsal_tables_removed=0");
+    console.log("rehearsal_columns_removed=0");
+    console.log("rehearsal_columns_retyped=0");
+    console.log("rehearsal_columns_tightened=0");
+    console.log("rehearsal_columns_narrowed=0");
+    console.log("rehearsal_enum_labels_removed=0");
+    console.log("rehearsal_restrictive_constraints_added=0");
+    console.log(
+      `rehearsal_additive=ok added_columns=${after.columns.size - before.columns.size} ` +
+        `added_tables=${after.tables.size - before.tables.size}`,
+    );
   }
 
   // ---- Phase 5: rerun ------------------------------------------------------
   run(process.execPath, [prismaCli, "migrate", "deploy", "--config", "prisma.config.ts"], { cwd: databaseWorkspace });
-  const afterRerun = columnFingerprint();
-  if (afterRerun.size !== after.size) {
+  const afterRerun = schemaSnapshot();
+  // Compared in both directions: a one-way scan would miss a rerun that ADDED
+  // something, which is equally a violation of idempotency.
+  const rerunDrift = [
+    ...backwardIncompatibleChanges(after, afterRerun),
+    ...backwardIncompatibleChanges(afterRerun, after),
+  ];
+  if (afterRerun.columns.size !== after.columns.size || afterRerun.tables.size !== after.tables.size || rerunDrift.length > 0) {
     console.error("FAIL re-running the migration stream changed the schema; it is not idempotent");
+    for (const problem of rerunDrift) {
+      console.error(`  ${problem}`);
+    }
     process.exitCode = 1;
   } else {
     console.log("rehearsal_idempotent=ok");
   }
 
   if (!process.exitCode) {
-    console.log("migration_rehearsal=ok");
+    console.log("migration_schema_additivity_rehearsal=ok");
+    // Stated explicitly so a green run is never read as a rollback guarantee.
+    console.log("rehearsal_scope=schema-additivity-only");
+    console.log("rehearsal_previous_image_runtime_compatibility=NOT_VERIFIED_HERE (see VPS staging rollback test)");
   }
+} catch (error) {
+  // Success markers are only printed on the happy path above, so a throw here
+  // can never be mistaken for a pass.
+  console.error(`FAIL ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 } finally {
-  // The repository must never be left missing a migration directory.
+  // The repository must never be left missing a migration directory, even if
+  // the rehearsal threw partway through.
+  const restoreFailures = [];
   for (const name of movedAside) {
     const held = path.join(holdingArea, name);
     if (existsSync(held)) {
-      renameSync(held, path.join(migrationRoot, name));
+      try {
+        renameSync(held, path.join(migrationRoot, name));
+      } catch (error) {
+        restoreFailures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
-  rmSync(holdingArea, { recursive: true, force: true });
+  if (restoreFailures.length > 0) {
+    console.error(`FAIL could not restore migration directories: ${restoreFailures.join("; ")}`);
+    console.error(`They remain in ${holdingArea}; restore them before committing.`);
+    process.exitCode = process.exitCode || 1;
+  } else {
+    rmSync(holdingArea, { recursive: true, force: true });
+  }
+
   if (started) {
-    run(dockerCommand, ["compose", "-p", project, "-f", composeFile, "down", "--volumes", "--remove-orphans"], { allowFailure: true, quiet: true });
+    // Teardown failure is reported but must never clear a verdict already set.
+    const teardown = run(dockerCommand, ["compose", "-p", project, "-f", composeFile, "down", "--volumes", "--remove-orphans"], {
+      tolerateFailure: true,
+      quiet: true,
+    });
+    if (teardown.status !== 0) {
+      console.error("WARN rehearsal teardown failed; inspect the Docker project manually.");
+      process.exitCode = process.exitCode || 1;
+    }
   }
 }

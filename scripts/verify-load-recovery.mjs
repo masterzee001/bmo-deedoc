@@ -26,9 +26,25 @@ const require = createRequire(import.meta.url);
 const prismaCli = require.resolve("prisma/build/index.js");
 const dockerCommand = process.platform === "win32" ? "docker.exe" : "docker";
 
+/**
+ * Reads a positive-integer CLI argument.
+ *
+ * Validated rather than coerced: `--jobs 0` (and `Number("")`/`Number("abc")`)
+ * would otherwise make every invariant below compare 0 against 0 and print the
+ * success marker without exercising anything.
+ */
 function argValue(flag, fallback) {
   const index = process.argv.indexOf(flag);
-  return index >= 0 ? Number(process.argv[index + 1]) : fallback;
+  if (index < 0) {
+    return fallback;
+  }
+  const raw = process.argv[index + 1];
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    console.error(`FAIL ${flag} must be a positive integer (received ${JSON.stringify(raw)}).`);
+    process.exit(1);
+  }
+  return parsed;
 }
 
 const totalJobs = argValue("--jobs", 500);
@@ -39,6 +55,11 @@ const databaseUrl = `postgresql://ogun_test:ogun_test_local_only@127.0.0.1:${por
 const composeFile = path.join(repoRoot, "docker-compose.dev.yml");
 const env = { ...process.env, NODE_ENV: "test", DATABASE_URL: databaseUrl, OGUN_POSTGRES_PORT: port };
 
+/**
+ * Runs a compose subcommand and throws on any non-zero status.
+ *
+ * `tolerateFailure` is scoped to teardown only; no validation step may use it.
+ */
 function compose(args, options = {}) {
   const result = spawnSync(dockerCommand, ["compose", "-p", project, "-f", composeFile, ...args], {
     cwd: repoRoot,
@@ -46,14 +67,14 @@ function compose(args, options = {}) {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0 && !options.allowFailure) {
-    throw new Error(`docker compose ${args.join(" ")} failed: ${result.stderr}`);
+  if (result.status !== 0 && !options.tolerateFailure) {
+    throw new Error(`docker compose ${args.join(" ")} exited ${result.status}: ${(result.stderr || "").trim()}`);
   }
   return result;
 }
 
 function psql(sql) {
-  return compose(["exec", "-T", "postgres", "psql", "-U", "ogun_test", "-d", "ogun_phase0_test", "-t", "-A", "-c", sql]).stdout.trim();
+  return compose(["exec", "-T", "postgres", "psql", "-U", "ogun_test", "-d", "ogun_phase0_test", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]).stdout.trim();
 }
 
 let started = false;
@@ -62,11 +83,14 @@ const failures = [];
 try {
   compose(["up", "-d", "--wait", "postgres"]);
   started = true;
-  spawnSync(process.execPath, [prismaCli, "migrate", "deploy", "--config", "prisma.config.ts"], {
+  const migrate = spawnSync(process.execPath, [prismaCli, "migrate", "deploy", "--config", "prisma.config.ts"], {
     cwd: databaseWorkspace,
     env,
     stdio: "inherit",
   });
+  if (migrate.status !== 0) {
+    throw new Error(`prisma migrate deploy exited ${migrate.status}; the load rehearsal cannot run against an unmigrated database.`);
+  }
 
   const { PrismaClient } = require(path.join(repoRoot, "node_modules", "@prisma/client"));
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
@@ -182,8 +206,18 @@ try {
   } else {
     console.log(`load_recovery_rehearsal=ok jobs=${totalJobs} concurrency=${concurrency}`);
   }
+} catch (error) {
+  // The success marker is only printed on the happy path, so a throw here can
+  // never be mistaken for a pass.
+  console.error(`FAIL ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 } finally {
   if (started) {
-    compose(["down", "--volumes", "--remove-orphans"], { allowFailure: true });
+    // Teardown failure is reported but must never clear a verdict already set.
+    const teardown = compose(["down", "--volumes", "--remove-orphans"], { tolerateFailure: true });
+    if (teardown.status !== 0) {
+      console.error("WARN rehearsal teardown failed; inspect the Docker project manually.");
+      process.exitCode = process.exitCode || 1;
+    }
   }
 }
