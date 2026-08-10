@@ -5,6 +5,7 @@ import {
   PayoutStatus,
   Prisma,
   ReferralStatus,
+  RewardLedgerCategory,
   RewardQualifyingEvent,
   UserRole,
   VoterVerificationDecision,
@@ -17,19 +18,54 @@ import { generateUniqueReferralCode } from "../auth/referral";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import { createAuditLog } from "../lib/audit";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 
 const router = Router();
 
+const commandTerritoryTypeSchema = z.enum([
+  "STATE",
+  "SENATORIAL_DISTRICT",
+  "FEDERAL_CONSTITUENCY",
+  "STATE_CONSTITUENCY",
+  "WARD",
+  "POLLING_UNIT",
+]);
+
 const verificationQueueQuerySchema = z.object({
   status: z.nativeEnum(VoterVerificationStatus).optional(),
   flagged: z.coerce.boolean().optional(),
+  search: z.string().trim().max(120).optional(),
+  territoryType: commandTerritoryTypeSchema.optional(),
+  territoryId: z.string().trim().min(1).optional(),
+  export: z.enum(["csv"]).optional(),
 });
 
 const verificationDecisionSchema = z.object({
   decision: z.enum(["APPROVE", "REJECT", "REQUEST_RESUBMISSION"]),
   note: z.string().trim().max(1000).optional(),
+});
+
+const verificationDocumentSchema = z.object({
+  documentProcessingConsent: z.literal(true),
+  voterDocument: z.object({
+    originalStorageKey: z
+      .string()
+      .trim()
+      .min(20)
+      .max(500)
+      .refine((value) => !/^https?:\/\//i.test(value), "Document storage key must not be a public URL."),
+    previewStorageKey: z
+      .string()
+      .trim()
+      .max(500)
+      .refine((value) => !/^https?:\/\//i.test(value), "Preview storage key must not be a public URL.")
+      .optional(),
+    originalFileName: z.string().trim().min(1).max(255),
+    mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
+    fileSize: z.number().int().min(1).max(8 * 1024 * 1024),
+    sha256: z.string().trim().regex(/^[a-f0-9]{64}$/i),
+  }),
 });
 
 const rewardRuleSchema = z.object({
@@ -84,18 +120,31 @@ const rewardBalanceQuerySchema = z.object({
   userId: z.string().trim().min(1).optional(),
 });
 
-const commandTerritoryTypeSchema = z.enum([
-  "STATE",
-  "SENATORIAL_DISTRICT",
-  "FEDERAL_CONSTITUENCY",
-  "STATE_CONSTITUENCY",
-  "WARD",
-  "POLLING_UNIT",
-]);
+const rewardLedgerQuerySchema = z.object({
+  userId: z.string().trim().min(1).optional(),
+  category: z.nativeEnum(RewardLedgerCategory).optional(),
+});
 
 const scopedQuerySchema = z.object({
   territoryType: commandTerritoryTypeSchema,
   territoryId: z.string().trim().min(1),
+});
+
+const referralManagementQuerySchema = z.object({
+  territoryType: commandTerritoryTypeSchema.optional(),
+  territoryId: z.string().trim().min(1).optional(),
+  status: z.nativeEnum(ReferralStatus).optional(),
+  search: z.string().trim().max(120).optional(),
+  export: z.enum(["csv"]).optional(),
+});
+
+const payoutBatchQuerySchema = z.object({
+  status: z.nativeEnum(PayoutStatus).optional(),
+});
+
+const payoutEligibilityQuerySchema = z.object({
+  cycleId: z.string().trim().min(1).optional(),
+  search: z.string().trim().max(120).optional(),
 });
 
 const strengthMetricSchema = z.object({
@@ -219,6 +268,17 @@ function serializeVerificationCase(verification: {
   };
 }
 
+function csvEscape(value: unknown) {
+  const normalized = value === null || value === undefined ? "" : String(value);
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function sendCsv(response: { setHeader(name: string, value: string): void; send(body: string): void }, fileName: string, rows: unknown[][]) {
+  response.setHeader("Content-Type", "text/csv; charset=utf-8");
+  response.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  response.send(rows.map((row) => row.map(csvEscape).join(",")).join("\n"));
+}
+
 function canUseReferralCode(user: NonNullable<Request["authUser"]>) {
   return user.role === "COORDINATOR" && Boolean(user.coordinatorProfile);
 }
@@ -280,6 +340,28 @@ function buildScopedVoterProfileWhere(territoryType: string, territoryId: string
     return { wardId: territoryId };
   }
   return { pollingUnitId: territoryId };
+}
+
+function buildScopedVerificationWhere(territoryType?: string, territoryId?: string): Prisma.VoterVerificationWhereInput {
+  if (!territoryType || !territoryId) {
+    return {};
+  }
+  return { memberUser: { voterProfile: { is: buildScopedVoterProfileWhere(territoryType, territoryId) } } };
+}
+
+function buildSearchWhere(search?: string): Prisma.VoterVerificationWhereInput {
+  const normalized = search?.trim();
+  if (!normalized) {
+    return {};
+  }
+  return {
+    OR: [
+      { voterIdentifier: { contains: normalized, mode: "insensitive" } },
+      { memberUser: { name: { contains: normalized, mode: "insensitive" } } },
+      { memberUser: { email: { contains: normalized, mode: "insensitive" } } },
+      { memberUser: { phone: { contains: normalized, mode: "insensitive" } } },
+    ],
+  };
 }
 
 function buildScopedCoordinatorWhere(territoryType: string, territoryId: string): Prisma.CoordinatorProfileWhereInput {
@@ -352,6 +434,98 @@ function serializePayoutAssignment(assignment: {
         note: transaction.note,
         createdAt: transaction.createdAt.toISOString(),
       })) || [],
+  };
+}
+
+function serializeRewardLedgerEntry(entry: {
+  id: string;
+  userId: string;
+  points: number;
+  category: string;
+  sourceEventType: string;
+  sourceEventId: string;
+  rewardRuleVersionId: string | null;
+  relatedUserId: string | null;
+  description: string | null;
+  createdAt: Date;
+  relatedUser?: { name: string; email: string } | null;
+  rewardRuleVersion?: { version: number; rewardRule: { name: string } } | null;
+}) {
+  return {
+    id: entry.id,
+    userId: entry.userId,
+    points: entry.points,
+    category: entry.category,
+    sourceEventType: entry.sourceEventType,
+    sourceEventId: entry.sourceEventId,
+    rewardRuleVersionId: entry.rewardRuleVersionId,
+    rewardRuleName: entry.rewardRuleVersion?.rewardRule.name || null,
+    rewardRuleVersion: entry.rewardRuleVersion?.version || null,
+    relatedUserId: entry.relatedUserId,
+    relatedUserName: entry.relatedUser?.name || null,
+    relatedUserEmail: entry.relatedUser?.email || null,
+    description: entry.description,
+    createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+function serializeReferral(referral: {
+  id: string;
+  referredUserId: string;
+  referrerUserId: string;
+  referralCode: string;
+  status: ReferralStatus;
+  registeredAt: Date;
+  qualifiedAt: Date | null;
+  rewardProcessedAt: Date | null;
+  flaggedAt: Date | null;
+  fraudReason: string | null;
+  referredUser: { name: string; email: string; voterProfile: { wardId: string; pollingUnitId: string | null } | null };
+  referrerUser: { name: string; email: string };
+}) {
+  return {
+    id: referral.id,
+    referredUserId: referral.referredUserId,
+    referredName: referral.referredUser.name,
+    referredEmail: referral.referredUser.email,
+    referrerUserId: referral.referrerUserId,
+    referrerName: referral.referrerUser.name,
+    referrerEmail: referral.referrerUser.email,
+    referralCode: referral.referralCode,
+    status: referral.status,
+    wardId: referral.referredUser.voterProfile?.wardId || null,
+    pollingUnitId: referral.referredUser.voterProfile?.pollingUnitId || null,
+    registeredAt: referral.registeredAt.toISOString(),
+    qualifiedAt: referral.qualifiedAt?.toISOString() || null,
+    rewardProcessedAt: referral.rewardProcessedAt?.toISOString() || null,
+    flaggedAt: referral.flaggedAt?.toISOString() || null,
+    fraudReason: referral.fraudReason,
+  };
+}
+
+function serializePayoutBatchWithAssignments(batch: {
+  id: string;
+  payoutCycleId: string;
+  status: PayoutStatus;
+  createdAt: Date;
+  approvedAt: Date | null;
+  payoutCycle?: { name: string; payoutDate: Date } | null;
+  assignments: Parameters<typeof serializePayoutAssignment>[0][];
+}) {
+  return {
+    id: batch.id,
+    payoutCycleId: batch.payoutCycleId,
+    payoutCycleName: batch.payoutCycle?.name || null,
+    payoutDate: batch.payoutCycle?.payoutDate.toISOString() || null,
+    status: batch.status,
+    createdAt: batch.createdAt.toISOString(),
+    approvedAt: batch.approvedAt?.toISOString() || null,
+    assignmentCount: batch.assignments.length,
+    totalPoints: batch.assignments.reduce((sum, assignment) => sum + assignment.points, 0),
+    totalAmount: decimalToString(
+      batch.assignments.reduce((sum, assignment) => sum.add(assignment.amount), new Prisma.Decimal(0)),
+    ),
+    assignments: batch.assignments.map(serializePayoutAssignment),
   };
 }
 
@@ -590,10 +764,154 @@ router.get("/referral-code", requireAuth, async (request, response) => {
   });
 });
 
+router.get("/verifications/me", requireAuth, requireMemberCapability, async (request, response) => {
+  const verification = await prisma.voterVerification.findUnique({
+    where: { memberUserId: request.authUser!.id },
+    include: {
+      memberUser: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          voterProfile: {
+            select: {
+              stateId: true,
+              senatorialDistrictId: true,
+              federalConstituencyId: true,
+              stateConstituencyId: true,
+              lgaId: true,
+              wardId: true,
+              pollingUnitId: true,
+            },
+          },
+        },
+      },
+      documents: { orderBy: { uploadedAt: "desc" } },
+      history: {
+        include: { actorUser: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+
+  return response.json({ verification: verification ? serializeVerificationCase(verification) : null });
+});
+
+router.post("/verifications/me/documents", requireAuth, requireMemberCapability, async (request, response) => {
+  const parsed = verificationDocumentSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid verification document payload.", errors: parsed.error.flatten() });
+  }
+
+  const result = await prisma.$transaction(async (transaction) => {
+    const verification = await transaction.voterVerification.findUnique({
+      where: { memberUserId: request.authUser!.id },
+    });
+    if (!verification) {
+      throw new Error("NOT_FOUND");
+    }
+    if (verification.status === VoterVerificationStatus.VERIFIED || verification.status === VoterVerificationStatus.REJECTED) {
+      throw new Error("FINALIZED");
+    }
+    if (verification.status === VoterVerificationStatus.UNDER_REVIEW && verification.reviewedByUserId) {
+      throw new Error("UNDER_REVIEW");
+    }
+
+    const duplicateDocument = await transaction.voterVerificationDocument.findFirst({
+      where: {
+        sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+        verification: { memberUserId: { not: request.authUser!.id } },
+      },
+      select: { id: true },
+    });
+
+    await transaction.voterVerificationDocument.create({
+      data: {
+        verificationId: verification.id,
+        originalStorageKey: parsed.data.voterDocument.originalStorageKey,
+        previewStorageKey: parsed.data.voterDocument.previewStorageKey || null,
+        originalFileName: parsed.data.voterDocument.originalFileName,
+        mimeType: parsed.data.voterDocument.mimeType,
+        fileSize: parsed.data.voterDocument.fileSize,
+        sha256: parsed.data.voterDocument.sha256.toLowerCase(),
+        storageProvider: "PRIVATE_OBJECT_STORAGE_STUB",
+      },
+    });
+
+    const updated = await transaction.voterVerification.update({
+      where: { id: verification.id },
+      data: {
+        status: VoterVerificationStatus.PENDING,
+        submittedAt: new Date(),
+        reviewStartedAt: null,
+        reviewedAt: null,
+        reviewedByUserId: null,
+        reviewNote: null,
+        isFlagged: Boolean(duplicateDocument),
+        fraudReason: duplicateDocument ? "DUPLICATE_DOCUMENT_HASH" : null,
+      },
+    });
+
+    await transaction.voterVerificationHistory.create({
+      data: {
+        verificationId: verification.id,
+        actorUserId: request.authUser!.id,
+        fromStatus: verification.status,
+        toStatus: VoterVerificationStatus.PENDING,
+        decision: duplicateDocument ? VoterVerificationDecision.FLAGGED : VoterVerificationDecision.SUBMITTED,
+        note: duplicateDocument
+          ? "Resubmitted voter evidence and flagged for duplicate document hash."
+          : "Voter evidence submitted for validation.",
+      },
+    });
+
+    await transaction.voterProfile.updateMany({
+      where: { userId: request.authUser!.id },
+      data: { documentConsentAt: new Date() },
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: duplicateDocument ? "VERIFICATION_DOCUMENT_RESUBMITTED_FLAGGED" : "VERIFICATION_DOCUMENT_RESUBMITTED",
+      targetType: "VoterVerification",
+      targetId: verification.id,
+      metadata: { duplicateDocument: Boolean(duplicateDocument) },
+    });
+
+    return updated;
+  }).catch((error: unknown) => (error instanceof Error ? error : Promise.reject(error)));
+
+  if (result instanceof Error) {
+    if (result.message === "NOT_FOUND") {
+      return response.status(404).json({ message: "Verification profile was not found." });
+    }
+    if (result.message === "FINALIZED") {
+      return response.status(409).json({ message: "Finalized verification cases cannot be resubmitted." });
+    }
+    if (result.message === "UNDER_REVIEW") {
+      return response.status(409).json({ message: "A validator is already reviewing this submission." });
+    }
+    throw result;
+  }
+
+  return response.status(201).json({ message: "Verification document submitted.", verificationId: result.id, status: result.status });
+});
+
 router.get("/verifications", requireAuth, requireRole("VALIDATOR", "SUPER_ADMIN"), async (request, response) => {
   const parsed = verificationQueueQuerySchema.safeParse(request.query);
   if (!parsed.success) {
     return response.status(400).json({ message: "Invalid verification queue query.", errors: parsed.error.flatten() });
+  }
+  if (Boolean(parsed.data.territoryType) !== Boolean(parsed.data.territoryId)) {
+    return response.status(400).json({ message: "territoryType and territoryId must be supplied together." });
+  }
+  if (
+    parsed.data.territoryType &&
+    parsed.data.territoryId &&
+    !(await canViewCommandTerritory(request.authUser!, parsed.data.territoryType, parsed.data.territoryId))
+  ) {
+    return response.status(403).json({ message: "You do not have permission to view this territory." });
   }
 
   const statuses = parsed.data.status
@@ -608,6 +926,10 @@ router.get("/verifications", requireAuth, requireRole("VALIDATOR", "SUPER_ADMIN"
 
   const verifications = await prisma.voterVerification.findMany({
     where: {
+      AND: [
+        buildScopedVerificationWhere(parsed.data.territoryType, parsed.data.territoryId),
+        buildSearchWhere(parsed.data.search),
+      ],
       status: { in: statuses },
       isFlagged: parsed.data.flagged === undefined ? undefined : parsed.data.flagged,
     },
@@ -640,6 +962,22 @@ router.get("/verifications", requireAuth, requireRole("VALIDATOR", "SUPER_ADMIN"
     orderBy: [{ isFlagged: "desc" }, { submittedAt: "asc" }],
     take: 100,
   });
+
+  if (parsed.data.export === "csv") {
+    return sendCsv(response, "pre-election-verifications.csv", [
+      ["id", "memberName", "memberEmail", "status", "flagged", "voterIdentifier", "submittedAt", "reviewedAt"],
+      ...verifications.map((verification) => [
+        verification.id,
+        verification.memberUser.name,
+        verification.memberUser.email,
+        verification.status,
+        verification.isFlagged,
+        verification.voterIdentifier,
+        verification.submittedAt?.toISOString() || "",
+        verification.reviewedAt?.toISOString() || "",
+      ]),
+    ]);
+  }
 
   return response.json({ verifications: verifications.map(serializeVerificationCase) });
 });
@@ -957,6 +1295,33 @@ router.get("/rewards/balance", requireAuth, async (request, response) => {
   });
 });
 
+router.get("/rewards/ledger", requireAuth, async (request, response) => {
+  const parsed = rewardLedgerQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid reward ledger query.", errors: parsed.error.flatten() });
+  }
+
+  const targetUserId = parsed.data.userId || request.authUser!.id;
+  if (targetUserId !== request.authUser!.id && request.authUser!.role !== "SUPER_ADMIN") {
+    return response.status(403).json({ message: "Only Super Admin can inspect another user's reward ledger." });
+  }
+
+  const entries = await prisma.rewardLedgerEntry.findMany({
+    where: {
+      userId: targetUserId,
+      category: parsed.data.category,
+    },
+    include: {
+      relatedUser: { select: { name: true, email: true } },
+      rewardRuleVersion: { select: { version: true, rewardRule: { select: { name: true } } } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return response.json({ rewardLedgerEntries: entries.map(serializeRewardLedgerEntry) });
+});
+
 router.get("/referrals/stats", requireAuth, async (request, response) => {
   const parsed = scopedQuerySchema.safeParse(request.query);
   if (!parsed.success) {
@@ -992,6 +1357,89 @@ router.get("/referrals/stats", requireAuth, async (request, response) => {
     directVerifiedRegistrations,
     networkRegistrations,
     networkVerifiedRegistrations,
+  });
+});
+
+router.get("/referrals", requireAuth, async (request, response) => {
+  const parsed = referralManagementQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid referral query.", errors: parsed.error.flatten() });
+  }
+  if (Boolean(parsed.data.territoryType) !== Boolean(parsed.data.territoryId)) {
+    return response.status(400).json({ message: "territoryType and territoryId must be supplied together." });
+  }
+  if (
+    parsed.data.territoryType &&
+    parsed.data.territoryId &&
+    !(await canViewCommandTerritory(request.authUser!, parsed.data.territoryType, parsed.data.territoryId))
+  ) {
+    return response.status(403).json({ message: "You do not have permission to view this territory." });
+  }
+
+  const search = parsed.data.search?.trim();
+  const voterScope =
+    parsed.data.territoryType && parsed.data.territoryId
+      ? buildScopedVoterProfileWhere(parsed.data.territoryType, parsed.data.territoryId)
+      : undefined;
+  const ownDirectOnly =
+    !voterScope && request.authUser!.role !== "SUPER_ADMIN" && request.authUser!.role !== "STATE_OFFICER";
+
+  const referrals = await prisma.referral.findMany({
+    where: {
+      status: parsed.data.status,
+      referrerUserId: ownDirectOnly ? request.authUser!.id : undefined,
+      referredUser: voterScope || search
+        ? {
+            voterProfile: voterScope ? { is: voterScope } : undefined,
+            OR: search
+              ? [
+                  { name: { contains: search, mode: "insensitive" } },
+                  { email: { contains: search, mode: "insensitive" } },
+                ]
+              : undefined,
+          }
+        : undefined,
+    },
+    include: {
+      referredUser: { select: { name: true, email: true, voterProfile: { select: { wardId: true, pollingUnitId: true } } } },
+      referrerUser: { select: { name: true, email: true } },
+    },
+    orderBy: { registeredAt: "desc" },
+    take: 200,
+  });
+  const items = referrals.map(serializeReferral);
+
+  if (parsed.data.export === "csv") {
+    return sendCsv(response, "pre-election-referrals.csv", [
+      ["id", "referredName", "referredEmail", "referrerName", "status", "referralCode", "registeredAt", "qualifiedAt"],
+      ...items.map((item) => [
+        item.id,
+        item.referredName,
+        item.referredEmail,
+        item.referrerName,
+        item.status,
+        item.referralCode,
+        item.registeredAt,
+        item.qualifiedAt || "",
+      ]),
+    ]);
+  }
+
+  const statusCounts = items.reduce<Record<string, number>>((accumulator, item) => {
+    accumulator[item.status] = (accumulator[item.status] || 0) + 1;
+    return accumulator;
+  }, {});
+
+  return response.json({
+    referrals: items,
+    summary: {
+      total: items.length,
+      qualified: statusCounts.QUALIFIED || 0,
+      rewardProcessed: statusCounts.REWARD_PROCESSED || 0,
+      pendingVerification: statusCounts.PENDING_VERIFICATION || 0,
+      rejected: statusCounts.REJECTED || 0,
+      flagged: statusCounts.FLAGGED || 0,
+    },
   });
 });
 
@@ -1048,6 +1496,16 @@ router.get("/payout/configurations/active", requireAuth, requireRole("SUPER_ADMI
   });
 });
 
+router.get("/payout/officers", requireAuth, requireRole("SUPER_ADMIN"), async (_request, response) => {
+  const officers = await prisma.user.findMany({
+    where: { role: UserRole.PAYOUT_OFFICER, isActive: true, accountStatus: "ACTIVE" },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, email: true },
+  });
+
+  return response.json({ payoutOfficers: officers });
+});
+
 router.post("/payout/cycles", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
   const parsed = payoutCycleSchema.safeParse(request.body);
   if (!parsed.success) {
@@ -1101,6 +1559,65 @@ router.get("/payout/cycles", requireAuth, requireRole("SUPER_ADMIN", "PAYOUT_OFF
   const cycles = await prisma.payoutCycle.findMany({ orderBy: { payoutDate: "desc" }, take: 50 });
   return response.json({
     payoutCycles: cycles.map((cycle) => ({ ...cycle, conversionRate: cycle.conversionRate.toString() })),
+  });
+});
+
+router.get("/payout/eligibility", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+  const parsed = payoutEligibilityQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid payout eligibility query.", errors: parsed.error.flatten() });
+  }
+
+  const search = parsed.data.search?.trim();
+  const beneficiaryUserIds = search
+    ? (
+        await prisma.user.findMany({
+          where: {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          },
+          select: { id: true },
+          take: 100,
+        })
+      ).map((user) => user.id)
+    : undefined;
+
+  const cycle = parsed.data.cycleId
+    ? await prisma.payoutCycle.findUnique({ where: { id: parsed.data.cycleId } })
+    : null;
+  const activeConfiguration = !cycle
+    ? await prisma.payoutConfiguration.findFirst({ where: { active: true }, orderBy: { createdAt: "desc" } })
+    : null;
+  if (!cycle && !activeConfiguration) {
+    return response.status(400).json({ message: "Create a payout cycle or active payout configuration first." });
+  }
+
+  const eligibilityCycle = cycle || {
+    id: "active-configuration",
+    minimumThreshold: activeConfiguration!.minimumPoints,
+    conversionRate: activeConfiguration!.pointConversionRate,
+  };
+  const eligible = await prisma.$transaction((transaction) =>
+    calculateEligibleBeneficiaries(transaction, eligibilityCycle, beneficiaryUserIds),
+  );
+  const users = await prisma.user.findMany({
+    where: { id: { in: eligible.map((item) => item.userId) } },
+    select: { id: true, name: true, email: true },
+  });
+  const userById = new Map(users.map((user) => [user.id, user]));
+
+  return response.json({
+    payoutEligibility: eligible.map((item) => ({
+      userId: item.userId,
+      name: userById.get(item.userId)?.name || null,
+      email: userById.get(item.userId)?.email || null,
+      availablePoints: item.availablePoints,
+      amount: decimalToString(item.amount),
+    })),
+    minimumThreshold: eligibilityCycle.minimumThreshold,
+    conversionRate: eligibilityCycle.conversionRate.toString(),
   });
 });
 
@@ -1196,6 +1713,36 @@ router.post("/payout/cycles/:cycleId/batches", requireAuth, requireRole("SUPER_A
       assignments: result.assignments.map(serializePayoutAssignment),
     },
   });
+});
+
+router.get("/payout/batches", requireAuth, requireRole("SUPER_ADMIN", "PAYOUT_OFFICER"), async (request, response) => {
+  const parsed = payoutBatchQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid payout batch query.", errors: parsed.error.flatten() });
+  }
+  const officerOnly = request.authUser!.role === "PAYOUT_OFFICER";
+  const batches = await prisma.payoutBatch.findMany({
+    where: {
+      status: parsed.data.status,
+      assignments: officerOnly ? { some: { payoutOfficerUserId: request.authUser!.id } } : undefined,
+    },
+    include: {
+      payoutCycle: { select: { name: true, payoutDate: true } },
+      assignments: {
+        where: officerOnly ? { payoutOfficerUserId: request.authUser!.id } : undefined,
+        include: {
+          beneficiaryUser: { select: { name: true, email: true } },
+          payoutOfficerUser: { select: { name: true, email: true } },
+          transactions: { orderBy: { createdAt: "desc" } },
+        },
+        orderBy: { assignedAt: "asc" },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  return response.json({ payoutBatches: batches.map(serializePayoutBatchWithAssignments) });
 });
 
 router.patch("/payout/batches/:batchId/approve", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
@@ -1585,6 +2132,151 @@ router.get("/strength/targets/progress", requireAuth, async (request, response) 
   );
 
   return response.json({ progress });
+});
+
+router.get("/strength/dashboard", requireAuth, async (request, response) => {
+  const parsed = scopedQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid strength dashboard query.", errors: parsed.error.flatten() });
+  }
+  if (!(await canViewCommandTerritory(request.authUser!, parsed.data.territoryType, parsed.data.territoryId))) {
+    return response.status(403).json({ message: "You do not have permission to view this territory." });
+  }
+
+  const [latestSnapshots, targets, coordinatorProfiles] = await Promise.all([
+    prisma.territoryStrengthSnapshot.findMany({
+      where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
+      orderBy: { calculatedAt: "desc" },
+      take: 2,
+    }),
+    prisma.territoryTarget.findMany({
+      where: { territoryType: parsed.data.territoryType, territoryId: parsed.data.territoryId },
+      orderBy: { startDate: "desc" },
+    }),
+    prisma.coordinatorProfile.findMany({
+      where: buildScopedCoordinatorWhere(parsed.data.territoryType, parsed.data.territoryId),
+      include: { user: { select: { id: true, name: true, email: true } } },
+      take: 50,
+    }),
+  ]);
+
+  const targetProgress = await Promise.all(
+    targets.map(async (target) => {
+      const actualValue = await calculateMetricActual(target.territoryType, target.territoryId, target.metric);
+      return {
+        targetId: target.id,
+        metric: target.metric,
+        territoryType: target.territoryType,
+        territoryId: target.territoryId,
+        targetValue: target.targetValue,
+        actualValue,
+        percentageAchieved: target.targetValue > 0 ? Number(Math.min((actualValue / target.targetValue) * 100, 100).toFixed(2)) : 0,
+        shortfall: Math.max(target.targetValue - actualValue, 0),
+      };
+    }),
+  );
+
+  const coordinatorPerformance = await Promise.all(
+    coordinatorProfiles.map(async (profile) => {
+      const [directRegistrations, directVerifiedRegistrations, points] = await Promise.all([
+        prisma.referral.count({ where: { referrerUserId: profile.userId } }),
+        prisma.referral.count({
+          where: {
+            referrerUserId: profile.userId,
+            status: { in: [ReferralStatus.QUALIFIED, ReferralStatus.REWARD_PROCESSED] },
+          },
+        }),
+        getConfirmedPoints(profile.userId),
+      ]);
+      return {
+        userId: profile.userId,
+        name: profile.user.name,
+        email: profile.user.email,
+        level: profile.level,
+        directRegistrations,
+        directVerifiedRegistrations,
+        confirmedPoints: points,
+      };
+    }),
+  );
+
+  const children =
+    parsed.data.territoryType === "STATE"
+      ? await prisma.senatorialDistrict.findMany({
+          where: { stateId: parsed.data.territoryId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        }).then((items) => items.map((item) => ({ ...item, territoryType: "SENATORIAL_DISTRICT" })))
+      : parsed.data.territoryType === "SENATORIAL_DISTRICT"
+        ? await prisma.federalConstituency.findMany({
+            where: { senatorialDistrictId: parsed.data.territoryId },
+            select: { id: true, name: true },
+            orderBy: { name: "asc" },
+          }).then((items) => items.map((item) => ({ ...item, territoryType: "FEDERAL_CONSTITUENCY" })))
+        : parsed.data.territoryType === "FEDERAL_CONSTITUENCY"
+          ? await prisma.stateConstituency.findMany({
+              where: { federalConstituencyId: parsed.data.territoryId },
+              select: { id: true, name: true },
+              orderBy: { name: "asc" },
+            }).then((items) => items.map((item) => ({ ...item, territoryType: "STATE_CONSTITUENCY" })))
+          : parsed.data.territoryType === "STATE_CONSTITUENCY"
+            ? await prisma.ward.findMany({
+                where: { stateConstituencyId: parsed.data.territoryId },
+                select: { id: true, name: true },
+                orderBy: { name: "asc" },
+              }).then((items) => items.map((item) => ({ ...item, territoryType: "WARD" })))
+            : parsed.data.territoryType === "WARD"
+              ? await prisma.pollingUnit.findMany({
+                  where: { wardId: parsed.data.territoryId },
+                  select: { id: true, name: true },
+                  orderBy: { name: "asc" },
+                }).then((items) => items.map((item) => ({ ...item, territoryType: "POLLING_UNIT" })))
+              : [];
+
+  const childSummaries = await Promise.all(
+    children.map(async (child) => {
+      const [snapshot, verifiedMembers, registeredMembers] = await Promise.all([
+        prisma.territoryStrengthSnapshot.findFirst({
+          where: { territoryType: child.territoryType, territoryId: child.id },
+          orderBy: { calculatedAt: "desc" },
+        }),
+        calculateMetricActual(child.territoryType, child.id, "VERIFIED_MEMBERS"),
+        calculateMetricActual(child.territoryType, child.id, "REGISTERED_MEMBERS"),
+      ]);
+      return {
+        territoryType: child.territoryType,
+        territoryId: child.id,
+        name: child.name,
+        latestScore: snapshot?.score.toString() || null,
+        latestScoreAt: snapshot?.calculatedAt.toISOString() || null,
+        verifiedMembers,
+        registeredMembers,
+      };
+    }),
+  );
+
+  const latest = latestSnapshots[0] || null;
+  return response.json({
+    dashboard: {
+      territoryType: parsed.data.territoryType,
+      territoryId: parsed.data.territoryId,
+      latestStrengthSnapshot: latest
+        ? {
+            ...latest,
+            score: latest.score.toString(),
+            calculatedAt: latest.calculatedAt.toISOString(),
+            trend: trendFromScores(latest.score, latestSnapshots[1]?.score),
+          }
+        : null,
+      targetProgress,
+      childSummaries,
+      coordinatorPerformance: coordinatorPerformance.sort(
+        (left, right) =>
+          right.directVerifiedRegistrations - left.directVerifiedRegistrations ||
+          right.confirmedPoints - left.confirmedPoints,
+      ),
+    },
+  });
 });
 
 export default router;

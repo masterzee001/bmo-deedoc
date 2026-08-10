@@ -17,7 +17,9 @@ type FormState = {
   pollingUnitId: string;
   referredByCode: string;
   acceptTerms: boolean;
+  acceptPrivacy: boolean;
   contactConsent: boolean;
+  documentProcessingConsent: boolean;
   confirmAdult: boolean;
 };
 
@@ -33,9 +35,22 @@ const initialForm: FormState = {
   pollingUnitId: "",
   referredByCode: "",
   acceptTerms: false,
+  acceptPrivacy: false,
   contactConsent: false,
+  documentProcessingConsent: false,
   confirmAdult: false,
 };
+
+async function sha256File(file: File) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function safeStorageName(fileName: string) {
+  return fileName.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "voter-document";
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -47,8 +62,14 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [voterDocument, setVoterDocument] = useState<File | null>(null);
 
   useEffect(() => {
+    const referralCode = new URLSearchParams(window.location.search).get("ref");
+    if (referralCode) {
+      setForm((current) => ({ ...current, referredByCode: referralCode.toUpperCase() }));
+    }
+
     async function loadStates() {
       try {
         setStates(await fetchPublicStates());
@@ -136,17 +157,38 @@ export default function RegisterPage() {
       if (!form.acceptTerms || !form.contactConsent || !form.confirmAdult) {
         throw new Error("You must accept the terms and confirm eligibility before registering.");
       }
+      if (voterDocument && !form.documentProcessingConsent) {
+        throw new Error("Document processing consent is required before submitting voter evidence.");
+      }
+      if (voterDocument && !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(voterDocument.type)) {
+        throw new Error("Upload a JPG, PNG, WebP, or PDF voter evidence file.");
+      }
+
+      const documentMetadata = voterDocument
+        ? {
+            originalStorageKey: `voter-verification/client/${crypto.randomUUID()}-${safeStorageName(voterDocument.name)}`,
+            originalFileName: voterDocument.name,
+            mimeType: voterDocument.type as "image/jpeg" | "image/png" | "image/webp" | "application/pdf",
+            fileSize: voterDocument.size,
+            sha256: await sha256File(voterDocument),
+          }
+        : undefined;
 
       const result = await registerVoterUser({
         ...form,
         referredByCode: form.referredByCode.trim() || undefined,
         acceptTerms: true,
+        acceptPrivacy: true,
         contactConsent: true,
+        documentProcessingConsent: documentMetadata ? true : undefined,
         confirmAdult: true,
+        consentVersion: "pre-election-v1",
+        voterDocument: documentMetadata,
       });
 
       setMessage(result.message);
       setForm(initialForm);
+      setVoterDocument(null);
       router.push("/login");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Registration failed.");
@@ -275,6 +317,18 @@ export default function RegisterPage() {
             />
           </label>
 
+          <label className="field">
+            <span>Voter Evidence Upload (Optional)</span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              onChange={(event) => setVoterDocument(event.target.files?.[0] || null)}
+            />
+            <small className="muted">
+              This creates a private evidence submission for validation. It is not a ballot, vote-choice, or proof-of-voting upload.
+            </small>
+          </label>
+
           <label className="field" style={{ alignItems: "flex-start" }}>
             <span>Terms and Consent</span>
             <label className="checkbox-row">
@@ -285,6 +339,7 @@ export default function RegisterPage() {
                   setForm({
                     ...form,
                     acceptTerms: event.target.checked,
+                    acceptPrivacy: event.target.checked,
                     contactConsent: event.target.checked,
                   })
                 }
@@ -293,6 +348,20 @@ export default function RegisterPage() {
               <span>
                 I agree to the <Link href="/terms">terms and conditions</Link>, including consent for election and civic updates within my registered territory, and contact handling by authorized platform operators.
               </span>
+            </label>
+          </label>
+
+          <label className="field" style={{ alignItems: "flex-start" }}>
+            <span>Document Processing Consent</span>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.documentProcessingConsent}
+                onChange={(event) => setForm({ ...form, documentProcessingConsent: event.target.checked })}
+                disabled={!voterDocument}
+                required={Boolean(voterDocument)}
+              />
+              <span>I consent to private processing of my voter-registration evidence by authorized validators only.</span>
             </label>
           </label>
 

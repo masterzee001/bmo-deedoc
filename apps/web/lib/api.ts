@@ -37,6 +37,7 @@ import type {
   RewardLedgerItem,
   RewardRedemptionItem,
   RewardsSummary,
+  TerritorySummary,
   ReferenceCompletenessReport,
   SenatorialDistrictItem,
   StateItem,
@@ -107,13 +108,26 @@ export async function registerVoterUser(body: {
   password: string;
   voterCardNumber: string;
   stateId: string;
+  senatorialDistrictId?: string;
+  federalConstituencyId?: string;
+  stateConstituencyId?: string;
   lgaId: string;
   wardId: string;
   pollingUnitId: string;
   referredByCode?: string;
   acceptTerms: true;
+  acceptPrivacy?: true;
   contactConsent: true;
+  documentProcessingConsent?: true;
   confirmAdult: true;
+  consentVersion?: string;
+  voterDocument?: {
+    originalStorageKey: string;
+    originalFileName: string;
+    mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    fileSize: number;
+    sha256: string;
+  };
 }): Promise<{ message: string; user: AuthUserProfile }> {
   const response = await fetch(`${API_BASE_URL}/auth/register-voter`, {
     method: "POST",
@@ -123,6 +137,159 @@ export async function registerVoterUser(body: {
 
   return readJson<{ message: string; user: AuthUserProfile }>(response);
 }
+
+export type PreElectionVerificationCase = {
+  id: string;
+  memberUserId: string;
+  memberName: string;
+  memberEmail: string;
+  memberPhone: string | null;
+  voterIdentifier: string;
+  status: string;
+  isFlagged: boolean;
+  fraudReason: string | null;
+  submittedAt: string | null;
+  reviewStartedAt: string | null;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewNote: string | null;
+  territory: TerritorySummary | null;
+  documents: Array<{
+    id: string;
+    originalFileName: string;
+    mimeType: string;
+    fileSize: number;
+    sha256: string;
+    storageProvider: string;
+    uploadedAt: string;
+  }>;
+  history: Array<{
+    id: string;
+    fromStatus: string | null;
+    toStatus: string;
+    decision: string;
+    note: string | null;
+    actorName: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type PreElectionReferralItem = {
+  id: string;
+  referredUserId: string;
+  referredName: string;
+  referredEmail: string;
+  referrerUserId: string;
+  referrerName: string;
+  referrerEmail: string;
+  referralCode: string;
+  status: string;
+  wardId: string | null;
+  pollingUnitId: string | null;
+  registeredAt: string;
+  qualifiedAt: string | null;
+  rewardProcessedAt: string | null;
+  flaggedAt: string | null;
+  fraudReason: string | null;
+};
+
+export type PreElectionRewardLedgerEntry = {
+  id: string;
+  userId: string;
+  points: number;
+  category: string;
+  sourceEventType: string;
+  sourceEventId: string;
+  rewardRuleVersionId: string | null;
+  rewardRuleName: string | null;
+  rewardRuleVersion: number | null;
+  relatedUserId: string | null;
+  relatedUserName: string | null;
+  relatedUserEmail: string | null;
+  description: string | null;
+  createdAt: string;
+};
+
+export type PreElectionPayoutAssignment = {
+  id: string;
+  payoutCycleId: string;
+  payoutBatchId: string;
+  payoutOfficerUserId: string;
+  payoutOfficerName: string | null;
+  beneficiaryUserId: string;
+  beneficiaryName: string | null;
+  beneficiaryEmail: string | null;
+  points: number;
+  amount: string;
+  status: string;
+  assignedAt: string;
+  processedAt: string | null;
+  note: string | null;
+  transactions: Array<{
+    id: string;
+    paymentReference: string;
+    pointsRedeemed: number;
+    amountPaid: string;
+    status: string;
+    proofStorageKey: string | null;
+    note: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type PreElectionPayoutBatch = {
+  id: string;
+  payoutCycleId: string;
+  payoutCycleName: string | null;
+  payoutDate: string | null;
+  status: string;
+  createdAt: string;
+  approvedAt: string | null;
+  assignmentCount: number;
+  totalPoints: number;
+  totalAmount: string;
+  assignments: PreElectionPayoutAssignment[];
+};
+
+export type PreElectionStrengthDashboard = {
+  territoryType: string;
+  territoryId: string;
+  latestStrengthSnapshot: {
+    id: string;
+    score: string;
+    trend: string;
+    calculatedAt: string;
+    breakdownJson: unknown;
+  } | null;
+  targetProgress: Array<{
+    targetId: string;
+    metric: string;
+    territoryType: string;
+    territoryId: string;
+    targetValue: number;
+    actualValue: number;
+    percentageAchieved: number;
+    shortfall: number;
+  }>;
+  childSummaries: Array<{
+    territoryType: string;
+    territoryId: string;
+    name: string;
+    latestScore: string | null;
+    latestScoreAt: string | null;
+    verifiedMembers: number;
+    registeredMembers: number;
+  }>;
+  coordinatorPerformance: Array<{
+    userId: string;
+    name: string;
+    email: string;
+    level: string;
+    directRegistrations: number;
+    directVerifiedRegistrations: number;
+    confirmedPoints: number;
+  }>;
+};
 
 export async function fetchPublicStates(): Promise<StateItem[]> {
   const response = await fetch(`${API_BASE_URL}/auth/territories/states`, {
@@ -170,6 +337,335 @@ export async function fetchCurrentUser(token: string): Promise<AuthUserProfile> 
 
   const payload = await readJson<{ user: AuthUserProfile }>(response);
   return payload.user;
+}
+
+export async function fetchPreElectionReferralCode(token: string): Promise<{ referralCode: string; referralLink: string }> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/referral-code`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ referralCode: string; referralLink: string }>(response);
+}
+
+export async function fetchMyPreElectionVerification(token: string): Promise<PreElectionVerificationCase | null> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ verification: PreElectionVerificationCase | null }>(response);
+  return payload.verification;
+}
+
+export async function submitMyPreElectionVerificationDocument(
+  token: string,
+  body: {
+    documentProcessingConsent: true;
+    voterDocument: {
+      originalStorageKey: string;
+      originalFileName: string;
+      mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+      fileSize: number;
+      sha256: string;
+    };
+  },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/me/documents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; verificationId: string; status: string }>(response);
+}
+
+export async function fetchPreElectionVerifications(
+  token: string,
+  query?: { status?: string; flagged?: boolean; search?: string; territoryType?: string; territoryId?: string },
+): Promise<PreElectionVerificationCase[]> {
+  const params = new URLSearchParams();
+  if (query?.status) params.set("status", query.status);
+  if (query?.flagged !== undefined) params.set("flagged", String(query.flagged));
+  if (query?.search) params.set("search", query.search);
+  if (query?.territoryType) params.set("territoryType", query.territoryType);
+  if (query?.territoryId) params.set("territoryId", query.territoryId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ verifications: PreElectionVerificationCase[] }>(response);
+  return payload.verifications;
+}
+
+export async function exportPreElectionVerificationsCsv(token: string, query?: { status?: string; search?: string }) {
+  const params = new URLSearchParams({ export: "csv" });
+  if (query?.status) params.set("status", query.status);
+  if (query?.search) params.set("search", query.search);
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new ApiError("Verification export failed.", response.status);
+  }
+  return response.text();
+}
+
+export async function claimPreElectionVerification(token: string, verificationId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/claim`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ message: string; verificationId: string }>(response);
+}
+
+export async function accessPreElectionVerificationDocument(token: string, verificationId: string, documentId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/documents/${documentId}/access`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ storageProvider: string; storageKey: string; accessToken: string; expiresAt: string }>(response);
+}
+
+export async function decidePreElectionVerification(
+  token: string,
+  verificationId: string,
+  body: { decision: "APPROVE" | "REJECT" | "REQUEST_RESUBMISSION"; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/verifications/${verificationId}/decision`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ message: string; verificationId: string; status: string }>(response);
+}
+
+export async function fetchPreElectionReferrals(
+  token: string,
+  query?: { status?: string; search?: string; territoryType?: string; territoryId?: string },
+) {
+  const params = new URLSearchParams();
+  if (query?.status) params.set("status", query.status);
+  if (query?.search) params.set("search", query.search);
+  if (query?.territoryType) params.set("territoryType", query.territoryType);
+  if (query?.territoryId) params.set("territoryId", query.territoryId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/referrals${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    referrals: PreElectionReferralItem[];
+    summary: Record<string, number>;
+  }>(response);
+}
+
+export async function fetchPreElectionRewardBalance(token: string, userId?: string) {
+  const suffix = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/balance${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    userId: string;
+    confirmedPoints: number;
+    pendingPotentialPoints: number;
+    reservedPayoutPoints: number;
+    availablePoints: number;
+  }>(response);
+}
+
+export async function fetchPreElectionRewardLedger(token: string, userId?: string): Promise<PreElectionRewardLedgerEntry[]> {
+  const suffix = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/rewards/ledger${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ rewardLedgerEntries: PreElectionRewardLedgerEntry[] }>(response);
+  return payload.rewardLedgerEntries;
+}
+
+export async function fetchPreElectionPayoutOfficers(token: string): Promise<Array<{ id: string; name: string; email: string }>> {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/officers`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutOfficers: Array<{ id: string; name: string; email: string }> }>(response);
+  return payload.payoutOfficers;
+}
+
+export async function createPreElectionPayoutConfiguration(
+  token: string,
+  body: { minimumPoints: number; pointConversionRate: number; frequency: string; nextPayoutDate?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/configurations`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutCycles(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ payoutCycles: Array<{ id: string; name: string; status: string; payoutDate: string; minimumThreshold: number; conversionRate: string }> }>(response);
+}
+
+export async function createPreElectionPayoutCycle(
+  token: string,
+  body: { name: string; opensAt: string; closesAt: string; payoutDate: string; minimumThreshold?: number; conversionRate?: number },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutEligibility(token: string, cycleId?: string) {
+  const suffix = cycleId ? `?cycleId=${encodeURIComponent(cycleId)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/eligibility${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{
+    payoutEligibility: Array<{ userId: string; name: string | null; email: string | null; availablePoints: number; amount: string }>;
+    minimumThreshold: number;
+    conversionRate: string;
+  }>(response);
+}
+
+export async function createPreElectionPayoutBatch(
+  token: string,
+  cycleId: string,
+  body: { payoutOfficerUserId: string; beneficiaryUserIds?: string[] },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles/${cycleId}/batches`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutBatches(token: string, status?: string): Promise<PreElectionPayoutBatch[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/batches${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutBatches: PreElectionPayoutBatch[] }>(response);
+  return payload.payoutBatches;
+}
+
+export async function approvePreElectionPayoutBatch(token: string, batchId: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/batches/${batchId}/approve`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionPayoutAssignments(token: string, status?: string): Promise<PreElectionPayoutAssignment[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/assignments${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ payoutAssignments: PreElectionPayoutAssignment[] }>(response);
+  return payload.payoutAssignments;
+}
+
+export async function updatePreElectionPayoutAssignment(
+  token: string,
+  assignmentId: string,
+  body: { status: "PROCESSING" | "PAID" | "HELD" | "REJECTED"; paymentReference?: string; proofStorageKey?: string; note?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/payout/assignments/${assignmentId}/status`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionRewardRule(
+  token: string,
+  body: { name: string; directPoints: number; eligibleRole?: string; eligibleCoordinatorLevel?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/reward-rules`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionRewardRules(token: string) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/reward-rules`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  return readJson<{ rewardRules: Array<{ id: string; name: string; active: boolean; eligibleRole: string; eligibleCoordinatorLevel: string | null; versions: Array<{ version: number; directPoints: number }> }> }>(response);
+}
+
+export async function createPreElectionStrengthMetric(token: string, body: { metric: string; description?: string }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/metrics`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionStrengthWeight(token: string, body: { metric: string; weight: number }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/weights`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function createPreElectionTerritoryTarget(
+  token: string,
+  body: { territoryType: string; territoryId: string; metric: string; targetValue: number; startDate: string; endDate?: string },
+) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/targets`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function calculatePreElectionStrengthSnapshot(token: string, body: { territoryType: string; territoryId: string }) {
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/snapshots/calculate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson(response);
+}
+
+export async function fetchPreElectionStrengthDashboard(
+  token: string,
+  query: { territoryType: string; territoryId: string },
+): Promise<PreElectionStrengthDashboard> {
+  const params = new URLSearchParams(query);
+  const response = await fetch(`${API_BASE_URL}/pre-election/strength/dashboard?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ dashboard: PreElectionStrengthDashboard }>(response);
+  return payload.dashboard;
 }
 
 export async function fetchOgunOrganizationTree(token: string): Promise<OgunOrganizationTree> {

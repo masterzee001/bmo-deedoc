@@ -31,6 +31,18 @@ async function apiRequest(path: string, options?: { token?: string; method?: str
   return { status: response.status, payload: (await response.json()) as Record<string, unknown> };
 }
 
+async function textRequest(path: string, options?: { token?: string; method?: string; body?: unknown }) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: options?.method || "GET",
+    headers: {
+      ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: options?.body ? JSON.stringify(options.body) : undefined,
+  });
+  return { status: response.status, body: await response.text() };
+}
+
 async function login(email: string) {
   const result = await apiRequest("/auth/login", { method: "POST", body: { email, password } });
   assert.equal(result.status, 200, JSON.stringify(result.payload));
@@ -273,6 +285,7 @@ export async function runPreElectionTests() {
       referralCodeResponse.payload.referralCode as string,
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
+    const referredMemberToken = await login(testEmail("member-001"));
     const referrer = await prisma.user.findUniqueOrThrow({ where: { email: testEmail("coordinator") }, select: { id: true } });
 
     assert.equal(await prisma.rewardLedger.count({ where: { voterUserId: referrer.id } }), 0);
@@ -281,11 +294,37 @@ export async function runPreElectionTests() {
     const referral = await prisma.referral.findUniqueOrThrow({ where: { referredUserId: referredMember.id } });
     assert.equal(referral.status, "PENDING_VERIFICATION");
 
+    const memberVerification = await apiRequest("/pre-election/verifications/me", { token: referredMemberToken });
+    assert.equal(memberVerification.status, 200, JSON.stringify(memberVerification.payload));
+    assert.equal((memberVerification.payload.verification as { status: string }).status, "PENDING");
+
+    const resubmission = await apiRequest("/pre-election/verifications/me/documents", {
+      method: "POST",
+      token: referredMemberToken,
+      body: {
+        documentProcessingConsent: true,
+        voterDocument: {
+          originalStorageKey: `voter-verification/test/001/resubmission-${cryptoSafeKey("001")}`,
+          originalFileName: "001-resubmission.pdf",
+          mimeType: "application/pdf",
+          fileSize: 2048,
+          sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+      },
+    });
+    assert.equal(resubmission.status, 201, JSON.stringify(resubmission.payload));
+    assert.equal(await prisma.rewardLedgerEntry.count({ where: { userId: referrer.id } }), 0);
+
     const queue = await apiRequest("/pre-election/verifications?status=PENDING", { token: validatorToken });
     assert.equal(queue.status, 200, JSON.stringify(queue.payload));
     const cases = queue.payload.verifications as Array<{ id: string; documents: Array<{ id: string }> }>;
     const verificationCase = cases.find((item) => item.id);
     assert.ok(verificationCase);
+    assert.ok(verificationCase.documents.length >= 2);
+
+    const verificationCsv = await textRequest("/pre-election/verifications?status=PENDING&export=csv", { token: validatorToken });
+    assert.equal(verificationCsv.status, 200);
+    assert.match(verificationCsv.body, /memberName/);
 
     const access = await apiRequest(
       `/pre-election/verifications/${verificationCase.id}/documents/${verificationCase.documents[0].id}/access`,
@@ -326,6 +365,18 @@ export async function runPreElectionTests() {
     assert.equal(referralStats.payload.directRegistrations, 1);
     assert.equal(referralStats.payload.directVerifiedRegistrations, 1);
 
+    const referralManagement = await apiRequest(`/pre-election/referrals?territoryType=WARD&territoryId=${wardId}`, {
+      token: coordinatorToken,
+    });
+    assert.equal(referralManagement.status, 200, JSON.stringify(referralManagement.payload));
+    assert.equal((referralManagement.payload.referrals as Array<{ status: string }>).length, 1);
+
+    const rewardLedger = await apiRequest(`/pre-election/rewards/ledger?userId=${referrer.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(rewardLedger.status, 200, JSON.stringify(rewardLedger.payload));
+    assert.equal((rewardLedger.payload.rewardLedgerEntries as Array<{ category: string }>)[0].category, "VERIFIED_REFERRAL");
+
     const payoutConfigDenied = await apiRequest("/pre-election/payout/configurations", {
       method: "POST",
       token: payoutToken,
@@ -354,6 +405,14 @@ export async function runPreElectionTests() {
     const payoutCycleId = (payoutCycle.payload.payoutCycle as { id: string }).id;
     const payoutOfficer = await prisma.user.findUniqueOrThrow({ where: { email: testEmail("payout") }, select: { id: true } });
 
+    const payoutOfficers = await apiRequest("/pre-election/payout/officers", { token: superAdminToken });
+    assert.equal(payoutOfficers.status, 200, JSON.stringify(payoutOfficers.payload));
+    assert.ok((payoutOfficers.payload.payoutOfficers as Array<{ id: string }>).some((item) => item.id === payoutOfficer.id));
+
+    const payoutEligibility = await apiRequest(`/pre-election/payout/eligibility?cycleId=${payoutCycleId}`, { token: superAdminToken });
+    assert.equal(payoutEligibility.status, 200, JSON.stringify(payoutEligibility.payload));
+    assert.equal((payoutEligibility.payload.payoutEligibility as Array<{ userId: string }>)[0].userId, referrer.id);
+
     const payoutBatch = await apiRequest(`/pre-election/payout/cycles/${payoutCycleId}/batches`, {
       method: "POST",
       token: superAdminToken,
@@ -365,6 +424,10 @@ export async function runPreElectionTests() {
     assert.equal(assignments.length, 1);
     assert.equal(assignments[0].points, 25);
     assert.equal(assignments[0].amount, "50.00");
+
+    const payoutBatches = await apiRequest("/pre-election/payout/batches", { token: superAdminToken });
+    assert.equal(payoutBatches.status, 200, JSON.stringify(payoutBatches.payload));
+    assert.ok((payoutBatches.payload.payoutBatches as Array<{ id: string }>).some((item) => item.id === (payoutBatch.payload.payoutBatch as { id: string }).id));
 
     const duplicatePayoutBatch = await apiRequest(`/pre-election/payout/cycles/${payoutCycleId}/batches`, {
       method: "POST",
@@ -393,6 +456,12 @@ export async function runPreElectionTests() {
       body: { status: "PROCESSING" },
     });
     assert.equal(processingPayout.status, 200, JSON.stringify(processingPayout.payload));
+
+    const payoutOfficerAssignments = await apiRequest("/pre-election/payout/assignments?status=PROCESSING", {
+      token: payoutToken,
+    });
+    assert.equal(payoutOfficerAssignments.status, 200, JSON.stringify(payoutOfficerAssignments.payload));
+    assert.equal((payoutOfficerAssignments.payload.payoutAssignments as Array<{ id: string }>)[0].id, assignmentId);
 
     const paidPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
       method: "PATCH",
@@ -464,6 +533,12 @@ export async function runPreElectionTests() {
     });
     assert.equal(targetProgress.status, 200, JSON.stringify(targetProgress.payload));
     assert.equal((targetProgress.payload.progress as Array<{ metric: string; actualValue: number }>)[0].actualValue, 1);
+
+    const strengthDashboard = await apiRequest(`/pre-election/strength/dashboard?territoryType=WARD&territoryId=${wardId}`, {
+      token: coordinatorToken,
+    });
+    assert.equal(strengthDashboard.status, 200, JSON.stringify(strengthDashboard.payload));
+    assert.equal((strengthDashboard.payload.dashboard as { coordinatorPerformance: Array<{ userId: string }> }).coordinatorPerformance[0].userId, referrer.id);
 
     const approveAgain = await apiRequest(`/pre-election/verifications/${verificationCase.id}/decision`, {
       method: "PATCH",
