@@ -128,10 +128,50 @@ export const ELECTION_DAY_REALTIME_EVENT_TYPES = [
   "election.report.reviewed",
   "election.result.submitted",
   "message.created",
+  "call.initiated",
   "call.ringing",
+  "call.accepted",
+  "call.rejected",
   "call.connected",
   "call.ended",
+  "call.missed",
+  "call.signal",
 ] as const;
+
+export const VOICE_CALL_STATUSES = ["INITIATED", "RINGING", "CONNECTED", "ENDED"] as const;
+
+export const VOICE_CALL_END_REASONS = [
+  "COMPLETED",
+  "REJECTED",
+  "MISSED",
+  "CANCELLED",
+  "FAILED",
+] as const;
+
+export const VOICE_CALL_PARTICIPANT_STATUSES = [
+  "CALLING",
+  "RINGING",
+  "ACCEPTED",
+  "REJECTED",
+  "MISSED",
+  "LEFT",
+  "FAILED",
+] as const;
+
+export const VOICE_CALL_EVENT_TYPES = [
+  "INITIATED",
+  "RINGING",
+  "ACCEPTED",
+  "REJECTED",
+  "CONNECTED",
+  "ENDED",
+  "MISSED",
+  "FAILED",
+  "SIGNAL_RELAYED",
+] as const;
+
+/** WebRTC signalling message kinds relayed between call participants. Signal bodies are relayed transiently and never persisted. */
+export const VOICE_CALL_SIGNAL_TYPES = ["offer", "answer", "candidate"] as const;
 
 export const REALTIME_RUNTIME_STATUSES = [
   "TARGET_NOT_RUNNING",
@@ -192,6 +232,26 @@ export type ElectionDayGeofenceStatus = (typeof ELECTION_DAY_GEOFENCE_STATUSES)[
 export type ElectionDayAlertType = (typeof ELECTION_DAY_ALERT_TYPES)[number];
 export type ElectionDayAlertStatus = (typeof ELECTION_DAY_ALERT_STATUSES)[number];
 export type ElectionDayRealtimeEventType = (typeof ELECTION_DAY_REALTIME_EVENT_TYPES)[number];
+export type VoiceCallStatus = (typeof VOICE_CALL_STATUSES)[number];
+export type VoiceCallEndReason = (typeof VOICE_CALL_END_REASONS)[number];
+export type VoiceCallParticipantStatus = (typeof VOICE_CALL_PARTICIPANT_STATUSES)[number];
+export type VoiceCallEventType = (typeof VOICE_CALL_EVENT_TYPES)[number];
+export type VoiceCallSignalType = (typeof VOICE_CALL_SIGNAL_TYPES)[number];
+
+/**
+ * Permitted durable call-status transitions. Any transition not listed here is
+ * rejected by the API so call lifecycle cannot be driven into an invalid state.
+ */
+export const VOICE_CALL_STATUS_TRANSITIONS: Record<VoiceCallStatus, readonly VoiceCallStatus[]> = {
+  INITIATED: ["RINGING", "CONNECTED", "ENDED"],
+  RINGING: ["CONNECTED", "ENDED"],
+  CONNECTED: ["ENDED"],
+  ENDED: [],
+};
+
+export function canTransitionVoiceCall(from: VoiceCallStatus, to: VoiceCallStatus): boolean {
+  return VOICE_CALL_STATUS_TRANSITIONS[from].includes(to);
+}
 export type RealtimeRuntimeStatus = (typeof REALTIME_RUNTIME_STATUSES)[number];
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export type EvidenceClassification = (typeof EVIDENCE_CLASSIFICATIONS)[number];
@@ -450,6 +510,53 @@ export type ElectionDayMessageItem = {
   }>;
 };
 
+export type ElectionDayCallParticipantItem = {
+  userId: string;
+  name: string;
+  role: string;
+  isInitiator: boolean;
+  status: VoiceCallParticipantStatus;
+  invitedAt: string;
+  ringingAt: string | null;
+  answeredAt: string | null;
+  leftAt: string | null;
+  presence: RealtimePresenceState;
+};
+
+export type ElectionDayCallEventItem = {
+  id: string;
+  type: VoiceCallEventType;
+  actorUserId: string | null;
+  targetUserId: string | null;
+  signalType: string | null;
+  fromStatus: VoiceCallStatus | null;
+  toStatus: VoiceCallStatus | null;
+  occurredAt: string;
+};
+
+/**
+ * Durable Election Day call record. `recording` is always "DISABLED": call media
+ * is never captured, so no media reference is ever present on this contract.
+ */
+export type ElectionDayCallItem = {
+  id: string;
+  conversationId: string | null;
+  initiatorUserId: string;
+  initiatorName: string;
+  status: VoiceCallStatus;
+  endReason: VoiceCallEndReason | null;
+  territory: OperationalTerritory;
+  startedAt: string;
+  ringingAt: string | null;
+  connectedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  endedByUserId: string | null;
+  recording: "DISABLED";
+  participants: ElectionDayCallParticipantItem[];
+  events: ElectionDayCallEventItem[];
+};
+
 export type ElectionDayTimelineItem = {
   id: string;
   type: "ALERT" | "INCIDENT" | "REPORT" | "MESSAGE" | "ACTIVITY" | "REALTIME_EVENT";
@@ -466,16 +573,24 @@ export type ElectionDayWebrtcConfig = {
   signalling: {
     transport: "socket.io";
     path: string;
-    events: ["call.ringing", "call.connected", "call.ended", "call.signal"];
+    events: ElectionDayRealtimeEventType[];
+    /** REST endpoints that own durable lifecycle transitions. */
+    restLifecyclePath: string;
   };
   iceServers: Array<{
     urls: string | string[];
     username?: string;
     credential?: string;
   }>;
+  /**
+   * TURN relay is required for field devices behind carrier-grade NAT. When
+   * false, calls still work on permissive networks but must not be assumed
+   * reachable; production deployment configures a Coturn-compatible TURN URL.
+   */
   turnConfigured: boolean;
+  /** Calls are never recorded automatically; no media is persisted. */
   recording: "DISABLED";
-  durableCallHistory: "BLOCKED_SCHEMA_REVIEW_REQUIRED";
+  durableCallHistory: "AVAILABLE";
 };
 
 export type PlatformAuditEnvelope = {

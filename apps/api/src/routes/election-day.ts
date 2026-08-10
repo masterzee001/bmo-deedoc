@@ -13,10 +13,20 @@ import {
   OperationalAlertSeverity,
   OperationalAlertStatus,
   Prisma,
+  VoiceCallEndReason,
+  VoiceCallEventType,
+  VoiceCallParticipantStatus,
+  VoiceCallStatus,
 } from "@prisma/client";
 import {
+  ELECTION_DAY_REALTIME_EVENT_TYPES,
   OGUN_STATE_ID,
+  VOICE_CALL_SIGNAL_TYPES,
+  canTransitionVoiceCall,
   type AuthUserProfile,
+  type ElectionDayCallEventItem,
+  type ElectionDayCallItem,
+  type ElectionDayCallParticipantItem,
   type ElectionDayConversationItem,
   type ElectionDayLocationEvaluation,
   type ElectionDayMessageItem,
@@ -33,6 +43,7 @@ import { z } from "zod";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import { getAuthUserProfile } from "../auth/profile";
 import { createAuditLog } from "../lib/audit";
+import { canContactUser, contactTerritoryForUser, messagingCommandScope } from "../lib/messaging-permissions";
 import { createNotification } from "../lib/notifications";
 import { serializeBroadcastMessageItem, serializeIncidentItem } from "../lib/serializers";
 import { validateTerritoryReferences } from "../lib/territory";
@@ -40,7 +51,12 @@ import { requireAuth, requirePollingUnitFieldCapability } from "../middleware/au
 import { prisma } from "../prisma";
 import { createElectionDayRealtimeEvent } from "../realtime/events";
 import { env } from "../env";
-import { getPresenceSnapshot, getRealtimeGatewayStatus, publishRealtimeEvent } from "../realtime/gateway";
+import {
+  getPresenceSnapshot,
+  getRealtimeGatewayStatus,
+  publishRealtimeEvent,
+  publishRealtimeEventToUsers,
+} from "../realtime/gateway";
 
 const router = Router();
 
@@ -108,6 +124,27 @@ const messageCreateSchema = z.object({
 const timelineQuerySchema = z.object({
   reportDate: z.string().date().optional(),
   limit: z.coerce.number().int().min(10).max(200).default(80),
+});
+
+const callInitiateSchema = z.object({
+  targetUserId: z.string().trim().min(1),
+  conversationId: z.string().trim().optional(),
+});
+
+const callEndSchema = z.object({
+  reason: z.enum(["COMPLETED", "CANCELLED", "FAILED"]).optional(),
+});
+
+const callSignalSchema = z.object({
+  signalType: z.enum(VOICE_CALL_SIGNAL_TYPES),
+  targetUserId: z.string().trim().min(1),
+  /** Relayed verbatim to the peer and never persisted. */
+  signal: z.unknown(),
+});
+
+const callHistoryQuerySchema = z.object({
+  status: z.nativeEnum(VoiceCallStatus).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 type AgentProfileForOperation = {
@@ -579,22 +616,12 @@ async function targetTerritoryForUser(userId: string): Promise<OperationalTerrit
   };
 }
 
+/**
+ * Messaging and voice calling share one contact rule, so both delegate to the
+ * same helper that the realtime gateway uses.
+ */
 async function canMessageUser(actor: AuthUserProfile, targetUserId: string) {
-  if (actor.id === targetUserId) {
-    return false;
-  }
-  const targetProfile = await getAuthUserProfile(targetUserId);
-  const targetTerritory = await targetTerritoryForUser(targetUserId);
-  const actorTerritory =
-    commandScopeForActor(actor) ||
-    (actor.agentProfile?.stateId ? operationalTerritoryFromProfile({ ...actor.agentProfile, stateId: actor.agentProfile.stateId }) : null);
-  if (!targetProfile || !targetTerritory || !actorTerritory) {
-    return false;
-  }
-
-  const resolvedTarget = await resolveOperationalTerritory(prisma, targetTerritory);
-  const resolvedActor = await resolveOperationalTerritory(prisma, actorTerritory);
-  return authorizeAction(actor, "VIEW_TERRITORY", resolvedTarget) || authorizeAction(targetProfile, "VIEW_TERRITORY", resolvedActor);
+  return canContactUser(actor, targetUserId);
 }
 
 async function createFieldActivity(
@@ -1579,15 +1606,575 @@ router.get("/webrtc/config", requireAuth, async (_request, response) => {
     signalling: {
       transport: "socket.io",
       path: env.REALTIME_PATH,
-      events: ["call.ringing", "call.connected", "call.ended", "call.signal"],
+      events: ELECTION_DAY_REALTIME_EVENT_TYPES.filter((eventType) => eventType.startsWith("call.")),
+      restLifecyclePath: "/election-day/calls",
     },
     iceServers,
     turnConfigured: Boolean(env.TURN_URL && env.TURN_USERNAME && env.TURN_CREDENTIAL),
     recording: "DISABLED",
-    durableCallHistory: "BLOCKED_SCHEMA_REVIEW_REQUIRED",
+    durableCallHistory: "AVAILABLE",
   };
 
   return response.json({ config });
+});
+
+type VoiceCallWithRelations = Prisma.VoiceCallGetPayload<{
+  include: {
+    initiatorUser: { select: { name: true } };
+    participants: { include: { user: { select: { name: true; role: true } } } };
+    events: true;
+  };
+}>;
+
+const voiceCallInclude = {
+  initiatorUser: { select: { name: true } },
+  participants: { include: { user: { select: { name: true, role: true } } } },
+  events: { orderBy: { occurredAt: "asc" } },
+} satisfies Prisma.VoiceCallInclude;
+
+function serializeCall(call: VoiceCallWithRelations, presence: RealtimePresenceEntry[]): ElectionDayCallItem {
+  const presenceByUser = new Map(presence.map((entry) => [entry.userId, entry]));
+  const participants: ElectionDayCallParticipantItem[] = call.participants.map((participant) => ({
+    userId: participant.userId,
+    name: participant.user.name,
+    role: participant.user.role,
+    isInitiator: participant.isInitiator,
+    status: participant.status,
+    invitedAt: participant.invitedAt.toISOString(),
+    ringingAt: participant.ringingAt?.toISOString() || null,
+    answeredAt: participant.answeredAt?.toISOString() || null,
+    leftAt: participant.leftAt?.toISOString() || null,
+    presence: presenceByUser.get(participant.userId)?.state || "OFFLINE",
+  }));
+
+  const events: ElectionDayCallEventItem[] = call.events.map((event) => ({
+    id: event.id,
+    type: event.type,
+    actorUserId: event.actorUserId,
+    targetUserId: event.targetUserId,
+    signalType: event.signalType,
+    fromStatus: event.fromStatus,
+    toStatus: event.toStatus,
+    occurredAt: event.occurredAt.toISOString(),
+  }));
+
+  return {
+    id: call.id,
+    conversationId: call.conversationId,
+    initiatorUserId: call.initiatorUserId,
+    initiatorName: call.initiatorUser.name,
+    status: call.status,
+    endReason: call.endReason,
+    territory: {
+      stateId: call.stateId,
+      senatorialDistrictId: call.senatorialDistrictId,
+      federalConstituencyId: call.federalConstituencyId,
+      stateConstituencyId: call.stateConstituencyId,
+      wardId: call.wardId,
+      pollingUnitId: call.pollingUnitId,
+    },
+    startedAt: call.startedAt.toISOString(),
+    ringingAt: call.ringingAt?.toISOString() || null,
+    connectedAt: call.connectedAt?.toISOString() || null,
+    endedAt: call.endedAt?.toISOString() || null,
+    durationSeconds: call.durationSeconds,
+    endedByUserId: call.endedByUserId,
+    recording: "DISABLED",
+    participants,
+    events,
+  };
+}
+
+async function loadCallForParticipant(callId: string, userId: string) {
+  const call = await prisma.voiceCall.findUnique({ where: { id: callId }, include: voiceCallInclude });
+  if (!call || !call.participants.some((participant) => participant.userId === userId)) {
+    return null;
+  }
+  return call;
+}
+
+/** Publishes a call lifecycle event to the participants only, never to a territory room. */
+async function publishCallEvent(
+  eventType: "call.initiated" | "call.ringing" | "call.accepted" | "call.rejected" | "call.connected" | "call.ended" | "call.missed",
+  call: VoiceCallWithRelations,
+  actorUserId: string,
+  extraPayload: Record<string, unknown> = {},
+) {
+  const event = createElectionDayRealtimeEvent({
+    eventType,
+    actorUserId,
+    territory: {
+      stateId: call.stateId,
+      senatorialDistrictId: call.senatorialDistrictId,
+      federalConstituencyId: call.federalConstituencyId,
+      stateConstituencyId: call.stateConstituencyId,
+      wardId: call.wardId,
+      pollingUnitId: call.pollingUnitId,
+    },
+    idempotencyKey: `call:${call.id}:${eventType}`,
+    payload: {
+      callId: call.id,
+      conversationId: call.conversationId,
+      initiatorUserId: call.initiatorUserId,
+      status: call.status,
+      participantUserIds: call.participants.map((participant) => participant.userId),
+      recording: "DISABLED",
+      ...extraPayload,
+    },
+  });
+
+  await prisma.realtimeEventOutbox
+    .create({
+      data: {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        eventVersion: event.eventVersion,
+        idempotencyKey: event.idempotencyKey,
+        payloadJson: event.payload as Prisma.InputJsonValue,
+        territoryJson: event.territory as Prisma.InputJsonValue,
+        stateId: call.stateId,
+        senatorialDistrictId: call.senatorialDistrictId,
+        federalConstituencyId: call.federalConstituencyId,
+        stateConstituencyId: call.stateConstituencyId,
+        wardId: call.wardId,
+        pollingUnitId: call.pollingUnitId,
+      },
+    })
+    .catch((error) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return null;
+      }
+      throw error;
+    });
+
+  const published = publishRealtimeEventToUsers(
+    event,
+    call.participants.map((participant) => participant.userId),
+  );
+  if (published) {
+    await prisma.realtimeEventOutbox
+      .update({
+        where: { idempotencyKey: event.idempotencyKey },
+        data: { status: "PUBLISHED", publishedAt: new Date(), attempts: { increment: 1 } },
+      })
+      .catch(() => undefined);
+  }
+  return published;
+}
+
+router.post("/calls", requireAuth, async (request, response) => {
+  const parsed = callInitiateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call payload.", errors: parsed.error.flatten() });
+  }
+
+  if (parsed.data.targetUserId === request.authUser!.id) {
+    return response.status(400).json({ message: "You cannot call yourself." });
+  }
+
+  if (!(await canContactUser(request.authUser!, parsed.data.targetUserId))) {
+    return response.status(403).json({ message: "You cannot call this user outside your operational relationship." });
+  }
+
+  const callTerritory = (await contactTerritoryForUser(parsed.data.targetUserId)) || messagingCommandScope(request.authUser!);
+  if (!callTerritory) {
+    return response.status(403).json({ message: "Election Day call scope is required." });
+  }
+
+  if (parsed.data.conversationId) {
+    const membership = await prisma.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId: parsed.data.conversationId, userId: request.authUser!.id } },
+    });
+    if (!membership || membership.leftAt) {
+      return response.status(403).json({ message: "You are not a member of this conversation." });
+    }
+  }
+
+  // One live call per pair keeps the durable lifecycle unambiguous.
+  const existing = await prisma.voiceCall.findFirst({
+    where: {
+      status: { not: VoiceCallStatus.ENDED },
+      participants: { some: { userId: request.authUser!.id } },
+      AND: [{ participants: { some: { userId: parsed.data.targetUserId } } }],
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return response.status(409).json({ message: "A call with this user is already in progress.", callId: existing.id });
+  }
+
+  const created = await prisma.$transaction(async (transaction) => {
+    const call = await transaction.voiceCall.create({
+      data: {
+        conversationId: parsed.data.conversationId || null,
+        initiatorUserId: request.authUser!.id,
+        status: VoiceCallStatus.RINGING,
+        ringingAt: new Date(),
+        stateId: callTerritory.stateId,
+        senatorialDistrictId: callTerritory.senatorialDistrictId || null,
+        federalConstituencyId: callTerritory.federalConstituencyId || null,
+        stateConstituencyId: callTerritory.stateConstituencyId || null,
+        wardId: callTerritory.wardId || null,
+        pollingUnitId: callTerritory.pollingUnitId || null,
+        recordingPolicy: "DISABLED",
+        participants: {
+          create: [
+            { userId: request.authUser!.id, isInitiator: true, status: VoiceCallParticipantStatus.CALLING },
+            {
+              userId: parsed.data.targetUserId,
+              isInitiator: false,
+              status: VoiceCallParticipantStatus.RINGING,
+              ringingAt: new Date(),
+            },
+          ],
+        },
+        events: {
+          create: [
+            {
+              type: VoiceCallEventType.INITIATED,
+              actorUserId: request.authUser!.id,
+              targetUserId: parsed.data.targetUserId,
+              toStatus: VoiceCallStatus.INITIATED,
+            },
+            {
+              type: VoiceCallEventType.RINGING,
+              actorUserId: request.authUser!.id,
+              targetUserId: parsed.data.targetUserId,
+              fromStatus: VoiceCallStatus.INITIATED,
+              toStatus: VoiceCallStatus.RINGING,
+            },
+          ],
+        },
+      },
+      include: voiceCallInclude,
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_INITIATED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: call,
+      metadata: { targetUserId: parsed.data.targetUserId, recording: "DISABLED" },
+    });
+    return call;
+  });
+
+  await publishCallEvent("call.ringing", created, request.authUser!.id, { targetUserId: parsed.data.targetUserId });
+
+  return response.status(201).json({
+    message: "Election Day call initiated.",
+    item: serializeCall(created, getPresenceSnapshot(created.participants.map((participant) => participant.userId))),
+  });
+});
+
+router.post("/calls/:callId/accept", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  const participant = call.participants.find((entry) => entry.userId === request.authUser!.id)!;
+  if (participant.isInitiator) {
+    return response.status(403).json({ message: "The initiator cannot accept their own call." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "CONNECTED")) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be accepted.` });
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.update({
+      where: { callId_userId: { callId: call.id, userId: request.authUser!.id } },
+      data: { status: VoiceCallParticipantStatus.ACCEPTED, answeredAt: now },
+    });
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, isInitiator: true },
+      data: { status: VoiceCallParticipantStatus.ACCEPTED, answeredAt: now },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.CONNECTED,
+        connectedAt: now,
+        events: {
+          create: [
+            {
+              type: VoiceCallEventType.ACCEPTED,
+              actorUserId: request.authUser!.id,
+              fromStatus: call.status,
+              toStatus: VoiceCallStatus.CONNECTED,
+            },
+            {
+              type: VoiceCallEventType.CONNECTED,
+              actorUserId: request.authUser!.id,
+              fromStatus: call.status,
+              toStatus: VoiceCallStatus.CONNECTED,
+            },
+          ],
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_ACCEPTED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { recording: "DISABLED" },
+    });
+    return next;
+  });
+
+  await publishCallEvent("call.connected", updated, request.authUser!.id);
+
+  return response.json({
+    message: "Election Day call connected.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/reject", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  const participant = call.participants.find((entry) => entry.userId === request.authUser!.id)!;
+  if (participant.isInitiator) {
+    return response.status(403).json({ message: "The initiator cannot reject their own call; end it instead." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "ENDED") || call.status === VoiceCallStatus.CONNECTED) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be rejected.` });
+  }
+
+  const now = new Date();
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.update({
+      where: { callId_userId: { callId: call.id, userId: request.authUser!.id } },
+      data: { status: VoiceCallParticipantStatus.REJECTED, leftAt: now },
+    });
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, isInitiator: true },
+      data: { status: VoiceCallParticipantStatus.LEFT, leftAt: now },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.ENDED,
+        endReason: VoiceCallEndReason.REJECTED,
+        endedAt: now,
+        endedByUserId: request.authUser!.id,
+        durationSeconds: 0,
+        events: {
+          create: {
+            type: VoiceCallEventType.REJECTED,
+            actorUserId: request.authUser!.id,
+            fromStatus: call.status,
+            toStatus: VoiceCallStatus.ENDED,
+          },
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_REJECTED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { endReason: "REJECTED" },
+    });
+    return next;
+  });
+
+  await publishCallEvent("call.rejected", updated, request.authUser!.id);
+
+  return response.json({
+    message: "Election Day call rejected.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/end", requireAuth, async (request, response) => {
+  const parsed = callEndSchema.safeParse(request.body || {});
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call end payload.", errors: parsed.error.flatten() });
+  }
+
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  if (!canTransitionVoiceCall(call.status, "ENDED")) {
+    return response.status(409).json({ message: `A call in status ${call.status} cannot be ended.` });
+  }
+
+  const now = new Date();
+  // A call that never connected and is ended by the initiator was missed by the
+  // recipient; ended by anyone else before connecting it was cancelled.
+  const endReason: VoiceCallEndReason = call.connectedAt
+    ? VoiceCallEndReason[parsed.data.reason || "COMPLETED"]
+    : call.initiatorUserId === request.authUser!.id
+      ? VoiceCallEndReason.MISSED
+      : VoiceCallEndReason.CANCELLED;
+  const durationSeconds = call.connectedAt ? Math.max(0, Math.round((now.getTime() - call.connectedAt.getTime()) / 1000)) : 0;
+
+  const updated = await prisma.$transaction(async (transaction) => {
+    await transaction.voiceCallParticipant.updateMany({
+      where: { callId: call.id, leftAt: null },
+      data: {
+        status: endReason === VoiceCallEndReason.MISSED ? VoiceCallParticipantStatus.MISSED : VoiceCallParticipantStatus.LEFT,
+        leftAt: now,
+      },
+    });
+    const next = await transaction.voiceCall.update({
+      where: { id: call.id },
+      data: {
+        status: VoiceCallStatus.ENDED,
+        endReason,
+        endedAt: now,
+        endedByUserId: request.authUser!.id,
+        durationSeconds,
+        events: {
+          create: {
+            type: endReason === VoiceCallEndReason.MISSED ? VoiceCallEventType.MISSED : VoiceCallEventType.ENDED,
+            actorUserId: request.authUser!.id,
+            fromStatus: call.status,
+            toStatus: VoiceCallStatus.ENDED,
+            metadataJson: { endReason, durationSeconds } as Prisma.InputJsonObject,
+          },
+        },
+      },
+      include: voiceCallInclude,
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "ELECTION_DAY_CALL_ENDED",
+      targetType: "VoiceCall",
+      targetId: call.id,
+      territory: next,
+      metadata: { endReason, durationSeconds },
+    });
+    return next;
+  });
+
+  await publishCallEvent(endReason === VoiceCallEndReason.MISSED ? "call.missed" : "call.ended", updated, request.authUser!.id, {
+    endReason,
+    durationSeconds,
+  });
+
+  return response.json({
+    message: "Election Day call ended.",
+    item: serializeCall(updated, getPresenceSnapshot(updated.participants.map((entry) => entry.userId))),
+  });
+});
+
+router.post("/calls/:callId/signal", requireAuth, async (request, response) => {
+  const parsed = callSignalSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid signal payload.", errors: parsed.error.flatten() });
+  }
+
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  if (call.status === VoiceCallStatus.ENDED) {
+    return response.status(409).json({ message: "This call has already ended." });
+  }
+
+  if (
+    !call.participants.some((participant) => participant.userId === parsed.data.targetUserId) ||
+    !(await canContactUser(request.authUser!, parsed.data.targetUserId))
+  ) {
+    return response.status(403).json({ message: "Signal denied for this call." });
+  }
+
+  // Only the signal type is recorded; the SDP/ICE body is relayed and discarded.
+  await prisma.voiceCallEvent.create({
+    data: {
+      callId: call.id,
+      type: VoiceCallEventType.SIGNAL_RELAYED,
+      actorUserId: request.authUser!.id,
+      targetUserId: parsed.data.targetUserId,
+      signalType: parsed.data.signalType,
+    },
+  });
+
+  const delivered = publishRealtimeEventToUsers(
+    createElectionDayRealtimeEvent({
+      eventType: "call.signal",
+      actorUserId: request.authUser!.id,
+      territory: {
+        stateId: call.stateId,
+        senatorialDistrictId: call.senatorialDistrictId,
+        federalConstituencyId: call.federalConstituencyId,
+        stateConstituencyId: call.stateConstituencyId,
+        wardId: call.wardId,
+        pollingUnitId: call.pollingUnitId,
+      },
+      payload: {
+        callId: call.id,
+        fromUserId: request.authUser!.id,
+        targetUserId: parsed.data.targetUserId,
+        signalType: parsed.data.signalType,
+        signal: parsed.data.signal ?? null,
+        recording: "DISABLED",
+      },
+    }),
+    [parsed.data.targetUserId],
+  );
+
+  return response.status(202).json({
+    message: "Signal relayed.",
+    delivered,
+    transport: delivered ? "socket.io" : "REST_ONLY_REALTIME_UNAVAILABLE",
+  });
+});
+
+router.get("/calls", requireAuth, async (request, response) => {
+  const parsed = callHistoryQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid call history query.", errors: parsed.error.flatten() });
+  }
+
+  const calls = await prisma.voiceCall.findMany({
+    where: {
+      participants: { some: { userId: request.authUser!.id } },
+      status: parsed.data.status || undefined,
+    },
+    include: voiceCallInclude,
+    orderBy: { startedAt: "desc" },
+    take: parsed.data.limit,
+  });
+
+  const presence = getPresenceSnapshot(
+    Array.from(new Set(calls.flatMap((call) => call.participants.map((participant) => participant.userId)))),
+  );
+
+  return response.json({ calls: calls.map((call) => serializeCall(call, presence)) });
+});
+
+router.get("/calls/:callId", requireAuth, async (request, response) => {
+  const callId = Array.isArray(request.params.callId) ? request.params.callId[0] : request.params.callId;
+  const call = await loadCallForParticipant(callId, request.authUser!.id);
+  if (!call) {
+    return response.status(404).json({ message: "Call not found." });
+  }
+
+  return response.json({
+    item: serializeCall(call, getPresenceSnapshot(call.participants.map((participant) => participant.userId))),
+  });
 });
 
 router.get("/conversations", requireAuth, async (request, response) => {

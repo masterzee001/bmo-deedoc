@@ -34,6 +34,9 @@ import type {
   ElectionDaySituationRoomStatus,
   ElectionDayTimelineItem,
   ElectionDayWebrtcConfig,
+  ElectionDayCallItem,
+  VoiceCallSignalType,
+  VoiceCallStatus,
   EvidenceAggregationItem,
   EvidenceAssetItem,
   EvidenceClassification,
@@ -2373,6 +2376,94 @@ export async function fetchElectionDayWebrtcConfig(token: string): Promise<Elect
   });
   const payload = await readJson<{ config: ElectionDayWebrtcConfig }>(response);
   return payload.config;
+}
+
+export async function initiateElectionDayCall(
+  token: string,
+  body: { targetUserId: string; conversationId?: string },
+): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function acceptElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/accept`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function rejectElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/reject`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+export async function endElectionDayCall(
+  token: string,
+  callId: string,
+  reason?: "COMPLETED" | "CANCELLED" | "FAILED",
+): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/end`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
+}
+
+/** Relays a WebRTC offer/answer/ICE candidate to the peer. Signal bodies are never persisted. */
+export async function sendElectionDayCallSignal(
+  token: string,
+  callId: string,
+  body: { signalType: VoiceCallSignalType; targetUserId: string; signal: unknown },
+): Promise<{ delivered: boolean; transport: string }> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}/signal`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<{ delivered: boolean; transport: string }>(response);
+}
+
+export async function fetchElectionDayCalls(
+  token: string,
+  query?: { status?: VoiceCallStatus; limit?: number },
+): Promise<ElectionDayCallItem[]> {
+  const search = new URLSearchParams();
+  if (query?.status) {
+    search.set("status", query.status);
+  }
+  if (query?.limit) {
+    search.set("limit", String(query.limit));
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/election-day/calls${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ calls: ElectionDayCallItem[] }>(response);
+  return payload.calls;
+}
+
+export async function fetchElectionDayCall(token: string, callId: string): Promise<ElectionDayCallItem> {
+  const response = await fetch(`${API_BASE_URL}/election-day/calls/${callId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ item: ElectionDayCallItem }>(response);
+  return payload.item;
 }
 
 export async function fetchNotifications(token: string): Promise<NotificationItem[]> {

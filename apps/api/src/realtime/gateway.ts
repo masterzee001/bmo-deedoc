@@ -2,6 +2,7 @@ import type http from "node:http";
 import { createAdapter } from "@socket.io/redis-adapter";
 import {
   ELECTION_DAY_REALTIME_EVENT_TYPES,
+  VOICE_CALL_SIGNAL_TYPES,
   type AuthUserProfile,
   type ElectionDayRealtimeEnvelope,
   type OperationalTerritory,
@@ -14,6 +15,7 @@ import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import { getAuthUserProfile } from "../auth/profile";
 import { verifyAccessToken } from "../auth/jwt";
 import { env } from "../env";
+import { canContactUser } from "../lib/messaging-permissions";
 import { prisma } from "../prisma";
 import {
   commandScopeForRealtimeActor,
@@ -255,29 +257,50 @@ function registerHandlers(socket: AuthenticatedSocket) {
     acknowledge?.({ ok: true, state });
   });
 
+  // Transient WebRTC signalling only. Durable call lifecycle transitions are
+  // owned by the REST routes under /election-day/calls; this relay never
+  // creates or mutates call state, and never persists a signal body.
   socket.on("call.signal", async (payload?: {
     conversationId?: string;
     targetUserId?: string;
     callId?: string;
-    signalType?: "offer" | "answer" | "candidate" | "ringing" | "connected" | "ended" | "declined" | "failed";
+    signalType?: "offer" | "answer" | "candidate";
     signal?: unknown;
   }, acknowledge?: (response: Record<string, unknown>) => void) => {
-    if (!payload?.targetUserId || !payload.signalType) {
-      acknowledge?.({ ok: false, message: "targetUserId and signalType are required." });
+    if (!payload?.targetUserId || !payload.signalType || !payload.callId) {
+      acknowledge?.({ ok: false, message: "callId, targetUserId, and signalType are required." });
       return;
     }
 
-    const eventName =
-      payload.signalType === "ringing"
-        ? "call.ringing"
-        : payload.signalType === "connected"
-          ? "call.connected"
-          : payload.signalType === "ended" || payload.signalType === "declined" || payload.signalType === "failed"
-            ? "call.ended"
-            : "call.signal";
+    if (!VOICE_CALL_SIGNAL_TYPES.includes(payload.signalType)) {
+      acknowledge?.({ ok: false, message: "Unsupported signal type." });
+      return;
+    }
 
-    ioServer?.to(userPresenceRoom(payload.targetUserId)).emit(eventName, {
-      callId: payload.callId || `${socket.data.authUser.id}:${payload.targetUserId}:${Date.now()}`,
+    // The signal may only be relayed between two live participants of a call
+    // that is still in progress, and only when the contact rule permits it.
+    const call = await prisma.voiceCall.findUnique({
+      where: { id: payload.callId },
+      select: { id: true, status: true, participants: { select: { userId: true, status: true } } },
+    });
+    const participantIds = new Set(call?.participants.map((participant) => participant.userId) || []);
+    if (
+      !call ||
+      call.status === "ENDED" ||
+      !participantIds.has(socket.data.authUser.id) ||
+      !participantIds.has(payload.targetUserId)
+    ) {
+      acknowledge?.({ ok: false, message: "Signal denied for this call." });
+      return;
+    }
+
+    if (!(await canContactUser(socket.data.authUser, payload.targetUserId))) {
+      acknowledge?.({ ok: false, message: "Signal denied for this call." });
+      return;
+    }
+
+    ioServer?.to(userPresenceRoom(payload.targetUserId)).emit("call.signal", {
+      callId: call.id,
       conversationId: payload.conversationId || null,
       fromUserId: socket.data.authUser.id,
       targetUserId: payload.targetUserId,
@@ -286,7 +309,7 @@ function registerHandlers(socket: AuthenticatedSocket) {
       occurredAt: new Date().toISOString(),
       recording: "DISABLED",
     });
-    acknowledge?.({ ok: true, eventName, recording: "DISABLED" });
+    acknowledge?.({ ok: true, eventName: "call.signal", recording: "DISABLED" });
   });
 
   socket.on("disconnect", () => {
@@ -352,6 +375,22 @@ export function publishRealtimeEvent(event: ElectionDayRealtimeEnvelope): boolea
     return true;
   }
 
+  ioServer.to(rooms).emit(event.eventType, event);
+  ioServer.to(rooms).emit("realtime.event", event);
+  return true;
+}
+
+/**
+ * Deliver an event only to the named users' presence rooms. Call signalling and
+ * lifecycle are point-to-point, so they must never fan out to a territory room
+ * where non-participants are subscribed.
+ */
+export function publishRealtimeEventToUsers(event: ElectionDayRealtimeEnvelope, userIds: string[]): boolean {
+  if (!ioServer || userIds.length === 0) {
+    return false;
+  }
+
+  const rooms = Array.from(new Set(userIds)).map((userId) => userPresenceRoom(userId));
   ioServer.to(rooms).emit(event.eventType, event);
   ioServer.to(rooms).emit("realtime.event", event);
   return true;
