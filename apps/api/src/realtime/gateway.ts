@@ -162,6 +162,7 @@ async function configureRedisAdapter(io: Server) {
     });
     await Promise.all([pubClient.connect(), subClient.connect()]);
     io.adapter(createAdapter(pubClient, subClient));
+    await subscribeToOutboxReplay();
     gatewayStatus = {
       ...gatewayStatus,
       runtimeStatus: "AVAILABLE",
@@ -177,6 +178,38 @@ async function configureRedisAdapter(io: Server) {
       throw error;
     }
   }
+}
+
+/**
+ * Channel the worker publishes durable events on when it drains the outbox.
+ * The worker has no Socket.IO server of its own, so whichever API instance is
+ * connected performs the actual room fan-out.
+ */
+const REALTIME_OUTBOX_CHANNEL = "realtime:outbox";
+
+async function subscribeToOutboxReplay() {
+  if (!subClient) {
+    return;
+  }
+
+  // A dedicated connection: the adapter's own subscriber is in subscriber mode
+  // and cannot take additional commands.
+  const replayClient = subClient.duplicate() as RedisClientType;
+  replayClient.on("error", () => undefined);
+  await replayClient.connect();
+  await replayClient.subscribe(REALTIME_OUTBOX_CHANNEL, (message) => {
+    try {
+      const event = JSON.parse(message) as ElectionDayRealtimeEnvelope;
+      const rooms = realtimeRoomsForTerritory(event.territory);
+      if (rooms.length === 0) {
+        return;
+      }
+      ioServer?.to(rooms).emit(event.eventType, event);
+      ioServer?.to(rooms).emit("realtime.event", event);
+    } catch {
+      // A malformed replay payload must never take down the gateway.
+    }
+  });
 }
 
 async function authorizeSubscription(actor: AuthUserProfile, territory?: OperationalTerritory) {

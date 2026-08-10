@@ -68,16 +68,38 @@ const verificationDocumentSchema = z.object({
   }),
 });
 
-const rewardRuleSchema = z.object({
-  name: z.string().trim().min(3).max(120),
-  directPoints: z.number().int().min(0).max(100000),
-  eligibleRole: z.nativeEnum(UserRole).default(UserRole.COORDINATOR),
-  eligibleCoordinatorLevel: z
-    .enum(["SENATORIAL_DISTRICT", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "WARD", "POLLING_UNIT"])
-    .optional(),
-  effectiveFrom: z.string().datetime().optional(),
-  effectiveUntil: z.string().datetime().optional(),
-});
+const rewardRuleSchema = z
+  .object({
+    name: z.string().trim().min(3).max(120),
+    directPoints: z.number().int().min(0).max(100000),
+    qualifyingEvent: z.nativeEnum(RewardQualifyingEvent).default(RewardQualifyingEvent.VOTER_VERIFICATION_APPROVED),
+    /** Qualified-referral count that triggers a bonus award. Milestone rules only. */
+    milestoneThreshold: z.number().int().min(1).max(100000).optional(),
+    eligibleRole: z.nativeEnum(UserRole).default(UserRole.COORDINATOR),
+    eligibleCoordinatorLevel: z
+      .enum(["SENATORIAL_DISTRICT", "FEDERAL_CONSTITUENCY", "STATE_CONSTITUENCY", "WARD", "POLLING_UNIT"])
+      .optional(),
+    effectiveFrom: z.string().datetime().optional(),
+    effectiveUntil: z.string().datetime().optional(),
+  })
+  .superRefine((value, context) => {
+    // A bonus rule without a threshold would have no system trigger, and a
+    // system trigger is the only way bonus points may come into existence.
+    if (value.qualifyingEvent === RewardQualifyingEvent.REFERRAL_MILESTONE_REACHED && !value.milestoneThreshold) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["milestoneThreshold"],
+        message: "milestoneThreshold is required for REFERRAL_MILESTONE_REACHED bonus rules.",
+      });
+    }
+    if (value.qualifyingEvent !== RewardQualifyingEvent.REFERRAL_MILESTONE_REACHED && value.milestoneThreshold) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["milestoneThreshold"],
+        message: "milestoneThreshold only applies to REFERRAL_MILESTONE_REACHED bonus rules.",
+      });
+    }
+  });
 
 const payoutConfigurationSchema = z.object({
   minimumPoints: z.number().int().min(1).max(10_000_000),
@@ -1224,7 +1246,7 @@ router.post("/reward-rules", requireAuth, requireRole("SUPER_ADMIN"), async (req
     const created = await transaction.rewardRule.create({
       data: {
         name: parsed.data.name,
-        qualifyingEvent: RewardQualifyingEvent.VOTER_VERIFICATION_APPROVED,
+        qualifyingEvent: parsed.data.qualifyingEvent,
         eligibleRole: parsed.data.eligibleRole,
         eligibleCoordinatorLevel: (parsed.data.eligibleCoordinatorLevel as CoordinatorLevel | undefined) || null,
         effectiveFrom,
@@ -1234,6 +1256,7 @@ router.post("/reward-rules", requireAuth, requireRole("SUPER_ADMIN"), async (req
           create: {
             version: 1,
             directPoints: parsed.data.directPoints,
+            milestoneThreshold: parsed.data.milestoneThreshold ?? null,
             effectiveFrom,
           },
         },
@@ -1247,8 +1270,9 @@ router.post("/reward-rules", requireAuth, requireRole("SUPER_ADMIN"), async (req
       targetType: "RewardRule",
       targetId: created.id,
       metadata: {
-        qualifyingEvent: RewardQualifyingEvent.VOTER_VERIFICATION_APPROVED,
+        qualifyingEvent: parsed.data.qualifyingEvent,
         directPoints: parsed.data.directPoints,
+        milestoneThreshold: parsed.data.milestoneThreshold ?? null,
       },
     });
 

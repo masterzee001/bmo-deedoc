@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { configureEvidenceObjectStorage } from "@pics-nigeria/object-storage";
 import dotenv from "dotenv";
 import { z } from "zod";
 
@@ -148,3 +149,16 @@ export const env = {
     .map((url) => url.trim())
     .filter(Boolean),
 };
+
+// The storage client lives in a shared package so the API and the worker use one
+// implementation. Each host wires it from its own validated environment.
+configureEvidenceObjectStorage({
+  driver: env.STORAGE_DRIVER,
+  endpoint: env.STORAGE_ENDPOINT,
+  region: env.STORAGE_REGION,
+  bucket: env.STORAGE_BUCKET,
+  accessKey: env.STORAGE_ACCESS_KEY,
+  secretKey: env.STORAGE_SECRET_KEY,
+  forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
+  isTest: env.NODE_ENV === "test",
+});

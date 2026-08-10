@@ -360,6 +360,51 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
     },
   },
   {
+    name: "realtime replay rebuilds missed events from the durable outbox and stays territory scoped",
+    run: async () => {
+      const stateToken = await login(stateOfficerEmail);
+
+      // Earlier suites committed durable events (check-in, alerts, messages). A
+      // reconnecting client asks for everything since a cursor rather than
+      // trusting that every live socket frame arrived.
+      const replay = await apiRequest("/election-day/realtime/replay?since=1970-01-01T00:00:00.000Z", { token: stateToken });
+      assert.equal(replay.status, 200, JSON.stringify(replay.payload));
+      const body = replay.payload as {
+        events: Array<{ eventId: string; eventType: string; committedAt: string }>;
+        cursor: string;
+        snapshotPath: string;
+      };
+      assert.ok(body.events.length > 0, "durable outbox should contain committed events");
+      assert.equal(body.snapshotPath, "/election-day/situation-room/status");
+
+      // Ordering lets a client apply events and advance its cursor safely.
+      const timestamps = body.events.map((event) => new Date(event.committedAt).getTime());
+      assert.deepEqual(timestamps, [...timestamps].sort((left, right) => left - right));
+      assert.equal(body.cursor, body.events[body.events.length - 1].committedAt);
+
+      // Replaying from the returned cursor yields nothing new, so repeated
+      // reconnects do not reprocess the same events.
+      const empty = await apiRequest(`/election-day/realtime/replay?since=${encodeURIComponent(body.cursor)}`, { token: stateToken });
+      assert.equal(empty.status, 200, JSON.stringify(empty.payload));
+      assert.equal((empty.payload.events as unknown[]).length, 0);
+
+      // Replay must not become a way to read another territory's events.
+      const memberToken = await login(memberEmail);
+      const denied = await apiRequest("/election-day/realtime/replay", { token: memberToken });
+      assert.equal(denied.status, 403, JSON.stringify(denied.payload));
+
+      const pucToken = await login(pucEmail);
+      const scoped = await apiRequest("/election-day/realtime/replay?since=1970-01-01T00:00:00.000Z", { token: pucToken });
+      assert.equal(scoped.status, 200, JSON.stringify(scoped.payload));
+      const scopedEvents = scoped.payload.events as Array<{ territory: { pollingUnitId: string | null } | null }>;
+      const otherBranchPollingUnitId = branches[1].pollingUnitId;
+      assert.ok(
+        scopedEvents.every((event) => event.territory?.pollingUnitId !== otherBranchPollingUnitId),
+        "a Polling Unit coordinator must not replay another Polling Unit's events",
+      );
+    },
+  },
+  {
     name: "WebRTC config exposes STUN/TURN readiness, durable history, and never enables recording",
     run: async () => {
       const token = await login(stateOfficerEmail);

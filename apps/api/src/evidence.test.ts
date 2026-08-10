@@ -12,7 +12,7 @@ import {
   EvidenceObjectAlreadyExistsError,
   InMemoryEvidenceObjectStorage,
   setEvidenceObjectStorageForTests,
-} from "./storage/evidence-storage";
+} from "@pics-nigeria/object-storage";
 
 type ApiResult = { status: number; payload: Record<string, unknown> };
 type Branch = {
@@ -279,6 +279,53 @@ const cases: Array<{ name: string; run: () => Promise<void> }> = [
       assert.equal(row.pollingUnitId, branch.pollingUnitId);
       assert.equal(row.custodyEvents.some((event) => event.eventType === "UPLOADED"), true);
       assert.equal(await storage.getObject(row.originalStorageKey).then((item) => item?.sha256), row.sha256);
+
+      // Derivative work is scheduled durably in the same transaction as the
+      // asset, so accepting an original can never leave its renditions
+      // unscheduled — and the API needs neither Redis nor a running worker.
+      const job = await prisma.backgroundJob.findUniqueOrThrow({
+        where: { idempotencyKey: `evidence.derivatives:${uploadedEvidenceId}` },
+      });
+      assert.equal(job.queue, "evidence-derivatives");
+      assert.equal(job.jobName, "evidence.derivatives.generate");
+      assert.equal(job.status, "PENDING");
+      assert.equal((job.payloadJson as { evidenceAssetId: string }).evidenceAssetId, uploadedEvidenceId);
+    },
+  },
+  {
+    name: "evidence responses report derivative renditions without treating them as authoritative",
+    run: async () => {
+      const token = await login(stateOfficerEmail);
+      const detail = await apiRequest(`/evidence/${uploadedEvidenceId}`, { token });
+      assert.equal(detail.status, 200, JSON.stringify(detail.payload));
+      const evidence = detail.payload.evidence as {
+        derivativeRenditions: Array<{ kind: string; status: string }>;
+        preservation: { originalImmutable: boolean; authoritativeStorage: string; derivativeStatus: string };
+      };
+
+      // No worker runs during this suite, so renditions are still queued. The
+      // original stays authoritative regardless of derivative state.
+      assert.equal(evidence.preservation.originalImmutable, true);
+      assert.equal(evidence.preservation.authoritativeStorage, "private-object-storage");
+      assert.equal(evidence.preservation.derivativeStatus, "QUEUED");
+      assert.deepEqual(evidence.derivativeRenditions, []);
+
+      // A DEFERRED rendition must never be reported as a failure.
+      await prisma.evidenceDerivative.create({
+        data: {
+          evidenceAssetId: uploadedEvidenceId,
+          kind: "POSTER",
+          status: "DEFERRED",
+          deferredReason: "VIDEO_TRANSCODE_RUNTIME_NOT_DEPLOYED",
+        },
+      });
+      const deferred = await apiRequest(`/evidence/${uploadedEvidenceId}`, { token });
+      const deferredEvidence = deferred.payload.evidence as {
+        derivativeRenditions: Array<{ kind: string; status: string; deferredReason: string | null }>;
+        preservation: { derivativeStatus: string };
+      };
+      assert.equal(deferredEvidence.preservation.derivativeStatus, "DEFERRED");
+      assert.equal(deferredEvidence.derivativeRenditions[0].deferredReason, "VIDEO_TRANSCODE_RUNTIME_NOT_DEPLOYED");
     },
   },
   {
@@ -466,6 +513,8 @@ async function teardown() {
   await prisma.legalCaseNote.deleteMany({ where: { authorUser: { email: { startsWith: "evidence-test-" } } } });
   await prisma.legalCase.deleteMany({ where: { createdByUser: { email: { startsWith: "evidence-test-" } } } });
   await prisma.evidenceCustodyEvent.deleteMany({ where: { evidenceAsset: { uploaderUser: { email: { startsWith: "evidence-test-" } } } } });
+  await prisma.evidenceDerivative.deleteMany({ where: { evidenceAsset: { uploaderUser: { email: { startsWith: "evidence-test-" } } } } });
+  await prisma.backgroundJob.deleteMany({ where: { idempotencyKey: { startsWith: "evidence.derivatives:" } } });
   await prisma.evidenceAsset.deleteMany({ where: { uploaderUser: { email: { startsWith: "evidence-test-" } } } });
   await prisma.auditLog.deleteMany({ where: { actorUser: { email: { startsWith: "evidence-test-" } } } });
   await prisma.incident.deleteMany({ where: { reportedByUser: { email: { startsWith: "evidence-test-" } } } });

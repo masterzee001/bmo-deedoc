@@ -20,9 +20,10 @@ import {
 import { z } from "zod";
 import { authorizeAction, resolveOperationalTerritory } from "../authorization";
 import { createAuditLog } from "../lib/audit";
+import { enqueueBackgroundJob } from "../lib/background-jobs";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../prisma";
-import { EvidenceObjectAlreadyExistsError, getEvidenceObjectStorage } from "../storage/evidence-storage";
+import { EvidenceObjectAlreadyExistsError, getEvidenceObjectStorage } from "@pics-nigeria/object-storage";
 
 const router = Router();
 
@@ -237,8 +238,32 @@ function objectKey(id: string, fileName: string, now: Date) {
   return `election-evidence/original/${yyyy}/${mm}/${dd}/${id}-${sanitizeFileName(fileName)}`;
 }
 
-function serializeEvidence(asset: Prisma.EvidenceAssetGetPayload<{ include: { custodyEvents: true } }> | Prisma.EvidenceAssetGetPayload<object>) {
+type EvidenceDerivativeRow = Prisma.EvidenceDerivativeGetPayload<object>;
+
+/**
+ * Collapses per-rendition states into one status for the preservation block.
+ * DEFERRED is reported distinctly from FAILED so an unimplemented pipeline is
+ * never mistaken for a processing error.
+ */
+function derivativeStatusSummary(rows: EvidenceDerivativeRow[] | undefined) {
+  if (!rows || rows.length === 0) {
+    return "QUEUED";
+  }
+  if (rows.some((row) => row.status === "FAILED")) {
+    return "FAILED";
+  }
+  if (rows.some((row) => row.status === "PENDING" || row.status === "PROCESSING")) {
+    return "PROCESSING";
+  }
+  if (rows.every((row) => row.status === "DEFERRED")) {
+    return "DEFERRED";
+  }
+  return "READY";
+}
+
+function serializeEvidence(asset: Prisma.EvidenceAssetGetPayload<{ include: { custodyEvents: true, derivatives: true } }> | Prisma.EvidenceAssetGetPayload<object>) {
   const custodyEvents = "custodyEvents" in asset ? asset.custodyEvents : undefined;
+  const derivativeRows = "derivatives" in asset ? (asset.derivatives as EvidenceDerivativeRow[] | undefined) : undefined;
   return {
     id: asset.id,
     evidenceType: asset.evidenceType,
@@ -282,10 +307,26 @@ function serializeEvidence(asset: Prisma.EvidenceAssetGetPayload<{ include: { cu
       publicUrl: null,
       signedAccessRequired: true,
     },
+    // Derivative renditions are reported separately from the original and are
+    // never presented as authoritative: the original object and its SHA-256
+    // remain the evidentiary record, and any derivative can be regenerated.
+    derivativeRenditions:
+      derivativeRows?.map((derivative) => ({
+        id: derivative.id,
+        kind: derivative.kind,
+        status: derivative.status,
+        mimeType: derivative.mimeType,
+        width: derivative.width,
+        height: derivative.height,
+        byteSize: derivative.byteSize,
+        sha256: derivative.sha256,
+        deferredReason: derivative.deferredReason,
+        generatedAt: derivative.generatedAt?.toISOString() || null,
+      })) || [],
     preservation: {
       originalImmutable: true,
       authoritativeStorage: "private-object-storage",
-      derivativeStatus: "TARGET_LATER",
+      derivativeStatus: derivativeStatusSummary(derivativeRows),
       retentionPolicy: "ELECTION_EVIDENCE_STRONG_RETENTION_TARGET",
     },
   };
@@ -439,7 +480,7 @@ function validateEvidenceContent(evidenceType: EvidenceType, mimeType: string, b
 }
 
 async function loadEvidenceForActor(actor: AuthUserProfile, evidenceAssetId: string) {
-  const asset = await prisma.evidenceAsset.findUnique({ where: { id: evidenceAssetId }, include: { custodyEvents: true } });
+  const asset = await prisma.evidenceAsset.findUnique({ where: { id: evidenceAssetId }, include: { custodyEvents: true, derivatives: true } });
   if (!asset) {
     return null;
   }
@@ -736,7 +777,7 @@ router.post("/uploads/finalize", requireAuth, async (request, response) => {
             authoritativeOriginalLocation: "private-object-storage",
           }),
           derivativesJson: toInputJson(parsed.data.derivatives || {
-            derivativeWorkerStatus: "TARGET_LATER",
+            derivativeWorkerStatus: "QUEUED",
             derivatives: [],
           }),
           uploaderUserId: request.authUser!.id,
@@ -766,6 +807,17 @@ router.post("/uploads/finalize", requireAuth, async (request, response) => {
         territory,
         metadata: { evidenceType: created.evidenceType, sha256, storageRuntime: storage.runtime },
       });
+
+      // Scheduled inside the same transaction as the asset, so an accepted
+      // original can never end up without its derivative work recorded. The row
+      // is durable in PostgreSQL; the worker moves it into BullMQ when it runs,
+      // so neither Redis nor the worker needs to be up to accept evidence.
+      await enqueueBackgroundJob(transaction, {
+        jobName: "evidence.derivatives.generate",
+        idempotencyKey: `evidence.derivatives:${created.id}`,
+        payload: { evidenceAssetId: created.id },
+      });
+
       return created;
     });
 

@@ -137,6 +137,10 @@ try {
   runNpm(["run", "verify:reference:ogun:allow-incomplete"], testEnv);
   runNpm(["run", "report:reference:ogun"], testEnv);
   runNpm(["test", "--workspace", "@pics-nigeria/api"], testEnv);
+  // The worker suite exercises the derivative pipeline against the same
+  // disposable database. It imports the job modules directly and never starts
+  // the BullMQ runtime, so it does not require Redis.
+  runNpm(["test", "--workspace", "@pics-nigeria/worker"], testEnv);
   console.log("database_integration=ok");
 } finally {
   if (baselineShadow) {
