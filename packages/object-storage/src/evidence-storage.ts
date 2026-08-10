@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { env } from "../env";
 
 export type StoredEvidenceObject = {
   key: string;
@@ -263,31 +262,57 @@ export class S3CompatibleEvidenceObjectStorage implements EvidenceObjectStorage 
   }
 }
 
+export type EvidenceStorageConfig = {
+  driver: "memory" | "s3";
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKey: string;
+  secretKey: string;
+  forcePathStyle: boolean;
+  isTest: boolean;
+};
+
 let storage: EvidenceObjectStorage | null = null;
+let configuration: EvidenceStorageConfig | null = null;
+
+/**
+ * Wires the storage client from the host application's validated environment.
+ * The API and the worker each call this once at startup so a single client
+ * implementation serves both without either owning the other's configuration.
+ */
+export function configureEvidenceObjectStorage(config: EvidenceStorageConfig) {
+  configuration = config;
+  storage = null;
+}
 
 export function getEvidenceObjectStorage() {
   if (storage) {
     return storage;
   }
 
-  if (env.STORAGE_DRIVER === "memory") {
-    storage = new InMemoryEvidenceObjectStorage(env.STORAGE_BUCKET || "evidence-test-bucket");
+  if (!configuration) {
+    throw new Error("Evidence object storage was used before configureEvidenceObjectStorage() ran.");
+  }
+
+  if (configuration.driver === "memory") {
+    storage = new InMemoryEvidenceObjectStorage(configuration.bucket || "evidence-test-bucket");
     return storage;
   }
 
   storage = new S3CompatibleEvidenceObjectStorage({
-    endpoint: env.STORAGE_ENDPOINT,
-    region: env.STORAGE_REGION,
-    bucket: env.STORAGE_BUCKET,
-    accessKey: env.STORAGE_ACCESS_KEY,
-    secretKey: env.STORAGE_SECRET_KEY,
-    forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
+    endpoint: configuration.endpoint,
+    region: configuration.region,
+    bucket: configuration.bucket,
+    accessKey: configuration.accessKey,
+    secretKey: configuration.secretKey,
+    forcePathStyle: configuration.forcePathStyle,
   });
   return storage;
 }
 
 export function setEvidenceObjectStorageForTests(next: EvidenceObjectStorage | null) {
-  if (env.NODE_ENV !== "test") {
+  if (!configuration?.isTest) {
     throw new Error("Evidence storage test replacement is only available in test mode.");
   }
   storage = next;

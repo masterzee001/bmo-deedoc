@@ -291,6 +291,30 @@ enum LegalCaseStatus {
   CLOSED
 }
 
+enum EvidenceDerivativeKind {
+  THUMBNAIL
+  PREVIEW
+  POSTER
+}
+
+enum EvidenceDerivativeStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  /// Recorded when the pipeline for this media type is not implemented yet.
+  /// Distinct from FAILED: nothing was attempted and no retry is scheduled.
+  DEFERRED
+}
+
+enum BackgroundJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+}
+
 enum OperationalAlertStatus {
   OPEN
   ACKNOWLEDGED
@@ -1994,6 +2018,7 @@ model EvidenceAsset {
   custodyEvents         EvidenceCustodyEvent[]
   caseEvidence          CaseEvidence[]
   packageItems          EvidencePackageItem[]
+  derivatives           EvidenceDerivative[]
 
   @@index([evidenceType])
   @@index([classification])
@@ -2025,6 +2050,58 @@ model EvidenceCustodyEvent {
   @@index([evidenceAssetId])
   @@index([actorUserId])
   @@index([eventType])
+  @@index([createdAt])
+}
+
+/// Derived renditions of an evidence original. Derivatives are never
+/// authoritative: the original object and its server-computed SHA-256 remain the
+/// evidentiary record, and a derivative is always regenerable from the original.
+model EvidenceDerivative {
+  id              String                   @id @default(cuid())
+  evidenceAssetId String
+  kind            EvidenceDerivativeKind
+  status          EvidenceDerivativeStatus @default(PENDING)
+  storageKey      String?                  @unique
+  sha256          String?
+  mimeType        String?
+  width           Int?
+  height          Int?
+  byteSize        Int?
+  attempts        Int                      @default(0)
+  lastError       String?
+  deferredReason  String?
+  generatedAt     DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  evidenceAsset   EvidenceAsset            @relation(fields: [evidenceAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceAssetId, kind])
+  @@index([status, createdAt])
+  @@index([evidenceAssetId])
+}
+
+/// Durable record of background work. PostgreSQL is authoritative for what must
+/// run; Redis/BullMQ is only the execution transport. A job enqueued while Redis
+/// is unavailable still lands here and is picked up by the worker reconciler, so
+/// losing Redis delays work rather than dropping it.
+model BackgroundJob {
+  id             String              @id @default(cuid())
+  queue          String
+  jobName        String
+  idempotencyKey String              @unique
+  payloadJson    Json
+  status         BackgroundJobStatus @default(PENDING)
+  attempts       Int                 @default(0)
+  maxAttempts    Int                 @default(5)
+  availableAt    DateTime            @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  lastError      String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status, availableAt])
+  @@index([queue, status])
   @@index([createdAt])
 }
 

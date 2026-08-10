@@ -20,6 +20,7 @@ export const LEGACY_AUTH_ROLES = [
 export const USER_ROLES = [...TARGET_AUTH_ROLES, ...LEGACY_AUTH_ROLES] as const;
 
 export * from "./platform-contracts";
+export * from "./job-contracts";
 
 export const ADMIN_LEVELS = [
   "NATIONAL",

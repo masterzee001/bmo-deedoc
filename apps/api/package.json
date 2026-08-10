@@ -10,9 +10,10 @@
     "predeploy:render": "npm run prisma:generate --workspace @pics-nigeria/database && npm run prisma:ensure-production --workspace @pics-nigeria/database && npm run bootstrap:reference-data --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database",
     "start:render": "npm run prisma:ensure-production --workspace @pics-nigeria/database && npm run bootstrap:reference-data --workspace @pics-nigeria/database && npm run bootstrap:super-admin --workspace @pics-nigeria/database && npm run verify:production --workspace @pics-nigeria/database && npm run start",
     "lint": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build --workspace @pics-nigeria/shared && npm run build && node dist/apps/api/src/run-tests.js"
+    "test": "npm run build --workspace @pics-nigeria/shared && npm run build --workspace @pics-nigeria/object-storage && npm run build && node dist/apps/api/src/run-tests.js"
   },
   "dependencies": {
+    "@pics-nigeria/object-storage": "1.0.0",
     "@pics-nigeria/shared": "1.0.0",
     "@prisma/client": "6.19.3",
     "@socket.io/redis-adapter": "^8.3.0",

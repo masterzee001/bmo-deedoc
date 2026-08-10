@@ -147,6 +147,12 @@ const callHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+const realtimeReplaySchema = z.object({
+  /** ISO cursor of the last event the client already applied. */
+  since: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+
 type AgentProfileForOperation = {
   userId: string;
   geoPoliticalZoneId: string | null;
@@ -1003,6 +1009,60 @@ router.get("/realtime-contracts", requireAuth, async (_request, response) => {
       contractVersion: 1,
       eventTypes: realtimeStatus.eventTypes,
     },
+  });
+});
+
+/**
+ * Durable replay for a reconnecting client.
+ *
+ * Socket delivery is best effort: a client that was offline, backgrounded, or on
+ * a flapping field connection can miss live events. Because every realtime event
+ * is written to `RealtimeEventOutbox` in the same transaction as the business
+ * change, the client can ask for everything committed since its last cursor and
+ * rebuild exactly what it missed from PostgreSQL.
+ *
+ * Results are scoped to the caller's authorized territory, so replay cannot be
+ * used to read events from a territory the caller could not subscribe to live.
+ */
+router.get("/realtime/replay", requireAuth, async (request, response) => {
+  const parsed = realtimeReplaySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid replay query.", errors: parsed.error.flatten() });
+  }
+
+  const scope = await requireCommandScope(request.authUser!);
+  if (!scope) {
+    return response.status(403).json({ message: "Election Day realtime replay requires a command scope." });
+  }
+
+  const since = parsed.data.since ? new Date(parsed.data.since) : new Date(Date.now() - 30 * 60_000);
+
+  const events = await prisma.realtimeEventOutbox.findMany({
+    where: {
+      committedAt: { gt: since },
+      ...territoryFilter(scope),
+    },
+    orderBy: { committedAt: "asc" },
+    take: parsed.data.limit,
+  });
+
+  const items = events.map((event) => ({
+    eventId: event.eventId,
+    eventType: event.eventType,
+    eventVersion: event.eventVersion,
+    idempotencyKey: event.idempotencyKey,
+    committedAt: event.committedAt.toISOString(),
+    territory: event.territoryJson,
+    payload: event.payloadJson,
+  }));
+
+  return response.json({
+    events: items,
+    // The client advances its cursor to the last event it actually received, so
+    // a truncated batch resumes correctly on the next call.
+    cursor: items.length > 0 ? items[items.length - 1].committedAt : since.toISOString(),
+    hasMore: items.length === parsed.data.limit,
+    snapshotPath: "/election-day/situation-room/status",
   });
 });
 

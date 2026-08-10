@@ -12,6 +12,9 @@
     "paths": {
       "@pics-nigeria/shared": [
         "packages/shared/src/index.ts"
+      ],
+      "@pics-nigeria/object-storage": [
+        "packages/object-storage/src/index.ts"
       ]
     },
     "typeRoots": [
