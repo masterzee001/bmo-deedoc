@@ -13,6 +13,7 @@ const groups: AdminNavGroup[] = [
     title: "Core",
     items: [
       { href: "/admin/dashboard", label: "Overview" },
+      { href: "/admin/command", label: "Command Dashboard" },
       { href: "/admin/pre-election", label: "Pre-Election" },
       { href: "/admin/rewards", label: "Rewards" },
       { href: "/admin/activity", label: "Activity" },

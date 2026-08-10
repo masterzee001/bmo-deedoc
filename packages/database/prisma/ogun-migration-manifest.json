@@ -37,6 +37,10 @@
     {
       "name": "20260810120000_background_jobs_and_evidence_derivatives",
       "sha256": "d36fb39f42a035bc137d34c626809a1d87ba0df24595724095d1c9a7ef6474ea"
+    },
+    {
+      "name": "20260810140000_system_controlled_bonus_rules",
+      "sha256": "93821ac371101ef800130cadb1359b8db6e7910bf65b72f7819cab86a4c9a29c"
     }
   ]
 }

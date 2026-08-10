@@ -212,7 +212,15 @@ async function cleanup() {
       where: { OR: [{ userId: { in: userIds } }, { relatedUserId: { in: userIds } }] },
     });
     await prisma.rewardEvent.deleteMany({
-      where: { OR: [{ referral: { referrerUserId: { in: userIds } } }, { referral: { referredUserId: { in: userIds } } }] },
+      where: {
+        OR: [
+          { referral: { referrerUserId: { in: userIds } } },
+          { referral: { referredUserId: { in: userIds } } },
+          // Milestone bonus events carry no referral link, so they are matched
+          // through the rule version that produced them.
+          { rewardRuleVersion: { rewardRule: { createdByUserId: { in: userIds } } } },
+        ],
+      },
     });
     await prisma.rewardRuleVersion.deleteMany({
       where: { rewardRule: { createdByUserId: { in: userIds } } },
@@ -558,6 +566,174 @@ export async function runPreElectionTests() {
     });
     assert.equal(duplicateVerification.isFlagged, true);
     assert.equal(duplicateVerification.fraudReason, "DUPLICATE_DOCUMENT_HASH");
+
+    // --- Feature 043: system-controlled bonus points -------------------------
+
+    // Only a Super Admin may define a bonus rule. A Payout Officer, who moves
+    // money, must not be able to create the rule that decides how much exists.
+    const payoutBonusAttempt = await apiRequest("/pre-election/reward-rules", {
+      method: "POST",
+      token: payoutToken,
+      body: {
+        name: "Payout officer forbidden bonus",
+        directPoints: 500,
+        qualifyingEvent: "REFERRAL_MILESTONE_REACHED",
+        milestoneThreshold: 1,
+      },
+    });
+    assert.equal(payoutBonusAttempt.status, 403, JSON.stringify(payoutBonusAttempt.payload));
+
+    // A bonus rule with no system trigger is rejected: bonus points may only
+    // come into existence through a computed milestone.
+    const untriggeredBonus = await apiRequest("/pre-election/reward-rules", {
+      method: "POST",
+      token: superAdminToken,
+      body: { name: "Bonus without trigger", directPoints: 50, qualifyingEvent: "REFERRAL_MILESTONE_REACHED" },
+    });
+    assert.equal(untriggeredBonus.status, 400, JSON.stringify(untriggeredBonus.payload));
+
+    const bonusRule = await apiRequest("/pre-election/reward-rules", {
+      method: "POST",
+      token: superAdminToken,
+      body: {
+        name: "Two qualified referrals milestone",
+        directPoints: 100,
+        qualifyingEvent: "REFERRAL_MILESTONE_REACHED",
+        milestoneThreshold: 2,
+        eligibleRole: "COORDINATOR",
+      },
+    });
+    assert.equal(bonusRule.status, 201, JSON.stringify(bonusRule.payload));
+
+    // Not yet awarded: the coordinator has one qualified referral, not two.
+    assert.equal(await prisma.rewardLedgerEntry.count({ where: { userId: referrer.id, category: "BONUS" } }), 0);
+
+    // A second qualified referral crosses the threshold.
+    const secondReferred = await registerMember(
+      "003",
+      referralCodeResponse.payload.referralCode as string,
+      "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    );
+    const secondCase = await prisma.voterVerification.findUniqueOrThrow({ where: { memberUserId: secondReferred.id } });
+    const secondApprove = await apiRequest(`/pre-election/verifications/${secondCase.id}/decision`, {
+      method: "PATCH",
+      token: validatorToken,
+      body: { decision: "APPROVE", note: "Second referral verified." },
+    });
+    assert.equal(secondApprove.status, 200, JSON.stringify(secondApprove.payload));
+
+    const bonusEntries = await prisma.rewardLedgerEntry.findMany({
+      where: { userId: referrer.id, category: "BONUS" },
+    });
+    assert.equal(bonusEntries.length, 1, "the milestone must award exactly one bonus");
+    assert.equal(bonusEntries[0].points, 100);
+    assert.equal(bonusEntries[0].sourceEventType, "REFERRAL_MILESTONE_REACHED");
+    // The amount comes from a versioned rule, never an operator-supplied value.
+    assert.ok(bonusEntries[0].rewardRuleVersionId, "a bonus must reference the rule version that produced it");
+
+    // Re-processing must never pay the same milestone twice.
+    const bonusEvent = await prisma.rewardEvent.findFirstOrThrow({
+      where: { eventType: "REFERRAL_MILESTONE_REACHED", sourceId: `${referrer.id}:2` },
+    });
+    assert.equal(bonusEvent.status, "PROCESSED");
+    assert.equal(
+      await prisma.rewardEvent.count({ where: { eventType: "REFERRAL_MILESTONE_REACHED", sourceId: `${referrer.id}:2` } }),
+      1,
+    );
+
+    // --- Features 059-065, 077, 078: hierarchical dashboard ------------------
+
+    // One engine, every level. A Super Admin walks the full hierarchy and each
+    // level must present its own identity, its own child unit, and a heatmap
+    // band for every child.
+    const levels = [
+      { level: "STATE", territoryId: stateId, childUnit: "Senatorial Districts" },
+      { level: "SENATORIAL_DISTRICT", territoryId: senatorialDistrictId, childUnit: "Federal Constituencies" },
+      { level: "FEDERAL_CONSTITUENCY", territoryId: federalConstituencyId, childUnit: "State Constituencies" },
+      { level: "STATE_CONSTITUENCY", territoryId: stateConstituencyId, childUnit: "Wards" },
+      { level: "WARD", territoryId: wardId, childUnit: "Polling Units" },
+    ] as const;
+
+    for (const entry of levels) {
+      const view = await apiRequest(`/dashboard?level=${entry.level}&territoryId=${entry.territoryId}`, {
+        token: superAdminToken,
+      });
+      assert.equal(view.status, 200, `${entry.level}: ${JSON.stringify(view.payload)}`);
+      const dashboard = view.payload.dashboard as {
+        level: string;
+        territoryName: string;
+        presentation: { childUnitPlural: string; accent: string; singular: string };
+        breadcrumb: Array<{ level: string; name: string }>;
+        strengthScore: number;
+        band: string;
+        tiles: Array<{ key: string; value: number }>;
+        childLevel: string | null;
+        children: Array<{ band: string; strengthScore: number; level: string }>;
+        referenceDataIncomplete: boolean;
+      };
+
+      assert.equal(dashboard.level, entry.level);
+      assert.equal(dashboard.presentation.childUnitPlural, entry.childUnit, "each level must name its own child unit");
+      assert.ok(dashboard.presentation.accent, "each level must carry a distinct visual accent");
+      assert.ok(dashboard.breadcrumb.length >= 1, "every level must be navigable back up the hierarchy");
+      assert.equal(dashboard.breadcrumb[0].level, "STATE");
+      assert.ok(dashboard.strengthScore >= 0 && dashboard.strengthScore <= 100);
+      assert.ok(["CRITICAL", "WEAK", "MODERATE", "STRONG"].includes(dashboard.band));
+      assert.ok(dashboard.tiles.some((tile) => tile.key === "REGISTERED_MEMBERS"));
+      assert.equal(dashboard.referenceDataIncomplete, false, `${entry.level} has fixture children loaded`);
+
+      // Heatmap: every child carries a band so the grid can always be coloured.
+      assert.ok(dashboard.children.length > 0, `${entry.level} should list children`);
+      for (const child of dashboard.children) {
+        assert.ok(["CRITICAL", "WEAK", "MODERATE", "STRONG"].includes(child.band));
+        assert.equal(child.level, dashboard.childLevel);
+      }
+    }
+
+    // The terminal level stops the drill-down and exposes ground truth instead.
+    const pollingUnitView = await apiRequest(`/dashboard?level=POLLING_UNIT&territoryId=${pollingUnitId}`, {
+      token: superAdminToken,
+    });
+    assert.equal(pollingUnitView.status, 200, JSON.stringify(pollingUnitView.payload));
+    const pollingUnitDashboard = pollingUnitView.payload.dashboard as {
+      childLevel: string | null;
+      children: unknown[];
+      pollingUnitDetail: { operationalStatus: string; incidentCount: number } | null;
+      breadcrumb: Array<{ level: string }>;
+    };
+    assert.equal(pollingUnitDashboard.childLevel, null, "Polling Unit is the terminal command level");
+    assert.equal(pollingUnitDashboard.children.length, 0);
+    assert.ok(pollingUnitDashboard.pollingUnitDetail, "the terminal level must expose Polling Unit readiness");
+    assert.equal(pollingUnitDashboard.breadcrumb.length, 6, "full ancestry from State to Polling Unit");
+
+    // A coordinator with no explicit scope lands on the territory they command.
+    const coordinatorDefault = await apiRequest("/dashboard", { token: coordinatorToken });
+    assert.equal(coordinatorDefault.status, 200, JSON.stringify(coordinatorDefault.payload));
+    assert.equal((coordinatorDefault.payload.dashboard as { level: string }).level, "WARD");
+
+    // Leaderboards rank on approved operational metrics only.
+    const leaderboardView = await apiRequest(
+      `/dashboard?level=WARD&territoryId=${wardId}&leaderboardMetric=VERIFIED_REFERRALS`,
+      { token: coordinatorToken },
+    );
+    assert.equal(leaderboardView.status, 200, JSON.stringify(leaderboardView.payload));
+    const leaderboard = (leaderboardView.payload.dashboard as {
+      leaderboard: Array<{ rank: number; coordinatorUserId: string; value: number; metric: string }>;
+    }).leaderboard;
+    assert.ok(leaderboard.length >= 1, "the ward coordinator should appear on its own leaderboard");
+    assert.equal(leaderboard[0].rank, 1);
+    assert.equal(leaderboard[0].metric, "VERIFIED_REFERRALS");
+    assert.equal(leaderboard[0].coordinatorUserId, referrer.id);
+    assert.equal(leaderboard[0].value, 2, "two qualified referrals were created above");
+
+    // Authorization is applied by the same engine at every level: a Validator
+    // holds no command territory and cannot read a command dashboard.
+    const validatorDenied = await apiRequest(`/dashboard?level=WARD&territoryId=${wardId}`, { token: validatorToken });
+    assert.equal(validatorDenied.status, 403, JSON.stringify(validatorDenied.payload));
+
+    // A Payout Officer likewise commands no territory.
+    const payoutDenied = await apiRequest("/dashboard", { token: payoutToken });
+    assert.equal(payoutDenied.status, 403, JSON.stringify(payoutDenied.payload));
 
     console.log("pre_election_tests=passed");
   } finally {

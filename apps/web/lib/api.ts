@@ -35,6 +35,9 @@ import type {
   ElectionDayTimelineItem,
   ElectionDayWebrtcConfig,
   ElectionDayCallItem,
+  DashboardLevel,
+  HierarchicalDashboard,
+  LeaderboardMetric,
   VoiceCallSignalType,
   VoiceCallStatus,
   EvidenceAggregationItem,
@@ -2813,4 +2816,23 @@ export async function updateAgentTask(token: string, taskId: string, body: {
   });
 
   return readJson<{ message: string; task: FieldTaskItem }>(response);
+}
+
+export async function fetchHierarchicalDashboard(
+  token: string,
+  query?: { level?: DashboardLevel; territoryId?: string; leaderboardMetric?: LeaderboardMetric; leaderboardLimit?: number },
+): Promise<HierarchicalDashboard> {
+  const search = new URLSearchParams();
+  if (query?.level) search.set("level", query.level);
+  if (query?.territoryId) search.set("territoryId", query.territoryId);
+  if (query?.leaderboardMetric) search.set("leaderboardMetric", query.leaderboardMetric);
+  if (query?.leaderboardLimit) search.set("leaderboardLimit", String(query.leaderboardLimit));
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+
+  const response = await fetch(`${API_BASE_URL}/dashboard${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const payload = await readJson<{ dashboard: HierarchicalDashboard }>(response);
+  return payload.dashboard;
 }

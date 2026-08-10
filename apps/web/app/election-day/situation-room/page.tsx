@@ -27,6 +27,7 @@ import {
   updateElectionDayAlert,
 } from "../../../lib/api";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import { VoiceCallPanel } from "../../../components/voice-call-panel";
 
 const tokenKeys = ["picsNigeriaAdminToken", "picsNigeriaAgentToken", "picsNigeriaCandidateToken"];
 
@@ -64,6 +65,9 @@ function conversationTitle(conversation: ElectionDayConversationItem, currentUse
 
 export default function ElectionSituationRoomPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
+  // Read once on mount: the panel needs a stable token, and localStorage is not
+  // available during server rendering.
+  const [callToken, setCallToken] = useState<string | null>(null);
   const [status, setStatus] = useState<ElectionDaySituationRoomStatus | null>(null);
   const [alerts, setAlerts] = useState<ElectionDayOperationalAlertItem[]>([]);
   const [timeline, setTimeline] = useState<ElectionDayTimelineItem[]>([]);
@@ -112,6 +116,7 @@ export default function ElectionSituationRoomPage() {
       window.location.href = "/login";
       return;
     }
+    setCallToken(token);
 
     loadPage(token)
       .catch((caughtError) => {
@@ -507,6 +512,21 @@ export default function ElectionSituationRoomPage() {
           </div>
         </section>
       </section>
+
+      {callToken ? (
+        <section className="panel card" style={{ marginTop: 24 }}>
+          {/* Callable contacts are the people already in this officer's
+              conversations, which the API has authorized for contact. */}
+          <VoiceCallPanel
+            token={callToken}
+            contacts={conversations
+              .flatMap((conversation) => conversation.members)
+              .filter((member) => member.userId !== user?.id)
+              .filter((member, index, all) => all.findIndex((item) => item.userId === member.userId) === index)
+              .map((member) => ({ userId: member.userId, name: member.name, role: member.role }))}
+          />
+        </section>
+      ) : null}
 
       <section className="panel card" style={{ marginTop: 24 }}>
         <div className="section-head">

@@ -220,6 +220,10 @@ enum ReferralStatus {
 
 enum RewardQualifyingEvent {
   VOTER_VERIFICATION_APPROVED
+  /// System-computed milestone: a coordinator's qualified referral count
+  /// crossed a threshold configured on an active Super Admin reward rule.
+  /// Bonus points exist only through this path; no operator can mint them.
+  REFERRAL_MILESTONE_REACHED
 }
 
 enum RewardLedgerCategory {
@@ -944,6 +948,9 @@ model RewardRuleVersion {
   directPoints         Int
   upstreamPointsConfig Json?
   maximumPoints        Int?
+  /// Qualified-referral count at which a REFERRAL_MILESTONE_REACHED rule awards
+  /// its bonus. Null for non-milestone rules.
+  milestoneThreshold   Int?
   effectiveFrom        DateTime            @default(now())
   createdAt            DateTime            @default(now())
   rewardRule           RewardRule          @relation(fields: [rewardRuleId], references: [id], onDelete: Restrict)

@@ -1514,3 +1514,226 @@ textarea {
     flex-direction: column;
   }
 }
+
+/* Hierarchical command dashboard (Features 059-065, 077, 078) */
+.command-header {
+  border-left: 6px solid #334155;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.command-breadcrumb {
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+  color: #475569;
+}
+.command-crumb {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+.command-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin: 0;
+}
+.command-title {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 1.75rem;
+}
+.command-summary {
+  margin: 0 0 1rem;
+  color: #475569;
+  max-width: 60ch;
+}
+.command-strength {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.command-score {
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+.command-score-value { font-size: 1.8rem; font-weight: 700; }
+.command-score-unit { font-size: 0.85rem; opacity: 0.85; }
+.command-band { margin: 0; font-weight: 700; }
+.command-trend { margin: 0; color: #64748b; font-size: 0.85rem; }
+
+.command-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.command-tile {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+.command-tile-label { margin: 0; font-size: 0.8rem; color: #64748b; }
+.command-tile-value { margin: 0.2rem 0; font-size: 1.5rem; font-weight: 700; }
+.command-tile-target { margin: 0; font-size: 0.78rem; color: #475569; }
+.command-tile-muted { color: #94a3b8; }
+
+.command-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.command-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.command-section h2 { margin: 0; font-size: 1.1rem; }
+.command-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+.command-legend li { display: flex; align-items: center; gap: 0.35rem; }
+.command-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+.command-heatmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+.command-heat-cell {
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0.75rem;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 76px;
+}
+.command-heat-name { font-size: 0.82rem; font-weight: 600; line-height: 1.2; }
+.command-heat-score { font-size: 1.35rem; font-weight: 700; }
+
+.command-table-wrap { overflow-x: auto; }
+.command-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.command-table th, .command-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.command-pill {
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.78rem;
+}
+.command-drill {
+  background: #1d4ed8;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.command-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+}
+.command-detail dt { font-size: 0.78rem; color: #64748b; }
+.command-detail dd { margin: 0.15rem 0 0; font-weight: 600; }
+
+.command-leaderboard { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.command-leaderboard li {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.command-rank { font-weight: 700; color: #64748b; }
+.command-leader-name { font-weight: 600; }
+.command-leader-level { font-size: 0.78rem; color: #64748b; }
+.command-leader-value { font-size: 0.85rem; font-weight: 600; }
+.command-metric-select { font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
+.command-note { font-size: 0.78rem; color: #64748b; margin: 0.4rem 0 0; }
+.command-empty { color: #64748b; font-style: italic; }
+.command-generated { font-size: 0.78rem; color: #64748b; }
+
+/* Election Day voice calling (Feature 111) */
+.call-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+.call-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.call-panel-head h2 { margin: 0; font-size: 1.1rem; }
+.call-recording-note { font-size: 0.75rem; color: #15803d; font-weight: 600; }
+.call-error { color: #b91c1c; font-size: 0.85rem; }
+.call-warning { color: #b45309; font-size: 0.82rem; }
+.call-start { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-top: 0.75rem; }
+.call-select { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+.call-start-button, .call-accept, .call-decline, .call-end {
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  color: #ffffff;
+  font-size: 0.85rem;
+}
+.call-start-button, .call-accept { background: #15803d; }
+.call-decline, .call-end { background: #b91c1c; }
+.call-start-button:disabled, .call-accept:disabled, .call-decline:disabled, .call-end:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.call-active { margin-top: 0.75rem; }
+.call-active-status { margin: 0; font-weight: 700; }
+.call-active-party { margin: 0.15rem 0 0.6rem; color: #475569; }
+.call-actions { display: flex; gap: 0.5rem; }
+.call-history-title { font-size: 0.95rem; margin: 1rem 0 0.4rem; }
+.call-history { list-style: none; margin: 0; padding: 0; }
+.call-history li {
+  display: grid;
+  grid-template-columns: 6rem 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.85rem;
+}
+.call-status { font-weight: 600; }
+.call-status-missed, .call-status-rejected { color: #b91c1c; }
+.call-status-completed { color: #15803d; }
+.call-status-connected, .call-status-ringing { color: #1d4ed8; }
+.call-history-meta { color: #64748b; font-size: 0.78rem; }
+.call-empty { color: #64748b; font-style: italic; }
