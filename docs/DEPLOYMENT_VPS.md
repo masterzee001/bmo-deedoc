@@ -19,7 +19,22 @@ Coturn (host network, TURN relay)
 Private S3-compatible object storage (external service)
 ```
 
-Only Caddy and Coturn are reachable from the internet. Postgres and Redis have no published ports at all.
+**Two services are internet-facing: Caddy and Coturn.**
+
+Caddy publishes 80/443 through Docker port mappings. Coturn is *not* behind a
+port mapping — it runs with host networking, so it binds the VPS's interfaces
+directly and is exposed on whatever ports the firewall permits. Both must be
+treated as public attack surface.
+
+Web, API, and worker are reachable only through Caddy. PostgreSQL and Redis
+publish no ports at all and exist only on the internal compose network.
+
+Because Coturn binds the host directly, the firewall rules in §3 are the only
+thing limiting its exposure — there is no Docker port mapping acting as a second
+gate. Coturn also relays to arbitrary peer addresses by design, so its
+`denied-peer-ip` list is what stops an authenticated client using the relay to
+reach PostgreSQL, Redis, the Docker bridge networks, the host, or the cloud
+metadata endpoint.
 
 ---
 
@@ -59,8 +74,8 @@ sudo ufw allow 443/tcp                 # HTTPS
 sudo ufw allow 443/udp                 # HTTP/3
 sudo ufw allow 3478/tcp                # TURN listener
 sudo ufw allow 3478/udp                # TURN listener
-sudo ufw allow 5349/tcp                # TURN over TLS
-sudo ufw allow 5349/udp                # TURN over DTLS
+sudo ufw allow 5349/tcp                # TURN over TLS — only if TURN TLS is enabled (§5a)
+sudo ufw allow 5349/udp                # TURN over DTLS — only if TURN TLS is enabled (§5a)
 sudo ufw allow 49160:49200/udp         # TURN relay range — must match TURN_MIN_PORT/TURN_MAX_PORT
 sudo ufw enable
 ```
@@ -90,6 +105,42 @@ openssl rand -base64 32    # TURN_CREDENTIAL
 `.env*` is gitignored. Never commit it, and never bake it into an image.
 
 **Object storage must be provisioned separately.** Create a private, versioned S3-compatible bucket with no public read, then set `STORAGE_*`. The API refuses to start in production with any driver other than `s3`. Nothing in this repository creates the bucket.
+
+## 4a. TURN TLS policy (explicit)
+
+TURN-over-TLS is **opt-in and off by default**, and the container fails to start
+rather than serving a broken TLS listener.
+
+| `TURN_TLS_CERT` / `TURN_TLS_KEY` | Result |
+|---|---|
+| Both set and readable | `turns:` enabled on `TURN_TLS_PORT`, TLS 1.2+ with modern ciphers |
+| Neither set | `no-tls` and `no-dtls` — listeners explicitly disabled |
+| Only one set, or unreadable | **Container refuses to start** |
+
+Why off by default: declaring a TLS port without a certificate is worse than no
+TLS at all, because coturn would advertise an endpoint that cannot complete a
+handshake — a client configured with a `turns:` URI fails while looking correctly
+configured.
+
+Turning it off does not weaken call confidentiality. **WebRTC media is already
+end-to-end encrypted with DTLS-SRTP** no matter how it is relayed. TURN-over-TLS
+buys traversal of firewalls that only allow 443, and conceals that the traffic is
+TURN — real benefits, but not media secrecy.
+
+Enable it when field devices sit behind restrictive corporate or carrier
+firewalls. Mount a certificate into the container and set both variables:
+
+```yaml
+# docker-compose.prod.yml, coturn service
+volumes:
+  - /etc/letsencrypt/live/ops.example.org:/etc/coturn/tls:ro
+environment:
+  TURN_TLS_CERT: /etc/coturn/tls/fullchain.pem
+  TURN_TLS_KEY: /etc/coturn/tls/privkey.pem
+```
+
+Then set `TURN_URL=turns:ops.example.org:5349` and open 5349/tcp and 5349/udp.
+With TLS disabled, leave those ports closed.
 
 ## 5. Database migration
 

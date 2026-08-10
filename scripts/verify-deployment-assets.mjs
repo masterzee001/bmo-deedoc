@@ -125,6 +125,41 @@ for (const placeholder of ["__TURN_REALM__", "__TURN_EXTERNAL_IP__", "__TURN_MIN
   }
 }
 
+// A TURN server relays to any peer address a client names. Without these denies
+// an authenticated client can reach PostgreSQL, Redis, the Docker bridge, the
+// host, or the cloud metadata endpoint through the relay.
+const requiredDeniedRanges = [
+  { label: "loopback", pattern: "denied-peer-ip=127.0.0.0-127.255.255.255" },
+  { label: "RFC1918 10/8", pattern: "denied-peer-ip=10.0.0.0-10.255.255.255" },
+  { label: "RFC1918 172.16/12 (Docker bridge)", pattern: "denied-peer-ip=172.16.0.0-172.31.255.255" },
+  { label: "RFC1918 192.168/16", pattern: "denied-peer-ip=192.168.0.0-192.168.255.255" },
+  { label: "carrier-grade NAT 100.64/10", pattern: "denied-peer-ip=100.64.0.0-100.127.255.255" },
+  { label: "link-local / cloud metadata 169.254/16", pattern: "denied-peer-ip=169.254.0.0-169.254.255.255" },
+  { label: "IPv4-mapped IPv6", pattern: "denied-peer-ip=::ffff:0.0.0.0-::ffff:255.255.255.255" },
+  { label: "IPv6 unique local fc00::/7", pattern: "denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" },
+  { label: "IPv6 link-local", pattern: "denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" },
+];
+for (const range of requiredDeniedRanges) {
+  if (!turnTemplate.includes(range.pattern)) {
+    failures.push(`Coturn must deny relaying to ${range.label}; a relay to private space is an SSRF primitive.`);
+  }
+}
+
+// TLS must be an explicit decision made at render time, never a bare port
+// declaration that would advertise an endpoint with no usable certificate.
+const turnEntrypoint = contents.get("deploy/coturn/entrypoint.sh") || "";
+if (/^\s*tls-listening-port=/m.test(turnTemplate)) {
+  failures.push("Coturn template declares tls-listening-port unconditionally; TLS must be resolved by the entrypoint.");
+}
+if (!turnTemplate.includes("__TLS_SECTION__")) {
+  failures.push("Coturn template must delegate the TLS decision to the rendered __TLS_SECTION__ block.");
+}
+for (const marker of ["no-tls", "no-dtls", "TURN_TLS_CERT", "TURN_TLS_KEY"]) {
+  if (!turnEntrypoint.includes(marker)) {
+    failures.push(`Coturn entrypoint must implement an explicit TLS policy (missing ${marker}).`);
+  }
+}
+
 // No committed secrets anywhere in the deployment assets.
 const secretPattern = /(password|secret|credential|access[-_]?key)\s*[:=]\s*(?!.*(replace-me|replace-with|__|\$\{|\$[A-Z]|""|''|<|REQUIRED))\S{8,}/i;
 for (const [asset, body] of contents) {

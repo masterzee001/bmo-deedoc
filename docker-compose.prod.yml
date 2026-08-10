@@ -192,7 +192,9 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    # The only service publishing ports to the internet.
+    # The only service publishing ports for HTTP traffic. Coturn is also
+    # internet-facing, but reaches the network directly through host networking
+    # rather than a published port mapping.
     ports:
       - "80:80"
       - "443:443"
@@ -232,9 +234,13 @@ services:
       TURN_USERNAME: ${TURN_USERNAME:?TURN_USERNAME is required}
       TURN_CREDENTIAL: ${TURN_CREDENTIAL:?TURN_CREDENTIAL is required}
       TURN_PORT: ${TURN_PORT:-3478}
-      TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
       TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
       TURN_MAX_PORT: ${TURN_MAX_PORT:-49200}
+      # TURN TLS is opt-in: empty cert/key means the TLS and DTLS listeners are
+      # explicitly disabled rather than advertised without a certificate.
+      TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
+      TURN_TLS_CERT: ${TURN_TLS_CERT:-}
+      TURN_TLS_KEY: ${TURN_TLS_KEY:-}
     volumes:
       - ./deploy/coturn/turnserver.conf.template:/etc/coturn/turnserver.conf.template:ro
       - ./deploy/coturn/entrypoint.sh:/usr/local/bin/coturn-entrypoint.sh:ro
