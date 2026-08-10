@@ -77,9 +77,28 @@ After remediation, `npm audit` reports 5 package findings: 1 low, 0 moderate, 4 
 | Production/dev-only | Installed in the production web dependency graph. |
 | Reachability | Not known to be attacker-reachable in current code. There are no `next/image` imports, no configured remote image sources, and no web image-upload processing route. |
 | Affected code path | Next server image optimization if enabled and given a processable image. |
-| Available fix | `sharp>=0.35.0`, currently offered by npm through the Next 16 major update. |
+| Available fix | `sharp>=0.35.0`, offered by npm only through the Next 16 major update for the Next-owned copy. |
 | Breaking-change risk | High when applied by forcing the Next major upgrade. |
-| Decision | `ACCEPT TEMPORARILY`. Keep remote image optimization disabled by configuration/default allowlist and do not route untrusted uploads through Next image optimization. Reassess before any image pipeline work. Does not block Phase 1. |
+| Decision | `REMEDIATED FOR THE REACHABLE PATH`. See the Sprint 4 update below. |
+
+**Sprint 4 update.** The reachability assessment above stopped being true when the
+background worker began processing operator-uploaded evidence images through
+sharp/libvips. That is genuine untrusted input, so it was remediated rather than
+accepted again:
+
+- `apps/worker` now pins **`sharp@0.35.3`**, which carries the fixed libvips.
+  npm resolves it as a nested dependency, so the worker no longer shares Next's
+  copy. Verified: the worker resolves `0.35.3` and all six derivative suites
+  pass across the major upgrade.
+- The remaining `sharp@0.34.5` under `node_modules/next` is now unreachable by
+  construction. `apps/web/next.config.ts` sets `images.unoptimized = true`, so
+  Next never invokes its bundled sharp. The app imports no `next/image`, and
+  evidence is served by short-lived signed URLs from private object storage,
+  never through the web tier's optimizer.
+
+Residual exposure is the Next-owned copy on a path that is both unused and now
+explicitly disabled. Re-open this finding if `images.unoptimized` is removed or
+`next/image` is introduced.
 
 ### High Finding 4 - XLSX
 
@@ -92,7 +111,25 @@ After remediation, `npm audit` reports 5 package findings: 1 low, 0 moderate, 4 
 | Affected code path | `packages/database/scripts/inec-constituency-reference.ts` during operator-invoked reference bootstrap. |
 | Available fix | No npm-registry fix is available for the installed package line. |
 | Breaking-change risk | Parser replacement requires workbook compatibility and constituency-count regression tests. |
-| Decision | `NOT PRODUCTION REACHABLE`; accept temporarily for the checksum-pinned project workbook only. Never parse an uploaded or unapproved workbook. Replace the parser before accepting external workbook input. Does not block Phase 1. |
+| Decision | `NOT PRODUCTION REACHABLE`; accepted for the checksum-pinned project workbook only, now with the two controls below enforcing that. |
+
+**Sprint 4 update.** The acceptance rested on two claims that were previously
+assumptions rather than controls. Both are now enforced:
+
+- **The parser no longer ships to production.** `xlsx` moved from
+  `dependencies` to `devDependencies` in `packages/database`, so it is absent
+  from the API and worker runtime images, which install with `--omit=dev`.
+  Bootstrap runs in the `migrate` image, which is built with dev dependencies —
+  `docs/DEPLOYMENT_VPS.md` §6 documents this, because pointing bootstrap at the
+  `api` image now fails with missing modules.
+- **The workbook hash is verified before parsing**, not merely reported.
+  `assertApprovedInecWorkbook()` compares the file against the approved SHA-256
+  and throws before `XLSX.readFile` is reached, so a swapped or corrupted
+  workbook fails closed. This also protects the reference data itself: silently
+  importing altered electoral boundaries would be worse than refusing to import.
+
+Replacing the parser is still required before any externally supplied workbook is
+ever accepted.
 
 The remaining low finding is transitive `esbuild@0.27.3` through `tsx`: `GHSA-g7r4-m6w7-qqqr`, a Windows local development-server arbitrary-read path. It is development/operational tooling, requires local access, is not request-reachable in deployed API/web runtimes, and is accepted temporarily while tracking the upstream `tsx` update.
 

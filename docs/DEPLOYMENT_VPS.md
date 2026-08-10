@@ -162,11 +162,20 @@ DATABASE_URL="postgresql://..." npx prisma migrate deploy --config packages/data
 
 Reference data and the Super Admin are seeded by an explicit one-off command, deliberately **not** part of container startup. A restart never re-seeds and never mutates existing records.
 
+Run it in the **`migrate` image, not `api`**. Bootstrap needs the reference-data
+scripts and their tooling — `tsx`, the Prisma CLI, and the spreadsheet parser —
+all of which are development dependencies deliberately excluded from the API
+runtime image. Pointing this at `api` fails with missing modules.
+
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm \
   -e SUPER_ADMIN_EMAIL=... -e SUPER_ADMIN_PASSWORD=... \
-  api npm run deploy:bootstrap
+  migrate npm run deploy:bootstrap
 ```
+
+The reference import refuses to parse an INEC workbook whose SHA-256 does not
+match the approved file, so a swapped or corrupted source fails closed rather
+than silently importing altered electoral boundaries.
 
 There is no demo or fixture seeding path in production.
 
@@ -278,6 +287,30 @@ Then confirm the application agrees: `GET /election-day/webrtc/config` must repo
 Browser-side check: open the call panel, start a call, and confirm an ICE candidate of type `relay` appears. Candidates of type `srflx` only mean STUN worked, not TURN.
 
 `recording` is always `DISABLED`. No call media is captured or persisted anywhere in this topology.
+
+## 15a. Pre-deploy rehearsals
+
+Run these before any production deploy. Each spins its own disposable PostgreSQL
+container and never touches a real database.
+
+```bash
+npm run rehearse:production      # all three
+```
+
+| Rehearsal | What it proves |
+|---|---|
+| `npm run rehearse:migration` | Pending migrations apply to a **populated** database, are additive (no column dropped or retyped, so the previous image can still run), and are idempotent on re-apply. Reports forward duration. |
+| `npm run verify:backup-restore` | The documented `pg_dump`/`pg_restore` commands round-trip. Seeds data, dumps, **destroys**, restores, then compares per-table content fingerprints — not just row counts. |
+| `npm run verify:load-recovery` | Under concurrency: no job lost on enqueue, replaying every idempotency key creates nothing new, contended claims are exclusive (exactly one winner per row), and stranded jobs all return to `PENDING`. |
+
+The migration rehearsal accepts a real dump for the highest-fidelity run:
+
+```bash
+npm run rehearse:migration -- --from-dump backup-20260810.dump
+```
+
+Rehearsing against empty tables proves very little — table rewrites, `NOT NULL`
+additions, and unique-index creation only fail with rows present.
 
 ## 16. Rollback
 
