@@ -190,7 +190,7 @@ export default function AdminRewardsPage() {
               <article key={item.id} className="reward-item">
                 <strong>{item.status}</strong>
                 <p>{item.pointsRequested} points requested</p>
-                {item.amountRequested !== null ? <p className="muted">Requested amount: {item.amountRequested}</p> : null}
+                {item.amountRequested !== null ? <p className="muted">Payable amount: {item.amountRequested}</p> : null}
                 <p className="muted">
                   Submitted {new Date(item.createdAt).toLocaleString()}
                   {item.reviewedAt ? ` | Reviewed ${new Date(item.reviewedAt).toLocaleString()}` : ""}

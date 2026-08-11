@@ -150,6 +150,41 @@ function constraintSet() {
   return new Set(rows.split("\n").map((entry) => entry.trim()).filter(Boolean));
 }
 
+/**
+ * The table a constraint or index line belongs to. Both snapshots put the table
+ * first; `conrelid::regclass` quotes mixed-case identifiers, information_schema
+ * does not, so the quotes are stripped to compare against the table set.
+ *
+ * Returns null when the line cannot be parsed, and callers treat null as
+ * restrictive. An unparseable line must never be mistaken for a new table and
+ * waved through — the gate fails closed.
+ */
+function ownerTable(line) {
+  const first = line.trim().split(/\s+/)[0];
+  if (!first) {
+    return null;
+  }
+  const stripped = first.replace(/^public\./, "").replace(/^"|"$/g, "");
+  return stripped.length > 0 ? stripped : null;
+}
+
+/**
+ * The referencing columns of a FOREIGN KEY definition — the `(a, b)` in
+ * `FOREIGN KEY ("a", "b") REFERENCES ...`, not the referenced side. Returns an
+ * empty array when the shape is not recognised, so an unparseable definition is
+ * never mistaken for an exempt one.
+ */
+function referencingColumns(constraint) {
+  const match = /FOREIGN KEY\s*\(([^)]*)\)/.exec(constraint);
+  if (!match) {
+    return [];
+  }
+  return match[1]
+    .split(",")
+    .map((column) => column.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+}
+
 /** Unique indexes, which restrict writes exactly as a unique constraint does. */
 function uniqueIndexSet() {
   const rows = psql(
@@ -208,6 +243,7 @@ function appliedMigrationCount() {
  */
 function backwardIncompatibleChanges(before, after) {
   const problems = [];
+  const notes = [];
 
   for (const [identity, previous] of before.columns) {
     const current = after.columns.get(identity);
@@ -247,18 +283,73 @@ function backwardIncompatibleChanges(before, after) {
   }
 
   // Newly restrictive constraints are reported; newly relaxed ones are not.
+  //
+  // A constraint is only restrictive if it lands on a table that ALREADY
+  // existed: that table holds rows a previous image wrote, and writers of it are
+  // live. A table created by this same migration has no existing data and no
+  // existing writer, so its primary key, unique indexes and foreign keys cannot
+  // reject anything that used to succeed. Reporting those as violations would
+  // make every new-table migration unmergeable, which is the pressure that gets
+  // an additivity gate switched off. Scoping by table keeps the gate credible
+  // without loosening what it detects on live tables.
   for (const constraint of after.constraints) {
-    if (!before.constraints.has(constraint) && /UNIQUE|CHECK|FOREIGN KEY/.test(constraint)) {
+    if (before.constraints.has(constraint) || !/UNIQUE|CHECK|FOREIGN KEY/.test(constraint)) {
+      continue;
+    }
+    const owner = ownerTable(constraint);
+    if (owner === null) {
       problems.push(`constraint added over existing data: ${constraint}`);
+      continue;
+    }
+    if (before.tables.has(owner)) {
+      // One exemption, and only one: a foreign key whose every referencing
+      // column is added by this same migration and is nullable. A previous
+      // image does not know those columns exist, so it writes NULL into them,
+      // and NULL satisfies a foreign key. Nothing it can insert or update is
+      // rejected. Any other constraint on a live table stays a violation,
+      // including a foreign key over a column that already held data.
+      const referencing = referencingColumns(constraint);
+      const exempt =
+        constraint.includes("FOREIGN KEY") &&
+        referencing.length > 0 &&
+        referencing.every((column) => {
+          const identity = `${owner}.${column}`;
+          return !before.columns.has(identity) && after.columns.get(identity)?.nullable === "YES";
+        });
+      if (!exempt) {
+        problems.push(`constraint added over existing data: ${constraint}`);
+        continue;
+      }
+      notes.push(`nullable new-column foreign key on pre-existing ${owner}: ${constraint}`);
+      continue;
+    }
+    // The constraint sits on a new table, but a foreign key still reaches back
+    // into the parent: with RESTRICT / NO ACTION, deleting a parent row that a
+    // new child references now fails where it previously succeeded. No existing
+    // row can be affected until the new code writes children, so this is not an
+    // additivity failure — but it is a real change to an existing delete path
+    // and is surfaced rather than swallowed.
+    const referenced = /REFERENCES\s+"?([A-Za-z0-9_]+)"?/.exec(constraint);
+    if (
+      constraint.includes("FOREIGN KEY") &&
+      referenced &&
+      before.tables.has(referenced[1]) &&
+      !/ON DELETE (CASCADE|SET NULL|SET DEFAULT)/.test(constraint)
+    ) {
+      notes.push(`new table ${owner} restricts deletes on pre-existing ${referenced[1]}: ${constraint}`);
     }
   }
   for (const index of after.uniqueIndexes) {
-    if (!before.uniqueIndexes.has(index)) {
+    if (before.uniqueIndexes.has(index)) {
+      continue;
+    }
+    const owner = ownerTable(index);
+    if (owner === null || before.tables.has(owner)) {
       problems.push(`unique index added over existing data: ${index}`);
     }
   }
 
-  return problems;
+  return { problems, notes };
 }
 
 const allMigrations = readdirSync(migrationRoot, { withFileTypes: true })
@@ -405,7 +496,13 @@ try {
 
   // ---- Phase 4: schema additivity ------------------------------------------
   const after = schemaSnapshot();
-  const incompatible = backwardIncompatibleChanges(before, after);
+  const { problems: incompatible, notes: additivityNotes } = backwardIncompatibleChanges(before, after);
+
+  // Printed whether the gate passes or fails: a reviewer must see a changed
+  // delete path even on a green run.
+  for (const note of additivityNotes) {
+    console.log(`rehearsal_note=${note}`);
+  }
 
   if (incompatible.length > 0) {
     console.error("FAIL migration is not schema-additive:");
@@ -432,9 +529,12 @@ try {
   const afterRerun = schemaSnapshot();
   // Compared in both directions: a one-way scan would miss a rerun that ADDED
   // something, which is equally a violation of idempotency.
+  // Drift is compared against the post-migration snapshot, where every table
+  // already exists, so the new-table exemption above cannot hide a rerun that
+  // adds a constraint.
   const rerunDrift = [
-    ...backwardIncompatibleChanges(after, afterRerun),
-    ...backwardIncompatibleChanges(afterRerun, after),
+    ...backwardIncompatibleChanges(after, afterRerun).problems,
+    ...backwardIncompatibleChanges(afterRerun, after).problems,
   ];
   if (afterRerun.columns.size !== after.columns.size || afterRerun.tables.size !== after.tables.size || rerunDrift.length > 0) {
     console.error("FAIL re-running the migration stream changed the schema; it is not idempotent");

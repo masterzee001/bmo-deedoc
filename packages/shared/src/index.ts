@@ -784,6 +784,10 @@ export type RewardBalanceSummary = {
   earnedPoints: number;
   reservedPoints: number;
   availablePoints: number;
+  /** Preserved legacy value awaiting an approved conversion rate. Never spendable. */
+  legacyCarryoverPendingPoints: number;
+  /** Legacy value already converted; included in earnedPoints. */
+  legacyCarryoverConfirmedPoints: number;
 };
 
 export type NotificationItem = {

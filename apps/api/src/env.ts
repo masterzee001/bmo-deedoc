@@ -71,6 +71,14 @@ const envSchema = z
     // parser forbade. 12mb covers the advertised 8MB original.
     API_JSON_BODY_LIMIT: z.string().regex(sizePattern, "API_JSON_BODY_LIMIT must be a size such as 12mb.").default("12mb"),
     CORS_ALLOWED_ORIGINS: z.string().default(""),
+
+    // Payout kill switch. Disabled in EVERY environment by default, production
+    // included: deploying to production must not by itself enable money
+    // movement. Enabling is a deliberate operator action taken after legacy
+    // balance reconciliation and the readiness gates have passed, so an
+    // authorization or UI mistake cannot cause a real payout on its own.
+    PAYOUT_EXECUTION_ENABLED: booleanString,
+
     AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(15 * 60 * 1000),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
     REGISTRATION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),

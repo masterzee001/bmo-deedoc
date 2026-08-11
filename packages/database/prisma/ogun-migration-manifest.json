@@ -41,6 +41,26 @@
     {
       "name": "20260810140000_system_controlled_bonus_rules",
       "sha256": "93821ac371101ef800130cadb1359b8db6e7910bf65b72f7819cab86a4c9a29c"
+    },
+    {
+      "name": "20260811090000_financial_integrity_legacy_carryover",
+      "sha256": "516b85053c4758218a3af5041d120baab0da33a59f1409d56c8760d03e187f5d"
+    },
+    {
+      "name": "20260811160000_payout_execution_chokepoint",
+      "sha256": "b1b77dee01d7969cbae914a2d61f94511017a883e4d7cada571c9f97f7f7a9e8"
+    },
+    {
+      "name": "20260811190000_one_carryover_per_member",
+      "sha256": "d769d52017fbca0328aae423948df8a8fc3d9890a88f6af99e76694e0869b770"
+    },
+    {
+      "name": "20260811210000_payout_cycle_configuration_provenance",
+      "sha256": "35d7140dac50634c4a74d5105541a30f8c3b682a1d4bddf864d8f105a92dba66"
+    },
+    {
+      "name": "20260812090000_legacy_reconciliation_policy",
+      "sha256": "956a16de6aff853f1c3d07e1715a53be0a479708cdf2913710171f1d6b3c486c"
     }
   ]
 }

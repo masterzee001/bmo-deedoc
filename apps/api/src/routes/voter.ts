@@ -7,6 +7,7 @@ import {
   IncidentStatus,
   IncidentType,
   NotificationType,
+  RewardLedgerCategory,
   RewardRedemptionStatus,
   RewardType,
   VoterVerificationDecision,
@@ -17,7 +18,9 @@ import { CAMPAIGN_EVENT_RSVP_STATUSES } from "@pics-nigeria/shared";
 import { requireAuth, requireMemberCapability } from "../middleware/auth";
 import { createNotification } from "../lib/notifications";
 import { prisma } from "../prisma";
+import { createAuditLog } from "../lib/audit";
 import { recordParticipationAndReward } from "../lib/participation";
+import { valuePayout } from "../lib/payout-authority";
 import {
   serializeCampaignEventItem,
   serializeFeedbackItem,
@@ -66,7 +69,9 @@ const incidentSchema = z.object({
 
 const redemptionSchema = z.object({
   pointsRequested: z.number().int().min(1),
-  amountRequested: z.number().positive().optional(),
+  // amountRequested is deliberately absent: the monetary value is computed
+  // server-side from the active payout configuration. Accepting it from the
+  // client made the member authoritative for their own payout amount.
   note: z.string().trim().max(500).optional(),
 });
 
@@ -469,9 +474,12 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
-    prisma.rewardLedger.groupBy({
-      by: ["type"],
-      where: { voterUserId },
+    // Grouped from the authoritative ledger. Grouping the legacy ledger here
+    // reported preserved carryover as the member's earned totals — a second
+    // leak, independent of the balance, that survives fixing the balance alone.
+    prisma.rewardLedgerEntry.groupBy({
+      by: ["category"],
+      where: { userId: voterUserId },
       _sum: { points: true },
     }),
     prisma.rewardRedemption.findMany({
@@ -481,7 +489,7 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
     }),
   ]);
 
-  const totals = new Map(groupedRewards.map((entry) => [entry.type, entry._sum.points || 0]));
+  const totals = new Map(groupedRewards.map((entry) => [entry.category, entry._sum.points || 0]));
   const totalPoints = Array.from(totals.values()).reduce((sum, value) => sum + value, 0);
 
   const balance = await getRewardBalance(prisma, voterUserId!);
@@ -505,10 +513,14 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
 
   return response.json({
     totalPoints,
-    totalParticipationPoints: totals.get(RewardType.PARTICIPATION) || 0,
-    totalReferralPoints: totals.get(RewardType.REFERRAL) || 0,
+    totalParticipationPoints: totals.get(RewardLedgerCategory.APPROVED_PARTICIPATION) || 0,
+    totalReferralPoints: totals.get(RewardLedgerCategory.VERIFIED_REFERRAL) || 0,
     availablePoints: balance.availablePoints,
     reservedPoints: balance.reservedPoints,
+    // Reported separately and never folded into availablePoints, so a member
+    // can see value that was preserved for them without it reading as spendable.
+    legacyCarryoverPendingPoints: balance.legacyCarryoverPendingPoints,
+    legacyCarryoverConfirmedPoints: balance.legacyCarryoverConfirmedPoints,
     recentRewards: recentRewards.map((reward) => ({
       id: reward.id,
       type: reward.type,
@@ -568,20 +580,58 @@ router.post("/redemptions", requireAuth, requireMemberCapability, async (request
   }
 
   const voterUserId = request.authUser!.id;
-  const redemption = await prisma.$transaction(async (transaction) => {
-    const balance = await getRewardBalance(transaction, voterUserId);
 
-    if (parsed.data.pointsRequested > balance.availablePoints) {
-      throw new Error("Requested redemption points exceed available balance.");
+  // Valued by the single payout authority, exactly as the payout-cycle path is.
+  // The member requests a number of points; the server decides whether they are
+  // eligible and what they are worth. A client-supplied monetary amount is
+  // never accepted, and the configured minimum threshold and conversion rate
+  // apply here as they do on every other money-out path.
+  const preview = await valuePayout(prisma, {
+    userId: voterUserId,
+    requestedPoints: parsed.data.pointsRequested,
+  });
+  if (!preview.meetsThreshold) {
+    return response.status(400).json({
+      message: preview.reason || "Redemption is not eligible.",
+      eligiblePoints: preview.eligiblePoints,
+      minimumThreshold: preview.minimumThreshold,
+    });
+  }
+
+  const redemption = await prisma.$transaction(async (transaction) => {
+    // Re-valued inside the transaction so two concurrent requests cannot spend
+    // the same points.
+    const confirmed = await valuePayout(transaction, {
+      userId: voterUserId,
+      requestedPoints: parsed.data.pointsRequested,
+    });
+    if (!confirmed.meetsThreshold) {
+      throw new Error(confirmed.reason || "Redemption is not eligible.");
     }
 
     const created = await transaction.rewardRedemption.create({
       data: {
         voterUserId,
-        pointsRequested: parsed.data.pointsRequested,
-        amountRequested: parsed.data.amountRequested || null,
+        pointsRequested: confirmed.requestedPoints,
+        // Server-computed from the active configuration, never from the client.
+        amountRequested: Number(confirmed.payableAmount),
         status: RewardRedemptionStatus.PENDING,
         note: parsed.data.note || null,
+      },
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: voterUserId,
+      action: "REWARD_REDEMPTION_REQUESTED",
+      targetType: "RewardRedemption",
+      targetId: created.id,
+      metadata: {
+        requestedPoints: confirmed.requestedPoints,
+        eligiblePoints: confirmed.eligiblePoints,
+        minimumThreshold: confirmed.minimumThreshold,
+        conversionRate: confirmed.conversionRate,
+        payableAmount: confirmed.payableAmount.toString(),
+        payoutConfigurationId: confirmed.payoutConfigurationId,
       },
     });
 

@@ -632,7 +632,10 @@ async function main() {
     update: {
       voterUserId: voter.id,
       pointsRequested: 10,
-      amountRequested: 1000,
+      // No amount. A pending redemption carries no monetary figure until
+      // approval values it through the payout authority; seeding one would put
+      // an amount nothing computed in front of the approve and paid routes.
+      amountRequested: null,
       status: RewardRedemptionStatus.PENDING,
       note: "Seeded cashout request",
     },
@@ -640,7 +643,10 @@ async function main() {
       id: "seed-redemption-1",
       voterUserId: voter.id,
       pointsRequested: 10,
-      amountRequested: 1000,
+      // No amount. A pending redemption carries no monetary figure until
+      // approval values it through the payout authority; seeding one would put
+      // an amount nothing computed in front of the approve and paid routes.
+      amountRequested: null,
       status: RewardRedemptionStatus.PENDING,
       note: "Seeded cashout request",
     },

@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { createApp } from "./app";
 import { hashPassword } from "./auth/password";
+import { env } from "./env";
+import { PayoutExecutionDisabledError, setPayoutExecutionEnabledForTests } from "./lib/payout-authority";
+import { PayoutExecutionError, executePayout } from "./lib/payout-execution";
+import { createRewardEntryWithNotification } from "./lib/rewards";
 import { prisma } from "./prisma";
 
 type ApiResult = { status: number; payload: Record<string, unknown> };
@@ -194,6 +198,9 @@ async function cleanup() {
   const userIds = users.map((user) => user.id);
 
   if (userIds.length > 0) {
+    await prisma.payoutExecution.deleteMany({
+      where: { OR: [{ beneficiaryUserId: { in: userIds } }, { executedByUserId: { in: userIds } }] },
+    });
     await prisma.payoutTransaction.deleteMany({
       where: { OR: [{ payoutOfficerUserId: { in: userIds } }, { payoutAssignment: { beneficiaryUserId: { in: userIds } } }] },
     });
@@ -208,6 +215,9 @@ async function cleanup() {
     await prisma.territoryTarget.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.strengthWeightConfiguration.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.strengthMetricDefinition.deleteMany({ where: { createdByUserId: { in: userIds } } });
+    await prisma.legacyBalanceCarryover.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.legacyReconciliationPolicy.deleteMany({ where: { createdByUserId: { in: userIds } } });
+    await prisma.legacyMigrationBatch.deleteMany({ where: { snapshotChecksum: "test-snapshot-checksum" } });
     await prisma.rewardLedgerEntry.deleteMany({
       where: { OR: [{ userId: { in: userIds } }, { relatedUserId: { in: userIds } }] },
     });
@@ -471,6 +481,55 @@ export async function runPreElectionTests() {
     assert.equal(payoutOfficerAssignments.status, 200, JSON.stringify(payoutOfficerAssignments.payload));
     assert.equal((payoutOfficerAssignments.payload.payoutAssignments as Array<{ id: string }>)[0].id, assignmentId);
 
+    // The kill switch is disabled by default in every environment, so a PAID
+    // transition is refused until an operator explicitly enables execution.
+    const blockedByKillSwitch = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: { status: "PAID", paymentReference: "blocked-by-kill-switch" },
+    });
+    assert.equal(blockedByKillSwitch.status, 409, JSON.stringify(blockedByKillSwitch.payload));
+    assert.equal(blockedByKillSwitch.payload.payoutExecutionEnabled, false);
+    const stillUnpaid = await prisma.payoutAssignment.findUniqueOrThrow({ where: { id: assignmentId } });
+    assert.notEqual(stillUnpaid.status, "PAID", "the kill switch must prevent the money-out transition");
+
+    setPayoutExecutionEnabledForTests(true);
+
+    // A cycle created before the payout authority priced its assignments at a
+    // caller-supplied rate. Those amounts were never server-derived, so they
+    // are refused at execution rather than paid — the same treatment a
+    // pre-authority redemption gets, which it previously did not receive.
+    const legacyCycle = await prisma.payoutCycle.findUniqueOrThrow({ where: { id: payoutCycleId } });
+    assert.ok(legacyCycle.payoutConfigurationId, "a cycle created now must record the configuration it priced from");
+    await prisma.payoutCycle.update({
+      where: { id: payoutCycleId },
+      data: { payoutConfigurationId: null },
+    });
+    const unprovenAssignment = await prisma.payoutAssignment.findFirstOrThrow({ where: { payoutCycleId } });
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId: unprovenAssignment.id,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "UNPROVEN-CYCLE-REF",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError &&
+        error.code === "AMOUNT_NOT_AUTHORITATIVE" &&
+        /predates server-side valuation/.test(error.message),
+      "an assignment priced by a caller-supplied rate must not be payable",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { paymentReference: "UNPROVEN-CYCLE-REF" } }),
+      0,
+      "a refused assignment must leave no execution record",
+    );
+    await prisma.payoutCycle.update({
+      where: { id: payoutCycleId },
+      data: { payoutConfigurationId: legacyCycle.payoutConfigurationId },
+    });
+
     const paidPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
       method: "PATCH",
       token: payoutToken,
@@ -483,6 +542,67 @@ export async function runPreElectionTests() {
     });
     assert.equal(paidPayout.status, 200, JSON.stringify(paidPayout.payload));
     assert.equal(await prisma.payoutTransaction.count({ where: { payoutAssignmentId: assignmentId } }), 1);
+
+    // The execution record is the artefact that says money left. It is written
+    // in the same transaction as the transition, so its absence would mean the
+    // transition committed alone.
+    const assignmentExecution = await prisma.payoutExecution.findUniqueOrThrow({
+      where: { payoutAssignmentId: assignmentId },
+    });
+    assert.equal(assignmentExecution.kind, "ASSIGNMENT");
+    assert.equal(assignmentExecution.paymentReference, "PRE-ELECTION-PAYOUT-REF-001");
+    assert.equal(assignmentExecution.points, 25);
+    assert.equal(Number(assignmentExecution.amount), 50);
+
+    // Executing the same assignment twice pays once. The second attempt is
+    // refused by the state claim, and no second execution record appears.
+    const doubleExecute = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: { status: "PAID", paymentReference: "PRE-ELECTION-PAYOUT-REF-002" },
+    });
+    assert.equal(doubleExecute.status, 409, JSON.stringify(doubleExecute.payload));
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { payoutAssignmentId: assignmentId } }),
+      1,
+      "a repeated execution must not create a second execution record",
+    );
+
+    // A payment reference identifies exactly one payment, across both kinds.
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "PRE-ELECTION-PAYOUT-REF-001",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError && error.code === "DUPLICATE_PAYMENT_REFERENCE",
+      "a reused payment reference must be refused",
+    );
+
+    // Called directly, bypassing every route: the chokepoint itself refuses
+    // while the switch is off. This is the assertion the previous design could
+    // not make, because there was no service to call.
+    setPayoutExecutionEnabledForTests(false);
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "DIRECT-CALL-WHILE-DISABLED",
+        }),
+      (error: unknown) => error instanceof PayoutExecutionDisabledError,
+      "the execution authority must refuse a direct call while the kill switch is off",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { paymentReference: "DIRECT-CALL-WHILE-DISABLED" } }),
+      0,
+      "a refused execution must leave no execution record",
+    );
+    setPayoutExecutionEnabledForTests(true);
 
     const finalizedPayoutChange = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
       method: "PATCH",
@@ -734,6 +854,661 @@ export async function runPreElectionTests() {
     // A Payout Officer likewise commands no territory.
     const payoutDenied = await apiRequest("/dashboard", { token: payoutToken });
     assert.equal(payoutDenied.status, 403, JSON.stringify(payoutDenied.payload));
+
+    // --- PR #10: one authoritative financial model --------------------------
+
+    const memberUser = await prisma.user.findUniqueOrThrow({
+      where: { email: testEmail("member-001") },
+      select: { id: true },
+    });
+
+    // The exact bypass the audit found: a member holding far less than the
+    // configured minimum could be paid through the legacy redemption path,
+    // which read a second ledger and applied neither threshold nor rate.
+    // A member with no eligible points is refused for that reason.
+    const noBalance = await apiRequest("/voter/redemptions", {
+      method: "POST",
+      token: referredMemberToken,
+      body: { pointsRequested: 1 },
+    });
+    assert.equal(noBalance.status, 400, JSON.stringify(noBalance.payload));
+    assert.match(String(noBalance.payload.message), /exceed the eligible balance/i);
+    assert.equal(await prisma.rewardRedemption.count({ where: { voterUserId: memberUser.id } }), 0);
+
+    // Give the member real eligible points, so the next two assertions exercise
+    // the threshold and the valuation rather than the empty-balance branch. The
+    // active configuration is minimumPoints 25 at a rate of 2.
+    const funded = await apiRequest("/admin/participation", {
+      method: "POST",
+      token: superAdminToken,
+      body: {
+        voterUserId: memberUser.id,
+        type: "VOTER_EDUCATION_DRIVE",
+        description: "Completed a verified voter education drive.",
+        pointsAwarded: 30,
+      },
+    });
+    assert.equal(funded.status, 201, JSON.stringify(funded.payload));
+
+    // Below the configured minimum, with enough balance to cover it — so only
+    // the threshold can produce this refusal.
+    const belowThreshold = await apiRequest("/voter/redemptions", {
+      method: "POST",
+      token: referredMemberToken,
+      body: { pointsRequested: 10 },
+    });
+    assert.equal(belowThreshold.status, 400, JSON.stringify(belowThreshold.payload));
+    assert.match(
+      String(belowThreshold.payload.message),
+      /minimum payout threshold of 25/i,
+      "the threshold must be the reason, not an incidental empty balance",
+    );
+    assert.equal(await prisma.rewardRedemption.count({ where: { voterUserId: memberUser.id } }), 0);
+
+    // The client may request points; it may never assert the monetary amount.
+    // This request WOULD succeed on its points alone, so the assertion turns on
+    // the stored amount rather than on a refusal that some other rule produced.
+    const clientSuppliedAmount = await apiRequest("/voter/redemptions", {
+      method: "POST",
+      token: referredMemberToken,
+      body: { pointsRequested: 30, amountRequested: 1_000_000 },
+    });
+    assert.equal(clientSuppliedAmount.status, 201, JSON.stringify(clientSuppliedAmount.payload));
+    const storedRedemption = await prisma.rewardRedemption.findFirstOrThrow({
+      where: { voterUserId: memberUser.id },
+    });
+    assert.equal(
+      storedRedemption.amountRequested,
+      60,
+      "the stored amount must be 30 points x the configured rate of 2, never the client's figure",
+    );
+    assert.notEqual(storedRedemption.amountRequested, 1_000_000);
+
+    // That redemption reserves the points, so the balance is spent exactly once.
+    const afterRedemption = await apiRequest(`/pre-election/rewards/balance?userId=${memberUser.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(
+      (afterRedemption.payload as { availablePoints: number }).availablePoints,
+      0,
+      "a pending redemption must reserve the points it was valued against",
+    );
+
+    // The payout-cycle path must see the same reservation. Before the authority
+    // was shared it subtracted only payout assignments, so these 30 points were
+    // simultaneously redeemable and payable through a cycle.
+    const eligibilityAfterRedemption = await apiRequest(
+      `/pre-election/payout/eligibility?cycleId=${payoutCycleId}`,
+      { token: superAdminToken },
+    );
+    assert.equal(eligibilityAfterRedemption.status, 200, JSON.stringify(eligibilityAfterRedemption.payload));
+    const eligibleIds = (
+      eligibilityAfterRedemption.payload.payoutEligibility as Array<{ userId: string }>
+    ).map((entry) => entry.userId);
+    assert.ok(
+      !eligibleIds.includes(memberUser.id),
+      "points reserved by a redemption must not also be payable through a payout cycle",
+    );
+
+    await prisma.rewardRedemption.delete({ where: { id: storedRedemption.id } });
+
+    // The legacy ledger is read-only: no new earnings may be written to it.
+    await assert.rejects(
+      () =>
+        prisma.$transaction((transaction) =>
+          createRewardEntryWithNotification(transaction, {
+            voterUserId: memberUser.id,
+            type: "PARTICIPATION",
+            points: 500,
+            description: "attempted legacy write",
+          }),
+        ),
+      /read-only/i,
+      "the legacy RewardLedger must refuse new earnings",
+    );
+
+    // A migrated legacy balance is preserved and visible, but never spendable
+    // until an approved equivalence ratio credits it.
+    const batch = await prisma.legacyMigrationBatch.create({
+      data: {
+        memberCount: 1,
+        beforeTotalPoints: 350,
+        migratedTotalPoints: 350,
+        pendingTotalPoints: 350,
+        snapshotChecksum: "test-snapshot-checksum",
+      },
+    });
+    const carryover = await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: referrer.id,
+        migrationBatchId: batch.id,
+        sourceRowIdsJson: ["legacy-row-1", "legacy-row-2"],
+        legacyPointBalance: 350,
+        rowChecksum: "test-row-checksum",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    const carriedBalance = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(carriedBalance.status, 200, JSON.stringify(carriedBalance.payload));
+    const carried = carriedBalance.payload as {
+      confirmedPoints: number;
+      availablePoints: number;
+      payablePoints: number;
+      legacyCarryoverPendingPoints: number;
+    };
+    assert.equal(carried.legacyCarryoverPendingPoints, 350, "the preserved legacy balance must be visible");
+    // Asserted against the ledger itself, not against a sibling response field.
+    // Comparing payablePoints to availablePoints proves nothing: the handler
+    // assigns the same expression to both keys, so it compares a value to
+    // itself and passes however badly the invariant is broken.
+    const referrerLedger = await prisma.rewardLedgerEntry.aggregate({
+      where: { userId: referrer.id },
+      _sum: { points: true },
+    });
+    const referrerAssignments = await prisma.payoutAssignment.aggregate({
+      where: { beneficiaryUserId: referrer.id },
+      _sum: { points: true },
+    });
+    const expectedAvailable = Math.max(
+      (referrerLedger._sum.points || 0) - (referrerAssignments._sum.points || 0),
+      0,
+    );
+    assert.equal(
+      carried.availablePoints,
+      expectedAvailable,
+      "the spendable balance must be exactly the authoritative ledger less reservations, with no carryover in it",
+    );
+    assert.equal(carried.payablePoints, expectedAvailable);
+    const beforeReconciliation = carried.confirmedPoints;
+
+    // With no approved policy there is no equivalence between a legacy point and
+    // an authoritative one, so there is nothing to convert. Fail closed.
+    assert.equal(
+      await prisma.legacyReconciliationPolicy.count({ where: { status: "APPROVED" } }),
+      0,
+      "no reconciliation ratio may be approved by default",
+    );
+    const unapproved = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(unapproved.status, 409, JSON.stringify(unapproved.payload));
+    assert.equal(unapproved.payload.code, "RECONCILIATION_POLICY_NOT_APPROVED");
+    assert.equal(
+      (await prisma.legacyBalanceCarryover.findUniqueOrThrow({ where: { id: carryover.id } })).status,
+      "LEGACY_CARRYOVER_PENDING",
+      "a refused reconciliation must leave the carryover pending",
+    );
+    assert.equal(
+      await prisma.rewardLedgerEntry.count({ where: { userId: referrer.id, category: "LEGACY_CARRYOVER" } }),
+      0,
+      "a refused reconciliation must credit nothing",
+    );
+    const batchBeforeAnyPolicy = await prisma.legacyMigrationBatch.findUniqueOrThrow({ where: { id: batch.id } });
+    assert.equal(batchBeforeAnyPolicy.reconciledTotalPoints, 0, "counters must not move for a refused reconciliation");
+
+    // The caller may no longer assert the valuation. A request carrying one is
+    // rejected outright rather than silently stripped, so an old client is told
+    // its figure was refused instead of quietly having it ignored.
+    const callerRatio = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id, conversionRatio: 1000 },
+    });
+    assert.equal(callerRatio.status, 400, JSON.stringify(callerRatio.payload));
+    const callerVersion = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id, reconciliationRuleVersion: "attacker-chosen" },
+    });
+    assert.equal(callerVersion.status, 400, JSON.stringify(callerVersion.payload));
+
+    // Governance approves a ratio in two deliberate acts: drafting proposes a
+    // valuation, approving authorises it. A draft alone converts nothing.
+    const draft = await apiRequest("/pre-election/rewards/legacy-reconciliation-policy", {
+      method: "POST",
+      token: superAdminToken,
+      body: { version: "legacy-reconciliation-v1", conversionRatio: 0.5, rationale: "Board-approved equivalence." },
+    });
+    assert.equal(draft.status, 201, JSON.stringify(draft.payload));
+    const draftedPolicy = (draft.payload as { policy: { id: string; status: string } }).policy;
+    assert.equal(draftedPolicy.status, "DRAFT");
+    const draftOnly = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(draftOnly.status, 409, "a drafted but unapproved ratio must convert nothing");
+    assert.equal(draftOnly.payload.code, "RECONCILIATION_POLICY_NOT_APPROVED");
+
+    const approvedPolicy = await apiRequest(
+      `/pre-election/rewards/legacy-reconciliation-policy/${draftedPolicy.id}/approve`,
+      { method: "POST", token: superAdminToken, body: {} },
+    );
+    assert.equal(approvedPolicy.status, 200, JSON.stringify(approvedPolicy.payload));
+    assert.equal((approvedPolicy.payload as { policy: { status: string } }).policy.status, "APPROVED");
+
+    // Reconciliation is the only path that turns a carryover into spendable
+    // points, and its ratio and version now come from the approved policy.
+    const reconciled = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(reconciled.status, 200, JSON.stringify(reconciled.payload));
+    const reconciledCarryover = (reconciled.payload as { carryover: { creditedPoints: number; status: string } }).carryover;
+    // 350 legacy points at a 0.5 ratio credits 175, not 350: a non-parity ratio
+    // is handled by the same mechanism without rewriting history.
+    assert.equal(reconciledCarryover.creditedPoints, 175);
+    assert.equal(reconciledCarryover.status, "LEGACY_CARRYOVER_CONFIRMED");
+
+    // Provenance: the credit traces back to the governance decision that
+    // authorised it, not merely to a number someone passed in.
+    const provenance = await prisma.legacyBalanceCarryover.findUniqueOrThrow({ where: { id: carryover.id } });
+    assert.equal(provenance.reconciliationPolicyId, draftedPolicy.id);
+    assert.equal(provenance.reconciliationRuleVersion, "legacy-reconciliation-v1");
+    assert.equal(provenance.conversionRatio?.toString(), "0.5");
+    const reconciliationAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: "LEGACY_BALANCE_RECONCILED", targetId: carryover.id },
+      orderBy: { createdAt: "desc" },
+    });
+    const auditMetadata = JSON.parse(reconciliationAudit.metadataJson || "{}") as Record<string, unknown>;
+    assert.equal(auditMetadata.reconciliationPolicyId, draftedPolicy.id);
+    assert.equal(auditMetadata.reconciliationPolicyVersion, "legacy-reconciliation-v1");
+    assert.equal(auditMetadata.conversionRatio, "0.5");
+    assert.equal(auditMetadata.creditedPoints, 175);
+    assert.equal(auditMetadata.sourceBalance, 350);
+
+    const afterReconciliation = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, {
+      token: superAdminToken,
+    });
+    const after = afterReconciliation.payload as { confirmedPoints: number; legacyCarryoverPendingPoints: number };
+    assert.equal(after.confirmedPoints, beforeReconciliation + 175);
+    assert.equal(after.legacyCarryoverPendingPoints, 0, "a confirmed carryover must leave the pending pool");
+
+    // The original legacy figure is preserved unchanged: history is corrected
+    // by explicit events, never by editing the record.
+    const storedCarryover = await prisma.legacyBalanceCarryover.findUniqueOrThrow({ where: { id: carryover.id } });
+    assert.equal(storedCarryover.legacyPointBalance, 350, "the source balance must never be rewritten");
+    assert.equal(storedCarryover.reconciliationRuleVersion, "legacy-reconciliation-v1");
+    assert.ok(storedCarryover.reconciledLedgerEntryId);
+
+    // Reconciling CONCURRENTLY must not credit twice either. The PENDING check
+    // runs before the transaction, so every request passes it; what stops the
+    // losers is the conditional claim inside. The audit could not verify from
+    // source alone whether that claim is a real compare-and-swap, so it is
+    // exercised here rather than argued: under READ COMMITTED a loser blocks on
+    // the row lock, re-evaluates its WHERE against the committed row, and
+    // matches nothing.
+    const raceMember = await registerMember("903", null, "e".repeat(64));
+    const raceBatch = await prisma.legacyMigrationBatch.create({
+      data: {
+        memberCount: 1,
+        beforeTotalPoints: 200,
+        migratedTotalPoints: 200,
+        pendingTotalPoints: 200,
+        snapshotChecksum: "race-checksum",
+      },
+    });
+    const raceCarryover = await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: raceMember.id,
+        migrationBatchId: raceBatch.id,
+        sourceRowIdsJson: ["legacy-row-race"],
+        legacyPointBalance: 200,
+        rowChecksum: "race-row",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    const raced = await Promise.all(
+      [1, 2, 3].map(() =>
+        apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+          method: "POST",
+          token: superAdminToken,
+          body: { carryoverId: raceCarryover.id },
+        }),
+      ),
+    );
+    assert.equal(
+      raced.filter((result) => result.status === 200).length,
+      1,
+      `exactly one concurrent reconciliation may succeed: ${JSON.stringify(raced.map((r) => r.status))}`,
+    );
+    assert.equal(raced.filter((result) => result.status === 409).length, 2);
+
+    assert.equal(
+      await prisma.rewardLedgerEntry.count({ where: { userId: raceMember.id, category: "LEGACY_CARRYOVER" } }),
+      1,
+      "a concurrent reconciliation must post exactly one credit",
+    );
+    const racedBatch = await prisma.legacyMigrationBatch.findUniqueOrThrow({ where: { id: raceBatch.id } });
+    assert.equal(
+      racedBatch.pendingTotalPoints,
+      0,
+      "the batch counters must move exactly once, not once per concurrent request",
+    );
+    assert.equal(racedBatch.reconciledTotalPoints, 100);
+
+    // One carryover per member is now a database constraint, not a check the
+    // cutover script performs outside its own write transaction. Without it a
+    // second batch credits the same legacy rows again.
+    await assert.rejects(
+      () =>
+        prisma.legacyBalanceCarryover.create({
+          data: {
+            userId: raceMember.id,
+            migrationBatchId: batch.id,
+            sourceRowIdsJson: ["legacy-row-duplicate"],
+            legacyPointBalance: 200,
+            rowChecksum: "duplicate-carryover-row",
+            status: "LEGACY_CARRYOVER_PENDING",
+          },
+        }),
+      /Unique constraint/i,
+      "a member must not be able to hold two carryovers for the same legacy balance",
+    );
+
+    // Reconciling twice must not credit twice.
+    const doubleReconcile = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(doubleReconcile.status, 409, JSON.stringify(doubleReconcile.payload));
+    const finalBalance = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, { token: superAdminToken });
+    assert.equal(
+      (finalBalance.payload as { confirmedPoints: number }).confirmedPoints,
+      beforeReconciliation + 175,
+      "a second reconciliation must not double-count",
+    );
+
+    // A member holding financial history must be refused deletion with the
+    // explained 409, not a raw foreign-key failure. Earnings now post to the
+    // authoritative ledger rather than the legacy one, so the dependency guard
+    // has to count both it and preserved carryover value; otherwise this delete
+    // passes the pre-check and fails in the database instead.
+    const participation = await apiRequest("/admin/participation", {
+      method: "POST",
+      token: superAdminToken,
+      body: {
+        voterUserId: referredMember.id,
+        type: "TOWN_HALL_ATTENDANCE",
+        description: "Attended a verified town hall meeting.",
+        pointsAwarded: 5,
+      },
+    });
+    assert.equal(participation.status, 201, JSON.stringify(participation.payload));
+    assert.ok(
+      (await prisma.rewardLedgerEntry.count({ where: { userId: referredMember.id } })) > 0,
+      "participation must credit the authoritative ledger",
+    );
+    await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: referredMember.id,
+        migrationBatchId: batch.id,
+        sourceRowIdsJson: ["legacy-row-3"],
+        legacyPointBalance: 40,
+        rowChecksum: "test-row-checksum-member",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    // The member-facing endpoints must not serve the carryover as spendable
+    // either. Both used to sum the legacy ledger — which after the cutover is
+    // precisely the preserved carryover — so the redemption screen itself, the
+    // one screen where a figure most reads as spendable, showed it as payable.
+    const memberLedger = await prisma.rewardLedgerEntry.aggregate({
+      where: { userId: referredMember.id },
+      _sum: { points: true },
+    });
+    const memberRedemptions = await apiRequest("/voter/redemptions", { token: referredMemberToken });
+    assert.equal(memberRedemptions.status, 200, JSON.stringify(memberRedemptions.payload));
+    const memberBalance = (memberRedemptions.payload as {
+      balance: { availablePoints: number; legacyCarryoverPendingPoints: number };
+    }).balance;
+    assert.equal(
+      memberBalance.availablePoints,
+      memberLedger._sum.points || 0,
+      "the redemption screen must not present preserved carryover as spendable",
+    );
+    assert.equal(
+      memberBalance.legacyCarryoverPendingPoints,
+      40,
+      "the preserved balance is still shown to the member, separately",
+    );
+
+    // Deactivation is an earlier precondition of the delete route; it is
+    // satisfied here so the request reaches the dependency guard under test.
+    await prisma.user.update({ where: { id: referredMember.id }, data: { isActive: false } });
+    const deleteFinancialMember = await apiRequest(`/admin/users/${referredMember.id}`, {
+      method: "DELETE",
+      token: superAdminToken,
+    });
+    assert.equal(deleteFinancialMember.status, 409, JSON.stringify(deleteFinancialMember.payload));
+    const deleteCounts = deleteFinancialMember.payload.dependencyCounts as Record<string, number>;
+    assert.ok(
+      deleteCounts.authoritativeLedgerEntries > 0,
+      "the delete guard must see entries in the authoritative ledger",
+    );
+    assert.ok(deleteCounts.legacyBalanceCarryovers > 0, "the delete guard must see preserved legacy value");
+    const survivingMember = await prisma.user.findUnique({ where: { id: referredMember.id } });
+    assert.ok(survivingMember, "a member holding financial history must still exist after a refused delete");
+
+    // Payout rows must block a delete too. Both payout foreign keys are
+    // Restrict, so a beneficiary holding them has to be refused with the
+    // explained 409 rather than reaching the database and failing there.
+    const existingAssignment = await prisma.payoutAssignment.findFirstOrThrow({
+      where: { beneficiaryUserId: referrer.id },
+      select: { payoutBatchId: true },
+    });
+    await prisma.payoutAssignment.create({
+      data: {
+        payoutCycleId,
+        payoutBatchId: existingAssignment.payoutBatchId,
+        beneficiaryUserId: referredMember.id,
+        payoutOfficerUserId: payoutOfficer.id,
+        points: 5,
+        amount: 10,
+        status: "PENDING",
+      },
+    });
+    const deleteBeneficiary = await apiRequest(`/admin/users/${referredMember.id}`, {
+      method: "DELETE",
+      token: superAdminToken,
+    });
+    assert.equal(deleteBeneficiary.status, 409, JSON.stringify(deleteBeneficiary.payload));
+    assert.ok(
+      (deleteBeneficiary.payload.dependencyCounts as Record<string, number>).payoutAssignments > 0,
+      "the delete guard must see payout assignments",
+    );
+
+    // The redemption path is the second money-out transition and had no test at
+    // all: deleting its kill-switch check broke nothing. Both states are proved
+    // here, and the block is enforced at the transition, not only by the route.
+    setPayoutExecutionEnabledForTests(false);
+    const paidRedemption = await prisma.rewardRedemption.create({
+      data: {
+        voterUserId: referredMember.id,
+        pointsRequested: 30,
+        // Deliberately not the authoritative value (30 points x rate 2 = 60),
+        // standing in for a row raised before the payout authority existed.
+        amountRequested: 999_999,
+        status: "APPROVED",
+      },
+    });
+    const blockedRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
+      method: "PATCH",
+      token: superAdminToken,
+      body: { paymentReference: "REDEMPTION-BLOCKED-REF" },
+    });
+    assert.equal(blockedRedemption.status, 409, JSON.stringify(blockedRedemption.payload));
+    assert.equal(blockedRedemption.payload.payoutExecutionEnabled, false);
+    assert.notEqual(
+      (await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: paidRedemption.id } })).status,
+      "PAID",
+      "the kill switch must prevent the redemption money-out transition",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: paidRedemption.id } }),
+      0,
+      "a refused redemption must write neither PAID nor an execution record",
+    );
+
+    setPayoutExecutionEnabledForTests(true);
+    const allowedRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
+      method: "PATCH",
+      token: superAdminToken,
+      body: { paymentReference: "REDEMPTION-PAID-REF-001" },
+    });
+    assert.equal(allowedRedemption.status, 200, JSON.stringify(allowedRedemption.payload));
+    assert.equal(
+      (await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: paidRedemption.id } })).status,
+      "PAID",
+      "an operator who enables execution must be able to complete the payment",
+    );
+
+    // The redemption path now leaves an execution record too. Before this there
+    // was none: after a redemption was paid, the only monetary figure in the
+    // system was the redemption's own stored amount.
+    const redemptionExecution = await prisma.payoutExecution.findUniqueOrThrow({
+      where: { rewardRedemptionId: paidRedemption.id },
+    });
+    assert.equal(redemptionExecution.kind, "REDEMPTION");
+    assert.equal(redemptionExecution.paymentReference, "REDEMPTION-PAID-REF-001");
+
+    // The stored amount was deliberately wrong. The authoritative valuation —
+    // 30 points at the configured rate of 2 — is what was actually paid, and
+    // the stored figure was corrected to match rather than being honoured.
+    assert.equal(
+      Number(redemptionExecution.amount),
+      60,
+      "the execution must record the authoritative valuation, not the stored amount",
+    );
+    assert.equal(
+      (await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: paidRedemption.id } })).amountRequested,
+      60,
+      "the authoritative value must overwrite a stored amount nothing computed",
+    );
+
+    // A redemption raised BEFORE the cutover is a claim on preserved legacy
+    // value. The gate found that such a row was both spendable and payable:
+    // the legacy offset removed its reservation, then re-valuation added the
+    // same points back, so the member's eligible balance became their earnings
+    // plus the pre-cutover claim — surplus funded entirely by carryover no
+    // approved ratio had converted.
+    const preCutoverBatch = await prisma.legacyMigrationBatch.create({
+      data: {
+        memberCount: 1,
+        beforeTotalPoints: 500,
+        migratedTotalPoints: 500,
+        pendingTotalPoints: 500,
+        snapshotChecksum: "pre-cutover-leak-checksum",
+      },
+    });
+    const leakMember = await registerMember("902", null, "d".repeat(64));
+    const preCutoverRedemption = await prisma.rewardRedemption.create({
+      data: {
+        voterUserId: leakMember.id,
+        pointsRequested: 400,
+        amountRequested: null,
+        status: "APPROVED",
+        createdAt: new Date(preCutoverBatch.executedAt.getTime() - 60_000),
+      },
+    });
+    await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: leakMember.id,
+        migrationBatchId: preCutoverBatch.id,
+        sourceRowIdsJson: ["legacy-row-leak"],
+        legacyPointBalance: 500,
+        legacyReservedPoints: 400,
+        rowChecksum: "pre-cutover-leak-row",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    // The member earned nothing in the authoritative ledger, so nothing is
+    // spendable — the 500 preserved points are visible but not payable, and the
+    // pre-cutover claim is reported rather than released.
+    const leakBalance = await apiRequest(`/pre-election/rewards/balance?userId=${leakMember.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(
+      (leakBalance.payload as { availablePoints: number }).availablePoints,
+      0,
+      "a pre-cutover claim must not turn preserved carryover into a spendable balance",
+    );
+    assert.equal((leakBalance.payload as { legacyCarryoverPendingPoints: number }).legacyCarryoverPendingPoints, 500);
+    assert.equal(
+      (leakBalance.payload as { preCutoverReservedPoints: number }).preCutoverReservedPoints,
+      400,
+      "a legacy-era claim must be reported, and must stay fully reserved",
+    );
+
+    // The decisive assertion: the preserved balance must not change what is
+    // spendable. Releasing a reservation because a carryover exists would price
+    // that carryover at parity, which no approved ratio has authorised.
+    const beforeCarryoverRemoval = (leakBalance.payload as { availablePoints: number }).availablePoints;
+    await prisma.legacyBalanceCarryover.updateMany({
+      where: { userId: leakMember.id },
+      data: { status: "LEGACY_CARRYOVER_VOID" },
+    });
+    const withoutCarryover = await apiRequest(`/pre-election/rewards/balance?userId=${leakMember.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(
+      (withoutCarryover.payload as { availablePoints: number }).availablePoints,
+      beforeCarryoverRemoval,
+      "the spendable balance must not be a function of a pending carryover",
+    );
+    await prisma.legacyBalanceCarryover.updateMany({
+      where: { userId: leakMember.id },
+      data: { status: "LEGACY_CARRYOVER_PENDING" },
+    });
+
+    // And it cannot be paid, at the chokepoint, whatever the routes allow.
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "REDEMPTION",
+          redemptionId: preCutoverRedemption.id,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "PRE-CUTOVER-CLAIM-REF",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError &&
+        error.code === "AMOUNT_NOT_AUTHORITATIVE" &&
+        /preserved legacy balance that has not been reconciled/.test(error.message),
+      "an unreconciled legacy claim must be refused as a legacy claim, not as an incidental balance shortfall",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: preCutoverRedemption.id } }),
+      0,
+      "a refused legacy claim must leave no execution record",
+    );
+
+    // Paying the same redemption twice pays once.
+    const doubleRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
+      method: "PATCH",
+      token: superAdminToken,
+      body: { paymentReference: "REDEMPTION-PAID-REF-002" },
+    });
+    assert.equal(doubleRedemption.status, 409, JSON.stringify(doubleRedemption.payload));
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: paidRedemption.id } }),
+      1,
+      "a repeated redemption payment must not create a second execution record",
+    );
+
+    // The configured default is disabled in every environment; the override
+    // above is a test affordance, not a change to that default.
+    assert.equal(env.PAYOUT_EXECUTION_ENABLED, false, "payout execution must default to disabled in every environment");
+    setPayoutExecutionEnabledForTests(null);
 
     console.log("pre_election_tests=passed");
   } finally {

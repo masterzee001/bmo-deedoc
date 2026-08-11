@@ -64,7 +64,7 @@ export default function DashboardPage() {
   const [engagementTasks, setEngagementTasks] = useState<VoterEngagementTaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ pointsRequested: "", amountRequested: "", note: "" });
+  const [form, setForm] = useState({ pointsRequested: "", note: "" });
   const [documentConsent, setDocumentConsent] = useState(false);
   const [verificationDocument, setVerificationDocument] = useState<File | null>(null);
   const [message, setMessage] = useState("");
@@ -170,10 +170,9 @@ export default function DashboardPage() {
     try {
       await createVoterRedemption(token, {
         pointsRequested: Number(form.pointsRequested),
-        amountRequested: form.amountRequested ? Number(form.amountRequested) : undefined,
         note: form.note || undefined,
       });
-      setForm({ pointsRequested: "", amountRequested: "", note: "" });
+      setForm({ pointsRequested: "", note: "" });
       setMessage("Redemption request submitted.");
       await loadDashboard(token);
     } catch (caughtError) {
@@ -330,6 +329,16 @@ export default function DashboardPage() {
           <h2>Available Balance</h2>
           <div className="value">{preElectionBalance?.availablePoints ?? balance.availablePoints}</div>
         </article>
+        {balance.legacyCarryoverPendingPoints > 0 ? (
+          <article className="panel card">
+            <h2>Preserved Legacy Balance</h2>
+            <div className="value">{balance.legacyCarryoverPendingPoints}</div>
+            <p className="muted">
+              Carried over and preserved for you. Not yet payable — it becomes spendable only once an
+              approved conversion rate is applied.
+            </p>
+          </article>
+        ) : null}
       </section>
 
       {error ? <p className="error" style={{ marginTop: 16 }}>{error}</p> : null}
@@ -505,10 +514,10 @@ export default function DashboardPage() {
               <span>Points Requested</span>
               <input value={form.pointsRequested} onChange={(event) => setForm({ ...form, pointsRequested: event.target.value })} required />
             </label>
-            <label className="field">
-              <span>Amount Requested</span>
-              <input value={form.amountRequested} onChange={(event) => setForm({ ...form, amountRequested: event.target.value })} />
-            </label>
+            {/* No amount field. The payable value is computed by the server
+                from the member's balance and the configured conversion rate;
+                asking the payee to state it invited the client to be
+                authoritative for money. */}
             <label className="field">
               <span>Note</span>
               <input value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
@@ -563,7 +572,7 @@ export default function DashboardPage() {
               <article key={item.id} className="reward-item">
                 <strong>{item.status}</strong>
                 <p>{item.pointsRequested} points requested</p>
-                {item.amountRequested !== null ? <p className="muted">Requested amount: {item.amountRequested}</p> : null}
+                {item.amountRequested !== null ? <p className="muted">Payable amount: {item.amountRequested}</p> : null}
                 <p className="muted">{new Date(item.createdAt).toLocaleString()}</p>
                 {item.note ? <p className="muted">Review note: {item.note}</p> : null}
               </article>

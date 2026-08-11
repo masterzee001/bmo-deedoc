@@ -33,6 +33,13 @@ import { createNotification } from "../lib/notifications";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
+import {
+  PayoutExecutionDisabledError,
+  getAuthoritativeBalance,
+  isPayoutExecutionEnabled,
+  valuePayout,
+} from "../lib/payout-authority";
+import { PayoutExecutionError, executePayout, payoutExecutionStatusCode } from "../lib/payout-execution";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { createElectionDayRealtimeEvent } from "../realtime/events";
 import { publishRealtimeEvent } from "../realtime/gateway";
@@ -217,6 +224,29 @@ type ManagedUserDependencyCounts = {
   candidateCampaignEvents: number;
   notifications: number;
   rewardEntries: number;
+  /**
+   * Entries in the authoritative ledger. Counted separately from the legacy
+   * `rewardEntries` because earnings now post here: without this the guard
+   * below would report no dependencies for a member who has earned points, and
+   * the delete would fail on the database foreign key as a 500 instead of the
+   * explained 409.
+   */
+  authoritativeLedgerEntries: number;
+  /** Preserved legacy value. A member holding a carryover must never be deleted. */
+  legacyBalanceCarryovers: number;
+  /**
+   * Payout rows, counted for both the beneficiary and the payout officer. Both
+   * foreign keys are Restrict, so any of them left uncounted turns a delete into
+   * a raw database error instead of the explained 409. A beneficiary is usually
+   * covered incidentally by their ledger entries, and a payout officer is
+   * currently unreachable here because canManageUser refuses that role first —
+   * counted anyway, so the guard does not depend on an authorization rule
+   * elsewhere continuing to say no.
+   */
+  payoutAssignments: number;
+  payoutTransactions: number;
+  /** Records that money left the platform. Immutable, and never deleted with a user. */
+  payoutExecutions: number;
   rewardRedemptions: number;
   agentActivities: number;
   reportedIncidents: number;
@@ -224,6 +254,13 @@ type ManagedUserDependencyCounts = {
   voterProfileDependents: number;
   engagementTaskClaims: number;
 };
+
+/** Evidence that a redemption payment actually happened, required to execute one. */
+const redemptionPaymentSchema = z.object({
+  paymentReference: z.string().trim().min(3).max(120),
+  proofStorageKey: z.string().trim().min(1).max(500).optional(),
+  note: z.string().trim().max(500).optional(),
+});
 
 const participationSchema = z.object({
   voterUserId: z.string().trim().min(1),
@@ -3716,6 +3753,11 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     candidateCampaignEvents,
     notifications,
     rewardEntries,
+    authoritativeLedgerEntries,
+    legacyBalanceCarryovers,
+    payoutAssignments,
+    payoutTransactions,
+    payoutExecutions,
     rewardRedemptions,
     agentActivities,
     reportedIncidents,
@@ -3739,6 +3781,15 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     prisma.campaignEvent.count({ where: { candidateUserId: userId } }),
     prisma.notification.count({ where: { userId } }),
     prisma.rewardLedger.count({ where: { OR: [{ voterUserId: userId }, { relatedUserId: userId }] } }),
+    prisma.rewardLedgerEntry.count({ where: { OR: [{ userId }, { relatedUserId: userId }] } }),
+    prisma.legacyBalanceCarryover.count({ where: { userId } }),
+    prisma.payoutAssignment.count({
+      where: { OR: [{ beneficiaryUserId: userId }, { payoutOfficerUserId: userId }] },
+    }),
+    prisma.payoutTransaction.count({ where: { payoutOfficerUserId: userId } }),
+    prisma.payoutExecution.count({
+      where: { OR: [{ beneficiaryUserId: userId }, { executedByUserId: userId }] },
+    }),
     prisma.rewardRedemption.count({ where: { OR: [{ voterUserId: userId }, { reviewedByUserId: userId }] } }),
     prisma.agentActivity.count({ where: { agentUserId: userId } }),
     prisma.incident.count({ where: { OR: [{ reportedByUserId: userId }, { assignedAdminUserId: userId }, { escalatedByUserId: userId }] } }),
@@ -3764,6 +3815,11 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     candidateCampaignEvents,
     notifications,
     rewardEntries,
+    authoritativeLedgerEntries,
+    legacyBalanceCarryovers,
+    payoutAssignments,
+    payoutTransactions,
+    payoutExecutions,
     rewardRedemptions,
     agentActivities,
     reportedIncidents,
@@ -3900,9 +3956,33 @@ router.post("/participation", requireAuth, requireRole("ADMIN", "SUPER_ADMIN"), 
     return response.status(403).json({ message: "You cannot record participation for this voter." });
   }
 
-  const result = await prisma.$transaction((transaction) =>
-    recordParticipationAndReward(transaction, parsed.data),
-  );
+  const result = await prisma.$transaction(async (transaction) => {
+    const recorded = await recordParticipationAndReward(transaction, parsed.data);
+
+    // Minting spendable points was the one financial mutation that left no
+    // audit row. It is the only ledger writer whose point figure comes from a
+    // caller rather than a versioned reward rule, which makes the trail more
+    // necessary here than anywhere else, not less.
+    if (recorded.created) {
+      await createAuditLog(transaction, {
+        actorUserId: request.authUser!.id,
+        action: "PARTICIPATION_POINTS_AWARDED",
+        targetType: "User",
+        targetId: parsed.data.voterUserId,
+        territory: voter.voterProfile || undefined,
+        metadata: {
+          type: parsed.data.type,
+          pointsAwarded: parsed.data.pointsAwarded,
+          description: parsed.data.description,
+          eventId: recorded.eventId,
+          relatedPollId: parsed.data.relatedPollId || null,
+          relatedPostId: parsed.data.relatedPostId || null,
+        },
+      });
+    }
+
+    return recorded;
+  });
 
   if (!result.created) {
     return response.status(409).json({ message: "This participation action was already recorded." });
@@ -5165,15 +5245,38 @@ router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADM
   }
 
   const updated = await prisma.$transaction(async (transaction) => {
-    const balance = await getRewardBalance(transaction, redemption.voterUserId);
-    if (redemption.pointsRequested > balance.availablePoints + redemption.pointsRequested) {
-      throw new Error("Redemption balance validation failed.");
+    // The previous guard read the legacy ledger and compared
+    // `pointsRequested > availablePoints + pointsRequested`, which is
+    // unsatisfiable for any positive request — it never rejected anything.
+    //
+    // This one can fire. The redemption already reserves its points, so what
+    // must hold at approval is that the member's earnings still cover every
+    // reservation against them. If other commitments have since consumed the
+    // balance, approving would confirm points the member does not have.
+    const balance = await getAuthoritativeBalance(transaction, redemption.voterUserId);
+    if (balance.reservedPoints > balance.confirmedPoints) {
+      throw new Error("REDEMPTION_BALANCE_INSUFFICIENT");
+    }
+
+    // Re-valued here, so the amount that is later paid is one this server
+    // computed. A redemption raised before the authority existed — or by a seed
+    // — carries a client-supplied `amountRequested`, and the PAID transition
+    // records that figure verbatim. Without revaluing, an old row remains
+    // approvable and payable at an amount nothing ever authorized.
+    const valuation = await valuePayout(transaction, {
+      userId: redemption.voterUserId,
+      requestedPoints: redemption.pointsRequested,
+      excludeRedemptionId: redemption.id,
+    });
+    if (!valuation.meetsThreshold) {
+      throw new Error("REDEMPTION_BALANCE_INSUFFICIENT");
     }
 
     const next = await transaction.rewardRedemption.update({
       where: { id: redemption.id },
       data: {
         status: RewardRedemptionStatus.APPROVED,
+        amountRequested: Number(valuation.payableAmount),
         note: parsed.data.note || redemption.note,
         reviewedByUserId: request.authUser!.id,
         reviewedAt: new Date(),
@@ -5282,6 +5385,14 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
     return;
   }
 
+  // A payment reference is now required on this path too. The assignment path
+  // always demanded one; the redemption path recorded no execution artefact at
+  // all, so a paid redemption could never be reconciled against a bank record.
+  const parsed = redemptionPaymentSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid redemption payment payload.", errors: parsed.error.flatten() });
+  }
+
   const redemption = await prisma.rewardRedemption.findUnique({ where: { id: redemptionId } });
   if (!redemption) {
     return response.status(404).json({ message: "Redemption was not found." });
@@ -5292,41 +5403,37 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
     return response.status(403).json({ message: "You cannot update this redemption." });
   }
 
-  if (redemption.status !== RewardRedemptionStatus.APPROVED) {
-    return response.status(400).json({ message: "Only approved redemptions can be marked as paid." });
+  // The state check, the kill switch, the revaluation, the atomic claim, the
+  // execution record and the audit row all belong to the execution authority.
+  // This route authorizes the actor and reports the outcome; it does not pay.
+  let executed;
+  try {
+    executed = await executePayout(prisma, {
+      kind: "REDEMPTION",
+      redemptionId: redemption.id,
+      actorUserId: request.authUser!.id,
+      paymentReference: parsed.data.paymentReference,
+      proofStorageKey: parsed.data.proofStorageKey || null,
+      note: parsed.data.note || null,
+    });
+  } catch (error) {
+    if (error instanceof PayoutExecutionDisabledError) {
+      return response.status(409).json({ message: error.message, payoutExecutionEnabled: false });
+    }
+    if (error instanceof PayoutExecutionError) {
+      return response.status(payoutExecutionStatusCode(error.code)).json({ message: error.message, code: error.code });
+    }
+    throw error;
   }
 
-  const updated = await prisma.$transaction(async (transaction) => {
-    const next = await transaction.rewardRedemption.update({
-      where: { id: redemption.id },
-      data: {
-        status: RewardRedemptionStatus.PAID,
-        reviewedByUserId: request.authUser!.id,
-        reviewedAt: new Date(),
-      },
-    });
-
-    await createNotification(transaction, {
-      userId: redemption.voterUserId,
-      type: NotificationType.REWARD_REDEMPTION,
-      title: "Redemption paid",
-      message: `${redemption.pointsRequested} points redemption has been marked as paid.`,
-    });
-
-    await createAuditLog(transaction, {
-      actorUserId: request.authUser!.id,
-      action: "REWARD_REDEMPTION_PAID",
-      targetType: "RewardRedemption",
-      targetId: redemption.id,
-      territory: voterProfile,
-      metadata: {
-        voterUserId: redemption.voterUserId,
-        pointsRequested: redemption.pointsRequested,
-      },
-    });
-
-    return next;
+  await createNotification(prisma, {
+    userId: redemption.voterUserId,
+    type: NotificationType.REWARD_REDEMPTION,
+    title: "Redemption paid",
+    message: `${redemption.pointsRequested} points redemption has been marked as paid.`,
   });
+
+  const updated = await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: redemption.id } });
 
   return response.json({
     message: "Redemption marked as paid successfully.",
