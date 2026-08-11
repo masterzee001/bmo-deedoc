@@ -7,6 +7,7 @@ import { signAccessToken } from "./auth/jwt";
 import { hashPassword } from "./auth/password";
 import { getAuthUserProfile } from "./auth/profile";
 import { createApp } from "./app";
+import { env } from "./env";
 import { prisma } from "./prisma";
 import {
   EvidenceObjectAlreadyExistsError,
@@ -185,6 +186,49 @@ async function createFixtures() {
 }
 
 const cases: Array<{ name: string; run: () => Promise<void> }> = [
+  {
+    name: "the JSON body limit admits a realistic base64 evidence photo",
+    run: async () => {
+      // The evidence route accepts decoded originals up to 8MB, but express.json
+      // parses the base64 envelope first. A parser ceiling below the advertised
+      // size rejected ordinary phone photos with a bare 413 before any evidence
+      // validation ran, which made evidence upload unusable for real files.
+      const declaredLimit = env.API_JSON_BODY_LIMIT.trim().toLowerCase();
+      assert.ok(declaredLimit.endsWith("mb"), `expected a megabyte limit, got ${declaredLimit}`);
+      const megabytes = Number(declaredLimit.replace(/mb$/, ""));
+      // 8MB of binary becomes roughly 10.7MB of base64, plus the JSON envelope.
+      assert.ok(megabytes >= 11, `API_JSON_BODY_LIMIT ${declaredLimit} cannot carry an 8MB base64 evidence original`);
+
+      const token = await login(pucEmail);
+      // 2MB is a conservative real-world phone photo; base64-encoded it exceeded
+      // the previous 1mb parser ceiling.
+      const original = Buffer.alloc(2 * 1024 * 1024, 7);
+      const upload = await apiRequest("/evidence/uploads/finalize", {
+        token,
+        method: "POST",
+        body: {
+          evidenceType: "PHOTO",
+          classification: "INCIDENT",
+          originalFileName: "large-field-photo.jpg",
+          mimeType: "image/jpeg",
+          contentBase64: original.toString("base64"),
+          pollingUnitId: branch.pollingUnitId,
+        },
+      });
+      assert.notEqual(upload.status, 413, "a realistic photo must not be rejected by the body parser");
+      assert.equal(upload.status, 201, JSON.stringify(upload.payload));
+      const stored = upload.payload.evidence as { id: string; fileSize: number; sha256: string };
+      assert.equal(stored.fileSize, original.byteLength);
+      assert.equal(stored.sha256, crypto.createHash("sha256").update(original).digest("hex"));
+
+      // Removed again so the Polling Unit's evidence counts stay exactly as the
+      // timeline and dossier cases below expect.
+      await prisma.evidenceDerivative.deleteMany({ where: { evidenceAssetId: stored.id } });
+      await prisma.backgroundJob.deleteMany({ where: { idempotencyKey: `evidence.derivatives:${stored.id}` } });
+      await prisma.evidenceCustodyEvent.deleteMany({ where: { evidenceAssetId: stored.id } });
+      await prisma.evidenceAsset.delete({ where: { id: stored.id } });
+    },
+  },
   {
     name: "storage test double denies overwrites and never uses filesystem authority",
     run: async () => {
