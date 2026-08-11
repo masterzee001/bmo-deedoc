@@ -7,6 +7,7 @@ import {
   IncidentStatus,
   IncidentType,
   NotificationType,
+  RewardLedgerCategory,
   RewardRedemptionStatus,
   RewardType,
   VoterVerificationDecision,
@@ -473,9 +474,12 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
-    prisma.rewardLedger.groupBy({
-      by: ["type"],
-      where: { voterUserId },
+    // Grouped from the authoritative ledger. Grouping the legacy ledger here
+    // reported preserved carryover as the member's earned totals — a second
+    // leak, independent of the balance, that survives fixing the balance alone.
+    prisma.rewardLedgerEntry.groupBy({
+      by: ["category"],
+      where: { userId: voterUserId },
       _sum: { points: true },
     }),
     prisma.rewardRedemption.findMany({
@@ -485,7 +489,7 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
     }),
   ]);
 
-  const totals = new Map(groupedRewards.map((entry) => [entry.type, entry._sum.points || 0]));
+  const totals = new Map(groupedRewards.map((entry) => [entry.category, entry._sum.points || 0]));
   const totalPoints = Array.from(totals.values()).reduce((sum, value) => sum + value, 0);
 
   const balance = await getRewardBalance(prisma, voterUserId!);
@@ -509,10 +513,14 @@ router.get("/rewards", requireAuth, requireMemberCapability, async (request, res
 
   return response.json({
     totalPoints,
-    totalParticipationPoints: totals.get(RewardType.PARTICIPATION) || 0,
-    totalReferralPoints: totals.get(RewardType.REFERRAL) || 0,
+    totalParticipationPoints: totals.get(RewardLedgerCategory.APPROVED_PARTICIPATION) || 0,
+    totalReferralPoints: totals.get(RewardLedgerCategory.VERIFIED_REFERRAL) || 0,
     availablePoints: balance.availablePoints,
     reservedPoints: balance.reservedPoints,
+    // Reported separately and never folded into availablePoints, so a member
+    // can see value that was preserved for them without it reading as spendable.
+    legacyCarryoverPendingPoints: balance.legacyCarryoverPendingPoints,
+    legacyCarryoverConfirmedPoints: balance.legacyCarryoverConfirmedPoints,
     recentRewards: recentRewards.map((reward) => ({
       id: reward.id,
       type: reward.type,

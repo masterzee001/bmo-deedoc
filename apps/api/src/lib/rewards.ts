@@ -1,36 +1,31 @@
 import { NotificationType, RewardRedemptionStatus, RewardType, type Prisma, type PrismaClient } from "@prisma/client";
+import { getAuthoritativeBalance } from "./payout-authority";
 
+/**
+ * A member's balance, as served to the member.
+ *
+ * This used to sum the legacy `RewardLedger`. After the cutover those rows are
+ * precisely the member's preserved carryover, so it served a non-spendable
+ * balance as `availablePoints` on the redemption screen itself — a member with
+ * 350 pending carryover points and no authoritative earnings was shown 350
+ * spendable. It now delegates to the payout authority, which is the only place
+ * a spendable figure is computed.
+ *
+ * The legacy figures remain available, clearly separated and clearly labelled
+ * as not payable, so a member can still see value that was preserved for them.
+ */
 export async function getRewardBalance(
   transaction: Prisma.TransactionClient | PrismaClient,
   voterUserId: string,
 ) {
-  const [earned, reserved] = await Promise.all([
-    transaction.rewardLedger.aggregate({
-      where: { voterUserId },
-      _sum: { points: true },
-    }),
-    transaction.rewardRedemption.aggregate({
-      where: {
-        voterUserId,
-        status: {
-          in: [
-            RewardRedemptionStatus.PENDING,
-            RewardRedemptionStatus.APPROVED,
-            RewardRedemptionStatus.PAID,
-          ],
-        },
-      },
-      _sum: { pointsRequested: true },
-    }),
-  ]);
-
-  const earnedPoints = earned._sum.points || 0;
-  const reservedPoints = reserved._sum.pointsRequested || 0;
+  const balance = await getAuthoritativeBalance(transaction, voterUserId);
 
   return {
-    earnedPoints,
-    reservedPoints,
-    availablePoints: Math.max(earnedPoints - reservedPoints, 0),
+    earnedPoints: balance.confirmedPoints,
+    reservedPoints: balance.reservedPoints,
+    availablePoints: balance.eligiblePoints,
+    legacyCarryoverPendingPoints: balance.legacyCarryoverPendingPoints,
+    legacyCarryoverConfirmedPoints: balance.legacyCarryoverConfirmedPoints,
   };
 }
 

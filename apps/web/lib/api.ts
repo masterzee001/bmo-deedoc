@@ -2629,7 +2629,7 @@ export async function fetchVoterRedemptions(
 
 export async function createVoterRedemption(
   token: string,
-  body: { pointsRequested: number; amountRequested?: number; note?: string },
+  body: { pointsRequested: number; note?: string },
 ) {
   const response = await fetch(`${API_BASE_URL}/voter/redemptions`, {
     method: "POST",
