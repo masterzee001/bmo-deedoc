@@ -37,6 +37,7 @@ import {
   assertPayoutExecutionEnabled,
   getAuthoritativeBalance,
   isPayoutExecutionEnabled,
+  valuePayout,
 } from "../lib/payout-authority";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { createElectionDayRealtimeEvent } from "../realtime/events";
@@ -5242,10 +5243,25 @@ router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADM
       throw new Error("REDEMPTION_BALANCE_INSUFFICIENT");
     }
 
+    // Re-valued here, so the amount that is later paid is one this server
+    // computed. A redemption raised before the authority existed — or by a seed
+    // — carries a client-supplied `amountRequested`, and the PAID transition
+    // records that figure verbatim. Without revaluing, an old row remains
+    // approvable and payable at an amount nothing ever authorized.
+    const valuation = await valuePayout(transaction, {
+      userId: redemption.voterUserId,
+      requestedPoints: redemption.pointsRequested,
+      alreadyReservedPoints: redemption.pointsRequested,
+    });
+    if (!valuation.meetsThreshold) {
+      throw new Error("REDEMPTION_BALANCE_INSUFFICIENT");
+    }
+
     const next = await transaction.rewardRedemption.update({
       where: { id: redemption.id },
       data: {
         status: RewardRedemptionStatus.APPROVED,
+        amountRequested: Number(valuation.payableAmount),
         note: parsed.data.note || redemption.note,
         reviewedByUserId: request.authUser!.id,
         reviewedAt: new Date(),

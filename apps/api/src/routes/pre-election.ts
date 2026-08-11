@@ -23,6 +23,7 @@ import { requireAuth, requireMemberCapability, requireRole } from "../middleware
 import { prisma } from "../prisma";
 import {
   assertPayoutExecutionEnabled,
+  PayoutExecutionDisabledError,
   getAuthoritativeBalance,
   isPayoutExecutionEnabled,
   resolveActivePayoutTerms,
@@ -570,25 +571,6 @@ async function getConfirmedPoints(userId: string) {
   return aggregate._sum.points || 0;
 }
 
-async function getReservedPayoutPoints(userId: string) {
-  const aggregate = await prisma.payoutAssignment.aggregate({
-    where: {
-      beneficiaryUserId: userId,
-      status: {
-        in: [
-          PayoutStatus.PENDING,
-          PayoutStatus.ELIGIBLE,
-          PayoutStatus.APPROVED,
-          PayoutStatus.PROCESSING,
-          PayoutStatus.PAID,
-          PayoutStatus.HELD,
-        ],
-      },
-    },
-    _sum: { points: true },
-  });
-  return aggregate._sum.points || 0;
-}
 
 async function getPotentialReferralPoints(userId: string) {
   const pendingCount = await prisma.referral.count({
@@ -1354,11 +1336,12 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
   // 100 x 0.29 is 28.999999999999996, which floors to 28 and under-credits; and
   // converting the gross balance would pay again for legacy points a redemption
   // had already committed before the cutover.
-  const creditedPoints = valueLegacyCarryover({
+  const valuation = await valueLegacyCarryover(prisma, {
+    userId: carryover.userId,
     legacyPointBalance: carryover.legacyPointBalance,
-    legacyReservedPoints: carryover.legacyReservedPoints,
     conversionRatio: parsed.data.conversionRatio,
   });
+  const creditedPoints = valuation.creditedPoints;
 
   const result = await prisma.$transaction(async (transaction) => {
     // The PENDING check above ran outside this transaction, so two simultaneous
@@ -1409,7 +1392,7 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
         sourceEventId: rewardEvent.id,
         description:
           `Legacy balance reconciled: ${carryover.legacyPointBalance} legacy points less ` +
-          `${carryover.legacyReservedPoints} already committed, x ${parsed.data.conversionRatio} ` +
+          `${valuation.committedAtCutover} already committed, x ${parsed.data.conversionRatio} ` +
           `= ${creditedPoints} points (${parsed.data.reconciliationRuleVersion})`,
       },
       update: {},
@@ -1435,6 +1418,10 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
     await transaction.legacyMigrationBatch.update({
       where: { id: carryover.migrationBatchId },
       data: {
+        // Both sides move on the same basis: the gross balance leaves the
+        // pending pool, and the gross is what the batch recorded as pending, so
+        // the two cannot drift. creditedPoints is the converted net and is
+        // tracked separately.
         pendingTotalPoints: { decrement: carryover.legacyPointBalance },
         reconciledTotalPoints: { increment: creditedPoints },
       },
@@ -1447,7 +1434,8 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
       targetId: carryover.id,
       metadata: {
         sourceBalance: carryover.legacyPointBalance,
-        legacyReservedPoints: carryover.legacyReservedPoints,
+        committedAtCutover: valuation.committedAtCutover,
+        unspentPoints: valuation.unspentPoints,
         conversionRatio: parsed.data.conversionRatio,
         creditedPoints,
         ruleVersion: parsed.data.reconciliationRuleVersion,
@@ -2150,6 +2138,11 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     }
     if (result.message === "INVALID_TRANSITION") {
       return response.status(409).json({ message: "Invalid payout status transition." });
+    }
+    // The switch was turned off between the handler check and the transaction.
+    // Reported as the same refusal, not as an unhandled server error.
+    if (result instanceof PayoutExecutionDisabledError) {
+      return response.status(409).json({ message: result.message, payoutExecutionEnabled: false });
     }
     throw result;
   }

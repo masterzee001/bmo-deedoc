@@ -543,7 +543,9 @@ export async function fetchPreElectionPayoutCycles(token: string) {
 
 export async function createPreElectionPayoutCycle(
   token: string,
-  body: { name: string; opensAt: string; closesAt: string; payoutDate: string; minimumThreshold?: number; conversionRate?: number },
+  // No minimumThreshold and no conversionRate: the server snapshots a cycle's
+  // monetary terms from the active payout configuration.
+  body: { name: string; opensAt: string; closesAt: string; payoutDate: string },
 ) {
   const response = await fetch(`${API_BASE_URL}/pre-election/payout/cycles`, {
     method: "POST",
