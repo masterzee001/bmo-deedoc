@@ -23,6 +23,12 @@
 | BLOCKED | 4 |
 | **Total** | **140** |
 
+**Readiness:** VPS staging is approved for **infrastructure validation only**;
+product/UAT staging is **not**. Six of the defects below need no VPS at all, so
+provisioning a host does not advance them. The P0 closure backlog and the
+two-track sequencing are in
+[`docs/VPS_STAGING_READINESS.md`](VPS_STAGING_READINESS.md).
+
 ## Why this differs so sharply from Sprint 3
 
 The Sprint 3 matrix largely asked *"does an implementation exist?"*. This audit

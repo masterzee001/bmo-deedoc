@@ -78,7 +78,15 @@ verification precedes parsing.
 
 ## Readiness decisions
 
-### READY FOR VPS STAGING: **YES**
+**VPS infrastructure staging is ready. Product/UAT staging is not.** The
+repository is ready to provision on a Linux VPS for infrastructure validation of
+TLS, Docker networking, Redis/BullMQ, object storage, Coturn, backup/restore,
+resource behaviour, and rollback. Known application defects that do not require a
+VPS remain and must be closed before real-user or production-like UAT. Staging
+must therefore use synthetic, non-sensitive data, and **payouts must remain
+disabled**.
+
+### READY FOR VPS STAGING: **YES — INFRASTRUCTURE VALIDATION ONLY**
 
 Every repository engineering gate is green on this baseline: migration integrity
 (17 + 10), 50/50 integration tests, lint, build, all three production rehearsals
@@ -86,28 +94,108 @@ Every repository engineering gate is green on this baseline: migration integrity
 The deployment topology is complete enough to launch — Dockerfiles build, the
 full seven-service compose stack came up healthy locally with working reverse
 proxy, Socket.IO upgrade, Redis-backed realtime and durable job processing, and
-migrations are gated behind a one-shot service that cannot race. The remaining
-uncertainty is precisely the kind that *only* a real Linux host can resolve: TLS
-issuance, host-networked TURN relay, real object storage, and behaviour under
-production-shaped load. Staging is the correct next step because it is the
-cheapest way to convert those unknowns into facts.
+migrations are gated behind a one-shot service that cannot race.
 
-### READY FOR PRODUCTION UAT: **NO**
+The scope of this YES is deliberately narrow. It covers the infrastructure
+questions a workstation cannot answer: TLS issuance, host-networked TURN relay,
+real S3 connectivity, Linux restart behaviour, backup/restore on the target,
+resource limits under load, observability, and image rollback.
 
-None of the seventeen staging-only validations has been performed, because no
-staging environment exists. UAT additionally presumes the product is usable
-end-to-end by its intended roles, and this audit found that it is not yet: only
-13 of 140 features survive an end-to-end test, voice calls carry no audio, and
-the command hierarchy below Federal Constituency cannot be populated without
-authoritative Ogun data. Putting real users in front of that would produce
-findings the team already knows about.
+It does **not** mean the product is ready to be exercised. This same audit found
+defects that need no VPS at all — the payout bypass, missing SDP/ICE
+negotiation, national/legacy authorization leakage, unpopulated constituency
+ancestry, the broken voter-card upload path, and unreadable derivatives. Those
+are ordinary engineering, and provisioning a host does not advance any of them.
+
+On the staging host, therefore:
+
+- use synthetic, non-sensitive data only;
+- keep payouts disabled — the redemption path can pay a member holding 1 point;
+- do not upload real voter documents;
+- do not run field UAT or operational campaign workflows.
+
+### READY FOR PRODUCT / UAT STAGING: **NO**
+
+Two independent reasons. First, none of the seventeen infrastructure validations
+has been performed, because no staging environment exists yet. Second, and
+separately, the product is not usable end-to-end by its intended roles: 13 of 140
+features survive an end-to-end test, voice calls carry no audio, and the command
+hierarchy below Federal Constituency cannot be populated without authoritative
+Ogun data. Putting real users in front of that would surface findings the team
+has already catalogued below.
 
 ### READY FOR PRODUCTION: **NO**
 
-Production requires staging and UAT to have passed first, and neither has begun.
-Beyond that, four features are BLOCKED on external inputs the project does not
-control — the Ogun reference release, PU geodata, and an approved evidence
-retention policy — and material product gaps remain, including two disjoint
-reward ledgers with an ungated money-out path that bypasses the configured
-minimum threshold and conversion rate. That last item is a financial-integrity
-defect and must be closed before any real payout runs.
+Production requires infrastructure staging *and* product/UAT staging to have
+passed, and neither has begun. Beyond that, four features are BLOCKED on external
+inputs the project does not control — the Ogun reference release, PU geodata, and
+an approved evidence retention policy — and the P0 backlog below is open,
+including a financial-integrity defect that must be closed before any real payout
+runs.
+
+---
+
+## P0 — must close before product/UAT staging
+
+None of these requires a VPS. They are the actual closure backlog this audit
+surfaced, and they gate real-user exposure independently of infrastructure work.
+
+### 1. Financial integrity
+- Retire or reconcile the legacy redemption ledger (`RewardLedger` vs `RewardLedgerEntry`)
+- Forbid a client-supplied payout value (`amountRequested` is currently caller-controlled)
+- Enforce the configured minimum threshold on every money-out path
+- Enforce the point conversion rate server-side
+- One authoritative payout balance
+
+### 2. Ogun-only enforcement
+- Registration must reject a non-Ogun `stateId`
+- Remove or disable the national admin exposure (`/admin`, `GeoPoliticalZone`, `NATIONAL`/`STATE` admin levels)
+- Remove LGA as command authority in the legacy layer
+- No all-37-state operational endpoint
+
+### 3. Voice
+- SDP offer/answer exchange
+- ICE candidate exchange
+- Realtime ringing notification to the callee
+- Callee receive/accept flow
+- **Only then** perform TURN relay validation — items 10 and 11 of the staging
+  list cannot pass before this
+
+### 4. Member ancestry
+- Derive State → Senatorial District → Federal Constituency → State Constituency → Ward → Polling Unit
+- Populate ancestry on the real registration/write path
+- Repair or backfill existing compatible records
+- Dashboards must read real ancestry, not nullable denormalised columns
+
+### 5. Voter-card upload
+- Perform an actual private-object-storage upload
+- No fabricated client-side storage key
+- Server-owned metadata, hash, and access path
+
+### 6. Evidence derivatives
+- Signed/private derivative read endpoint
+- Originals remain authoritative
+- Video stays PARTIAL until a transcoding runtime exists
+
+---
+
+## Sequencing after this audit
+
+The two workstreams are independent and should run in parallel rather than
+serially. Spending the next sprint only on the seventeen infrastructure tests
+would leave the product backlog untouched, and closing the product backlog
+without a host would leave the infrastructure unproven.
+
+| Track A — VPS infrastructure staging | Track B — product closure |
+|---|---|
+| TLS / Caddy | Financial ledger |
+| Redis | Ogun-only enforcement |
+| Worker | Voice SDP/ICE |
+| S3 | Territory ancestry |
+| Coturn | Voter-card storage |
+| Backup/restore | Derivative access |
+| Rollback | |
+| Monitoring | |
+| Resource/load | |
+
+`READY FOR PRODUCT UAT: YES` may only be declared when **both** tracks converge.
