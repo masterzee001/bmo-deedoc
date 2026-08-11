@@ -3,7 +3,8 @@ import http from "node:http";
 import { createApp } from "./app";
 import { hashPassword } from "./auth/password";
 import { env } from "./env";
-import { setPayoutExecutionEnabledForTests } from "./lib/payout-authority";
+import { PayoutExecutionDisabledError, setPayoutExecutionEnabledForTests } from "./lib/payout-authority";
+import { PayoutExecutionError, executePayout } from "./lib/payout-execution";
 import { createRewardEntryWithNotification } from "./lib/rewards";
 import { prisma } from "./prisma";
 
@@ -197,6 +198,9 @@ async function cleanup() {
   const userIds = users.map((user) => user.id);
 
   if (userIds.length > 0) {
+    await prisma.payoutExecution.deleteMany({
+      where: { OR: [{ beneficiaryUserId: { in: userIds } }, { executedByUserId: { in: userIds } }] },
+    });
     await prisma.payoutTransaction.deleteMany({
       where: { OR: [{ payoutOfficerUserId: { in: userIds } }, { payoutAssignment: { beneficiaryUserId: { in: userIds } } }] },
     });
@@ -502,6 +506,67 @@ export async function runPreElectionTests() {
     });
     assert.equal(paidPayout.status, 200, JSON.stringify(paidPayout.payload));
     assert.equal(await prisma.payoutTransaction.count({ where: { payoutAssignmentId: assignmentId } }), 1);
+
+    // The execution record is the artefact that says money left. It is written
+    // in the same transaction as the transition, so its absence would mean the
+    // transition committed alone.
+    const assignmentExecution = await prisma.payoutExecution.findUniqueOrThrow({
+      where: { payoutAssignmentId: assignmentId },
+    });
+    assert.equal(assignmentExecution.kind, "ASSIGNMENT");
+    assert.equal(assignmentExecution.paymentReference, "PRE-ELECTION-PAYOUT-REF-001");
+    assert.equal(assignmentExecution.points, 25);
+    assert.equal(Number(assignmentExecution.amount), 50);
+
+    // Executing the same assignment twice pays once. The second attempt is
+    // refused by the state claim, and no second execution record appears.
+    const doubleExecute = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
+      method: "PATCH",
+      token: payoutToken,
+      body: { status: "PAID", paymentReference: "PRE-ELECTION-PAYOUT-REF-002" },
+    });
+    assert.equal(doubleExecute.status, 409, JSON.stringify(doubleExecute.payload));
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { payoutAssignmentId: assignmentId } }),
+      1,
+      "a repeated execution must not create a second execution record",
+    );
+
+    // A payment reference identifies exactly one payment, across both kinds.
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "PRE-ELECTION-PAYOUT-REF-001",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError && error.code === "DUPLICATE_PAYMENT_REFERENCE",
+      "a reused payment reference must be refused",
+    );
+
+    // Called directly, bypassing every route: the chokepoint itself refuses
+    // while the switch is off. This is the assertion the previous design could
+    // not make, because there was no service to call.
+    setPayoutExecutionEnabledForTests(false);
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "DIRECT-CALL-WHILE-DISABLED",
+        }),
+      (error: unknown) => error instanceof PayoutExecutionDisabledError,
+      "the execution authority must refuse a direct call while the kill switch is off",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { paymentReference: "DIRECT-CALL-WHILE-DISABLED" } }),
+      0,
+      "a refused execution must leave no execution record",
+    );
+    setPayoutExecutionEnabledForTests(true);
 
     const finalizedPayoutChange = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
       method: "PATCH",
@@ -1072,15 +1137,17 @@ export async function runPreElectionTests() {
     const paidRedemption = await prisma.rewardRedemption.create({
       data: {
         voterUserId: referredMember.id,
-        pointsRequested: 5,
-        amountRequested: 10,
+        pointsRequested: 30,
+        // Deliberately not the authoritative value (30 points x rate 2 = 60),
+        // standing in for a row raised before the payout authority existed.
+        amountRequested: 999_999,
         status: "APPROVED",
       },
     });
     const blockedRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
       method: "PATCH",
       token: superAdminToken,
-      body: {},
+      body: { paymentReference: "REDEMPTION-BLOCKED-REF" },
     });
     assert.equal(blockedRedemption.status, 409, JSON.stringify(blockedRedemption.payload));
     assert.equal(blockedRedemption.payload.payoutExecutionEnabled, false);
@@ -1089,18 +1156,59 @@ export async function runPreElectionTests() {
       "PAID",
       "the kill switch must prevent the redemption money-out transition",
     );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: paidRedemption.id } }),
+      0,
+      "a refused redemption must write neither PAID nor an execution record",
+    );
 
     setPayoutExecutionEnabledForTests(true);
     const allowedRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
       method: "PATCH",
       token: superAdminToken,
-      body: {},
+      body: { paymentReference: "REDEMPTION-PAID-REF-001" },
     });
     assert.equal(allowedRedemption.status, 200, JSON.stringify(allowedRedemption.payload));
     assert.equal(
       (await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: paidRedemption.id } })).status,
       "PAID",
       "an operator who enables execution must be able to complete the payment",
+    );
+
+    // The redemption path now leaves an execution record too. Before this there
+    // was none: after a redemption was paid, the only monetary figure in the
+    // system was the redemption's own stored amount.
+    const redemptionExecution = await prisma.payoutExecution.findUniqueOrThrow({
+      where: { rewardRedemptionId: paidRedemption.id },
+    });
+    assert.equal(redemptionExecution.kind, "REDEMPTION");
+    assert.equal(redemptionExecution.paymentReference, "REDEMPTION-PAID-REF-001");
+
+    // The stored amount was deliberately wrong. The authoritative valuation —
+    // 30 points at the configured rate of 2 — is what was actually paid, and
+    // the stored figure was corrected to match rather than being honoured.
+    assert.equal(
+      Number(redemptionExecution.amount),
+      60,
+      "the execution must record the authoritative valuation, not the stored amount",
+    );
+    assert.equal(
+      (await prisma.rewardRedemption.findUniqueOrThrow({ where: { id: paidRedemption.id } })).amountRequested,
+      60,
+      "the authoritative value must overwrite a stored amount nothing computed",
+    );
+
+    // Paying the same redemption twice pays once.
+    const doubleRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
+      method: "PATCH",
+      token: superAdminToken,
+      body: { paymentReference: "REDEMPTION-PAID-REF-002" },
+    });
+    assert.equal(doubleRedemption.status, 409, JSON.stringify(doubleRedemption.payload));
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: paidRedemption.id } }),
+      1,
+      "a repeated redemption payment must not create a second execution record",
     );
 
     // The configured default is disabled in every environment; the override

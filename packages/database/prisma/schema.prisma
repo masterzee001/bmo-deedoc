@@ -510,6 +510,8 @@ model User {
   assignedAdminLinks         AdminCandidateAssignment[]    @relation("AssignmentCandidate")
   rewardEntries              RewardLedger[]                @relation("RewardOwner")
   legacyBalanceCarryovers    LegacyBalanceCarryover[]      @relation("LegacyCarryoverUser")
+  payoutExecutionsReceived   PayoutExecution[]             @relation("PayoutExecutionBeneficiary")
+  payoutExecutionsPerformed  PayoutExecution[]             @relation("PayoutExecutionActor")
   rewardRelatedEntries       RewardLedger[]                @relation("RewardRelatedUser")
   rewardRedemptions          RewardRedemption[]            @relation("RewardRedemptionVoter")
   reviewedRedemptions        RewardRedemption[]            @relation("RewardRedemptionReviewer")
@@ -1171,6 +1173,7 @@ model PayoutAssignment {
   payoutOfficerUser   User                 @relation("PayoutAssignmentOfficer", fields: [payoutOfficerUserId], references: [id], onDelete: Restrict)
   beneficiaryUser     User                 @relation("PayoutAssignmentBeneficiary", fields: [beneficiaryUserId], references: [id], onDelete: Restrict)
   transactions        PayoutTransaction[]
+  execution           PayoutExecution?
 
   @@unique([payoutCycleId, beneficiaryUserId])
   @@unique([payoutBatchId, beneficiaryUserId])
@@ -1950,11 +1953,56 @@ model RewardRedemption {
   updatedAt        DateTime               @updatedAt
   voterUser        User                   @relation("RewardRedemptionVoter", fields: [voterUserId], references: [id], onDelete: Cascade)
   reviewedByUser   User?                  @relation("RewardRedemptionReviewer", fields: [reviewedByUserId], references: [id])
+  execution        PayoutExecution?
 
   @@index([voterUserId])
   @@index([status])
   @@index([reviewedByUserId])
   @@index([createdAt])
+}
+
+/// How a payment left the platform. The discriminator exists because the two
+/// money-out paths reference different targets; everything else about an
+/// execution is identical, which is the point — one record, one shape.
+enum PayoutExecutionKind {
+  ASSIGNMENT
+  REDEMPTION
+}
+
+/// The immutable record that money left the platform.
+///
+/// Written only by `executePayout`, in the same transaction as the PAID
+/// transition it describes. The redemption path previously had no execution
+/// record at all: after a redemption was marked PAID the only monetary figure
+/// anywhere was the redemption's own `amountRequested`, so a payment could
+/// never be reconciled against anything.
+///
+/// The unique index on each target is what makes execution exactly-once at the
+/// database level rather than by application check, and `paymentReference` is
+/// unique across both kinds so one reference cannot identify two payments.
+model PayoutExecution {
+  id                 String              @id @default(cuid())
+  kind               PayoutExecutionKind
+  payoutAssignmentId String?             @unique
+  rewardRedemptionId String?             @unique
+  beneficiaryUserId  String
+  executedByUserId   String
+  paymentReference   String              @unique
+  /// Points the payment discharged, as valued at execution time.
+  points             Int
+  /// The amount paid, server-computed. Decimal, never a float.
+  amount             Decimal             @db.Decimal(18, 2)
+  proofStorageKey    String?
+  note               String?
+  executedAt         DateTime            @default(now())
+
+  payoutAssignment PayoutAssignment? @relation(fields: [payoutAssignmentId], references: [id], onDelete: Restrict)
+  rewardRedemption RewardRedemption? @relation(fields: [rewardRedemptionId], references: [id], onDelete: Restrict)
+  beneficiaryUser  User              @relation("PayoutExecutionBeneficiary", fields: [beneficiaryUserId], references: [id], onDelete: Restrict)
+  executedByUser   User              @relation("PayoutExecutionActor", fields: [executedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([beneficiaryUserId, executedAt])
+  @@index([kind, executedAt])
 }
 
 model Notification {

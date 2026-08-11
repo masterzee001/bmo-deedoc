@@ -22,7 +22,6 @@ import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
 import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import {
-  assertPayoutExecutionEnabled,
   PayoutExecutionDisabledError,
   getAuthoritativeBalance,
   isPayoutExecutionEnabled,
@@ -31,6 +30,7 @@ import {
   valueLegacyCarryover,
   type PayoutTerms,
 } from "../lib/payout-authority";
+import { PayoutExecutionError, executePayout, payoutExecutionStatusCode } from "../lib/payout-execution";
 
 const router = Router();
 
@@ -2041,15 +2041,49 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     return response.status(400).json({ message: "paymentReference is required when marking a payout paid." });
   }
 
-  // Marking an assignment PAID moves money. Gated by the kill switch in every
-  // environment, so neither this path nor the redemption path can pay a member
-  // until an operator explicitly enables execution.
-  if (parsed.data.status === "PAID" && !isPayoutExecutionEnabled()) {
-    return response.status(409).json({
-      message:
-        "Payout execution is disabled. Set PAYOUT_EXECUTION_ENABLED=true only after reconciliation and readiness gates have passed.",
-      payoutExecutionEnabled: false,
+  // Paying is not this route's to do. It owns the non-money transitions below;
+  // the PAID transition, its kill switch, its valuation, its atomic claim and
+  // its execution record all belong to the one execution authority.
+  if (parsed.data.status === "PAID") {
+    const assignment = await prisma.payoutAssignment.findUnique({
+      where: { id: assignmentId },
+      select: { payoutOfficerUserId: true },
     });
+    if (!assignment) {
+      return response.status(404).json({ message: "Payout assignment was not found." });
+    }
+    if (request.authUser!.role === "PAYOUT_OFFICER" && assignment.payoutOfficerUserId !== request.authUser!.id) {
+      return response.status(403).json({ message: "Payout Officer can only process assigned payouts." });
+    }
+
+    try {
+      await executePayout(prisma, {
+        kind: "ASSIGNMENT",
+        assignmentId,
+        actorUserId: request.authUser!.id,
+        paymentReference: parsed.data.paymentReference!,
+        proofStorageKey: parsed.data.proofStorageKey || null,
+        note: parsed.data.note || null,
+      });
+    } catch (error) {
+      if (error instanceof PayoutExecutionDisabledError) {
+        return response.status(409).json({ message: error.message, payoutExecutionEnabled: false });
+      }
+      if (error instanceof PayoutExecutionError) {
+        return response.status(payoutExecutionStatusCode(error.code)).json({ message: error.message, code: error.code });
+      }
+      throw error;
+    }
+
+    const paid = await prisma.payoutAssignment.findUniqueOrThrow({
+      where: { id: assignmentId },
+      include: {
+        beneficiaryUser: { select: { name: true, email: true } },
+        payoutOfficerUser: { select: { name: true, email: true } },
+        transactions: { orderBy: { createdAt: "desc" } },
+      },
+    });
+    return response.json({ message: "Payout assignment updated.", payoutAssignment: serializePayoutAssignment(paid) });
   }
 
   const result = await prisma.$transaction(async (transaction) => {
@@ -2069,28 +2103,11 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     if (parsed.data.status === "PROCESSING" && assignment.status !== PayoutStatus.APPROVED) {
       throw new Error("INVALID_TRANSITION");
     }
-    if (
-      parsed.data.status === "PAID" &&
-      assignment.status !== PayoutStatus.APPROVED &&
-      assignment.status !== PayoutStatus.PROCESSING
-    ) {
-      throw new Error("INVALID_TRANSITION");
-    }
-
-    // The kill switch is enforced here, at the transition itself, not only by
-    // the early return above. The handler check produces the explained 409; this
-    // one is what makes the guarantee true — it aborts the transaction for any
-    // caller that reaches this write, including one added later that forgets the
-    // handler check.
-    if (parsed.data.status === "PAID") {
-      assertPayoutExecutionEnabled();
-    }
-
     const updated = await transaction.payoutAssignment.update({
       where: { id: assignment.id },
       data: {
         status: parsed.data.status,
-        processedAt: ["PAID", "HELD", "REJECTED"].includes(parsed.data.status) ? new Date() : assignment.processedAt,
+        processedAt: ["HELD", "REJECTED"].includes(parsed.data.status) ? new Date() : assignment.processedAt,
         note: parsed.data.note || assignment.note,
       },
       include: {
@@ -2099,21 +2116,6 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
         transactions: { orderBy: { createdAt: "desc" } },
       },
     });
-
-    if (parsed.data.status === "PAID") {
-      await transaction.payoutTransaction.create({
-        data: {
-          payoutAssignmentId: assignment.id,
-          payoutOfficerUserId: request.authUser!.id,
-          paymentReference: parsed.data.paymentReference!,
-          pointsRedeemed: assignment.points,
-          amountPaid: assignment.amount,
-          status: PayoutStatus.PAID,
-          proofStorageKey: parsed.data.proofStorageKey || null,
-          note: parsed.data.note || null,
-        },
-      });
-    }
 
     await createAuditLog(transaction, {
       actorUserId: request.authUser!.id,
@@ -2138,11 +2140,6 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     }
     if (result.message === "INVALID_TRANSITION") {
       return response.status(409).json({ message: "Invalid payout status transition." });
-    }
-    // The switch was turned off between the handler check and the transaction.
-    // Reported as the same refusal, not as an unhandled server error.
-    if (result instanceof PayoutExecutionDisabledError) {
-      return response.status(409).json({ message: result.message, payoutExecutionEnabled: false });
     }
     throw result;
   }
