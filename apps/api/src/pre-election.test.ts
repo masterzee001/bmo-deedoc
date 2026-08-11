@@ -1198,6 +1198,76 @@ export async function runPreElectionTests() {
       "the authoritative value must overwrite a stored amount nothing computed",
     );
 
+    // A redemption raised BEFORE the cutover is a claim on preserved legacy
+    // value. The gate found that such a row was both spendable and payable:
+    // the legacy offset removed its reservation, then re-valuation added the
+    // same points back, so the member's eligible balance became their earnings
+    // plus the pre-cutover claim — surplus funded entirely by carryover no
+    // approved ratio had converted.
+    const preCutoverBatch = await prisma.legacyMigrationBatch.create({
+      data: {
+        memberCount: 1,
+        beforeTotalPoints: 500,
+        migratedTotalPoints: 500,
+        pendingTotalPoints: 500,
+        snapshotChecksum: "pre-cutover-leak-checksum",
+      },
+    });
+    const leakMember = await registerMember("902", null, "d".repeat(64));
+    const preCutoverRedemption = await prisma.rewardRedemption.create({
+      data: {
+        voterUserId: leakMember.id,
+        pointsRequested: 400,
+        amountRequested: null,
+        status: "APPROVED",
+        createdAt: new Date(preCutoverBatch.executedAt.getTime() - 60_000),
+      },
+    });
+    await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: leakMember.id,
+        migrationBatchId: preCutoverBatch.id,
+        sourceRowIdsJson: ["legacy-row-leak"],
+        legacyPointBalance: 500,
+        legacyReservedPoints: 400,
+        rowChecksum: "pre-cutover-leak-row",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    // The member earned nothing in the authoritative ledger, so nothing is
+    // spendable — the 500 preserved points are visible but not payable.
+    const leakBalance = await apiRequest(`/pre-election/rewards/balance?userId=${leakMember.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(
+      (leakBalance.payload as { availablePoints: number }).availablePoints,
+      0,
+      "a pre-cutover claim must not turn preserved carryover into a spendable balance",
+    );
+    assert.equal((leakBalance.payload as { legacyCarryoverPendingPoints: number }).legacyCarryoverPendingPoints, 500);
+
+    // And it cannot be paid, at the chokepoint, whatever the routes allow.
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "REDEMPTION",
+          redemptionId: preCutoverRedemption.id,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "PRE-CUTOVER-CLAIM-REF",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError &&
+        error.code === "AMOUNT_NOT_AUTHORITATIVE" &&
+        /preserved legacy balance that has not been reconciled/.test(error.message),
+      "an unreconciled legacy claim must be refused as a legacy claim, not as an incidental balance shortfall",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { rewardRedemptionId: preCutoverRedemption.id } }),
+      0,
+      "a refused legacy claim must leave no execution record",
+    );
+
     // Paying the same redemption twice pays once.
     const doubleRedemption = await apiRequest(`/admin/redemptions/${paidRedemption.id}/paid`, {
       method: "PATCH",

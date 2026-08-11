@@ -6,7 +6,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import { createAuditLog } from "./audit";
-import { assertPayoutExecutionEnabled, valuePayout } from "./payout-authority";
+import { assertPayoutExecutionEnabled, isUnreconciledLegacyClaim, valuePayout } from "./payout-authority";
 
 /**
  * The single execution authority: the only code in the platform that may mark
@@ -243,15 +243,26 @@ async function executeRedemption(
     throw new PayoutExecutionError("NOT_FOUND", "Redemption was not found.");
   }
 
+  // A redemption raised before the cutover is a claim on preserved legacy
+  // value. Until an approved ratio converts that value it is not spendable, so
+  // paying the claim would disburse carryover at an equivalence nobody approved.
+  if (await isUnreconciledLegacyClaim(transaction, redemption)) {
+    throw new PayoutExecutionError(
+      "AMOUNT_NOT_AUTHORITATIVE",
+      "This redemption is funded by a preserved legacy balance that has not been reconciled, and cannot be paid.",
+    );
+  }
+
   // Re-valued at execution, not trusted from storage. `amountRequested` was
   // client-supplied for every row raised before the payout authority existed,
   // and this is the last point at which a wrong figure can still be caught.
-  // The redemption's own reservation is added back, since it is reserving
-  // against the very balance it is being valued from.
+  // The redemption is excluded from its own balance rather than added back to
+  // it, so a pre-cutover row the legacy offset already removed is not credited
+  // twice.
   const valuation = await valuePayout(transaction, {
     userId: redemption.voterUserId,
     requestedPoints: redemption.pointsRequested,
-    alreadyReservedPoints: redemption.pointsRequested,
+    excludeRedemptionId: redemption.id,
   });
   if (!valuation.meetsThreshold) {
     throw new PayoutExecutionError(

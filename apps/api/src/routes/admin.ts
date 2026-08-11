@@ -5266,7 +5266,7 @@ router.patch("/redemptions/:redemptionId/approve", requireAuth, requireRole("ADM
     const valuation = await valuePayout(transaction, {
       userId: redemption.voterUserId,
       requestedPoints: redemption.pointsRequested,
-      alreadyReservedPoints: redemption.pointsRequested,
+      excludeRedemptionId: redemption.id,
     });
     if (!valuation.meetsThreshold) {
       throw new Error("REDEMPTION_BALANCE_INSUFFICIENT");

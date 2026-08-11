@@ -116,23 +116,35 @@ const EMPTY_BALANCE: AuthoritativeBalance = {
  * All carryovers in one batch share a cutover instant, so this costs one query
  * per batch rather than one per member.
  */
-async function getLegacyFundedReservations(client: Client, userIds?: string[]): Promise<Map<string, number>> {
+async function getLegacyFundedReservations(
+  client: Client,
+  userIds?: string[],
+  excludeRedemptionIds?: string[],
+): Promise<Map<string, number>> {
   const scope = userIds ? { in: userIds } : undefined;
 
   const carryovers = await client.legacyBalanceCarryover.findMany({
     where: { ...(scope ? { userId: scope } : {}), status: { not: "LEGACY_CARRYOVER_VOID" } },
-    select: { userId: true, migrationBatch: { select: { executedAt: true } } },
+    select: { userId: true, legacyPointBalance: true, migrationBatch: { select: { executedAt: true } } },
   });
   if (carryovers.length === 0) {
     return new Map();
   }
 
-  const usersByCutover = new Map<number, Set<string>>();
+  // One cutover instant per member — the latest. Bucketing per carryover row
+  // counted a member carried in two batches once per batch, summing the same
+  // redemptions twice and offsetting reservations that had no legacy funding.
+  const cutoverByUser = new Map<string, number>();
+  const legacyCeiling = new Map<string, number>();
   for (const carryover of carryovers) {
     const cutoverAt = carryover.migrationBatch.executedAt.getTime();
-    const bucket = usersByCutover.get(cutoverAt) || new Set<string>();
-    bucket.add(carryover.userId);
-    usersByCutover.set(cutoverAt, bucket);
+    cutoverByUser.set(carryover.userId, Math.max(cutoverByUser.get(carryover.userId) || 0, cutoverAt));
+    legacyCeiling.set(carryover.userId, (legacyCeiling.get(carryover.userId) || 0) + carryover.legacyPointBalance);
+  }
+
+  const usersByCutover = new Map<number, string[]>();
+  for (const [userId, cutoverAt] of cutoverByUser) {
+    usersByCutover.set(cutoverAt, [...(usersByCutover.get(cutoverAt) || []), userId]);
   }
 
   const perCutover = await Promise.all(
@@ -140,9 +152,10 @@ async function getLegacyFundedReservations(client: Client, userIds?: string[]): 
       client.rewardRedemption.groupBy({
         by: ["voterUserId"],
         where: {
-          voterUserId: { in: [...users] },
+          voterUserId: { in: users },
           status: { in: [...RESERVING_REDEMPTION_STATUSES] },
           createdAt: { lte: new Date(cutoverAt) },
+          ...(excludeRedemptionIds?.length ? { id: { notIn: excludeRedemptionIds } } : {}),
         },
         _sum: { pointsRequested: true },
       }),
@@ -152,10 +165,40 @@ async function getLegacyFundedReservations(client: Client, userIds?: string[]): 
   const legacyFunded = new Map<string, number>();
   for (const rows of perCutover) {
     for (const row of rows) {
-      legacyFunded.set(row.voterUserId, (legacyFunded.get(row.voterUserId) || 0) + (row._sum.pointsRequested || 0));
+      // Capped at the legacy value that justifies it. Without the cap, a member
+      // whose pre-cutover redemptions exceed their migrated balance receives an
+      // offset larger than the carryover it derives from.
+      legacyFunded.set(
+        row.voterUserId,
+        Math.min(row._sum.pointsRequested || 0, legacyCeiling.get(row.voterUserId) || 0),
+      );
     }
   }
   return legacyFunded;
+}
+
+/**
+ * Whether a redemption is a claim on a legacy balance that is still preserved
+ * and unreconciled — raised at or before the member's cutover, against a
+ * carryover no approved ratio has converted yet.
+ *
+ * Such a redemption must not be paid. The value behind it is deliberately
+ * non-spendable, so executing it would disburse carryover at an equivalence
+ * nobody approved.
+ */
+export async function isUnreconciledLegacyClaim(
+  client: Client,
+  redemption: { voterUserId: string; createdAt: Date },
+): Promise<boolean> {
+  const carryovers = await client.legacyBalanceCarryover.findMany({
+    where: { userId: redemption.voterUserId, status: { not: "LEGACY_CARRYOVER_VOID" } },
+    select: { status: true, migrationBatch: { select: { executedAt: true } } },
+  });
+  return carryovers.some(
+    (carryover) =>
+      carryover.status === "LEGACY_CARRYOVER_PENDING" &&
+      carryover.migrationBatch.executedAt.getTime() >= redemption.createdAt.getTime(),
+  );
 }
 
 /**
@@ -176,11 +219,21 @@ async function getLegacyFundedReservations(client: Client, userIds?: string[]): 
 export async function getAuthoritativeBalances(
   client: Client,
   userIds?: string[],
+  /**
+   * Redemptions to leave out of the reservation entirely, used when re-valuing
+   * one of them. Excluding the row is exact; adding its points back afterwards
+   * is not, because a pre-cutover redemption is already netted out by the
+   * legacy offset and would then be credited twice — once as a reservation that
+   * was never charged, once as an add-back — turning unreconciled carryover
+   * into spendable points.
+   */
+  excludeRedemptionIds?: string[],
 ): Promise<Map<string, AuthoritativeBalance>> {
   if (userIds && userIds.length === 0) {
     return new Map();
   }
   const scope = userIds ? { in: userIds } : undefined;
+  const redemptionExclusion = excludeRedemptionIds?.length ? { id: { notIn: excludeRedemptionIds } } : {};
 
   const [
     earned,
@@ -204,7 +257,11 @@ export async function getAuthoritativeBalances(
     // the same points through both money-out paths.
     client.rewardRedemption.groupBy({
       by: ["voterUserId"],
-      where: { ...(scope ? { voterUserId: scope } : {}), status: { in: [...RESERVING_REDEMPTION_STATUSES] } },
+      where: {
+        ...(scope ? { voterUserId: scope } : {}),
+        ...redemptionExclusion,
+        status: { in: [...RESERVING_REDEMPTION_STATUSES] },
+      },
       _sum: { pointsRequested: true },
     }),
     client.legacyBalanceCarryover.groupBy({
@@ -217,7 +274,9 @@ export async function getAuthoritativeBalances(
       where: { ...(scope ? { userId: scope } : {}), status: "LEGACY_CARRYOVER_CONFIRMED" },
       _sum: { creditedPoints: true },
     }),
-    getLegacyFundedReservations(client, userIds),
+    // Same exclusion, so the offset and the sum it offsets always describe the
+    // same set of rows.
+    getLegacyFundedReservations(client, userIds, excludeRedemptionIds),
   ]);
 
   const assignmentPoints = new Map(reservedAssignments.map((row) => [row.beneficiaryUserId, row._sum.points || 0]));
@@ -271,8 +330,12 @@ export async function getAuthoritativeBalances(
 }
 
 /** A single member's authoritative balance. One implementation, shared above. */
-export async function getAuthoritativeBalance(client: Client, userId: string): Promise<AuthoritativeBalance> {
-  const balances = await getAuthoritativeBalances(client, [userId]);
+export async function getAuthoritativeBalance(
+  client: Client,
+  userId: string,
+  excludeRedemptionIds?: string[],
+): Promise<AuthoritativeBalance> {
+  const balances = await getAuthoritativeBalances(client, [userId], excludeRedemptionIds);
   return balances.get(userId) || EMPTY_BALANCE;
 }
 
@@ -364,17 +427,23 @@ export async function valuePayout(
     userId: string;
     requestedPoints: number;
     /**
-     * Points this same request already holds in reserve. Re-valuing an existing
-     * redemption must not charge it against a balance it is itself reserving,
-     * or every approval would fail its own eligibility check.
+     * The redemption being re-valued, if any. It is excluded from the balance
+     * rather than added back to it: re-valuing must not charge a redemption
+     * against a balance it is itself reserving, and excluding the row is the
+     * only form of that correction which stays right for a pre-cutover
+     * redemption the legacy offset has already removed.
      */
-    alreadyReservedPoints?: number;
+    excludeRedemptionId?: string;
   },
 ): Promise<PayoutValuation> {
   const terms = await resolveActivePayoutTerms(client);
-  const balance = await getAuthoritativeBalance(client, input.userId);
+  const balance = await getAuthoritativeBalance(
+    client,
+    input.userId,
+    input.excludeRedemptionId ? [input.excludeRedemptionId] : undefined,
+  );
   const requestedPoints = Math.trunc(input.requestedPoints);
-  const eligiblePoints = balance.eligiblePoints + (input.alreadyReservedPoints || 0);
+  const eligiblePoints = balance.eligiblePoints;
 
   let reason: string | null = null;
   if (requestedPoints <= 0) {
