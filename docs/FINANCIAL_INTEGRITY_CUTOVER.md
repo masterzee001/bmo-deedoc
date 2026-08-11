@@ -1,8 +1,9 @@
 # Financial Integrity & Legacy Payout Cutover
 
-Status: implemented, **not executed against any real data**. Payout execution is
-disabled by default in every environment, production included, and no conversion
-ratio has been approved.
+Status: implemented, **not executed against any real data**. `PAYOUT_EXECUTION_ENABLED`
+is false in every environment, production included, and no conversion ratio has
+been approved — so reconciliation is fail-closed and a pending carryover remains
+non-spendable.
 
 ## Why this exists
 
@@ -150,20 +151,44 @@ the authoritative ledger. A second run reported `already_carried=2`,
 
 ## Reconciliation
 
-`POST /pre-election/rewards/legacy-carryover/reconcile` (SUPER_ADMIN) applies an
-approved `conversionRatio` and `reconciliationRuleVersion`, credits the derived
-points to the authoritative ledger, and links the resulting entry to the
-carryover. Points are computed in exact decimal — in binary floating point
-100 × 0.29 is 28.999999999999996, which floors to 28.
+**The valuation is server-derived.** `POST /pre-election/rewards/legacy-carryover/reconcile`
+(SUPER_ADMIN) takes a `carryoverId` and an optional note. It does **not** accept
+a conversion ratio or a rule version — a request carrying either is rejected
+outright rather than silently stripped, so an old client is told its figure was
+refused instead of quietly having it ignored.
+
+The ratio and version come from an approved `LegacyReconciliationPolicy` and
+nowhere else. Governance sets one in two deliberate acts:
+
+```bash
+POST /pre-election/rewards/legacy-reconciliation-policy            # drafts a ratio; inert
+POST /pre-election/rewards/legacy-reconciliation-policy/:id/approve # authorises it
+```
+
+Drafting proposes a valuation and approving authorises it, so no single request
+can both invent a ratio and apply it to a member's balance. At most one policy
+may be approved at a time — the application retires the previous one in the same
+transaction, and a partial unique index refuses the write if it ever fails to.
+
+**No ratio is currently approved, and none is seeded.** Until governance approves
+one, reconciliation fails closed with
+`RECONCILIATION_POLICY_NOT_APPROVED` (409): the carryover stays pending, nothing
+is credited, and the batch counters do not move. There is no equivalence between
+a legacy point and an authoritative one to apply.
+
+Points are computed in exact decimal — in binary floating point 100 × 0.29 is
+28.999999999999996, which floors to 28.
+
+Every credit carries provenance back to the decision that authorised it: the
+carryover records the policy id, version and ratio, and the audit entry records
+those plus the source balance, `preCutoverReservedPoints`, credited points and
+actor.
 
 Exactly-once is enforced at three levels: a conditional claim that transitions
 the carryover only if it is still pending, unique indexes on the reward event and
 ledger entry, and the one-carryover-per-member constraint. Verified under
 concurrency: three simultaneous requests produce one success, two 409s, one
 ledger credit, and batch counters that move once.
-
-**No ratio has been approved.** Until governance sets one, every carryover stays
-pending and unpayable.
 
 ## Payout kill switch
 

@@ -240,6 +240,15 @@ enum RewardQualifyingEvent {
 /// value from an unverified conversion assumption. PENDING balances are visible
 /// to the member but never spendable, never payable, and never counted in the
 /// eligible balance.
+/// Lifecycle of an equivalence ratio between legacy and authoritative points.
+/// Separate DRAFT and APPROVED states exist so proposing a ratio and authorising
+/// it are two deliberate acts; one call can neither invent nor apply a valuation.
+enum LegacyReconciliationPolicyStatus {
+  DRAFT
+  APPROVED
+  RETIRED
+}
+
 enum LegacyCarryoverStatus {
   LEGACY_CARRYOVER_PENDING
   LEGACY_CARRYOVER_CONFIRMED
@@ -253,6 +262,39 @@ enum LegacyCarryoverStatus {
 /// Records the totals needed to prove the cutover balanced: what existed
 /// before, what was migrated, what remains pending, and what has since been
 /// reconciled. Never edited to make totals fit — a correction is a new batch.
+/// The approved equivalence between a legacy point and an authoritative one.
+///
+/// Reconciliation reads its ratio and version from here and nowhere else. The
+/// endpoint previously accepted both in the request body, which made the caller
+/// authoritative for a valuation — the same defect this cutover removed from the
+/// redemption path, sitting on the one gateway that turns preserved carryover
+/// into spendable points.
+///
+/// At most one policy may be APPROVED at a time, enforced by a partial unique
+/// index created in the migration (Prisma cannot express a filtered index; do
+/// not drop `LegacyReconciliationPolicy_single_approved_key`).
+model LegacyReconciliationPolicy {
+  id               String                           @id @default(cuid())
+  /// Human-meaningful identifier recorded on every credit this policy produces.
+  version          String                           @unique
+  /// Authoritative points credited per legacy point.
+  conversionRatio  Decimal                          @db.Decimal(12, 6)
+  status           LegacyReconciliationPolicyStatus @default(DRAFT)
+  /// Why governance set this ratio; carried into the audit trail.
+  rationale        String?
+  approvedAt       DateTime?
+  approvedByUserId String?
+  createdByUserId  String
+  createdAt        DateTime                         @default(now())
+  updatedAt        DateTime                         @updatedAt
+
+  approvedByUser User?                    @relation("LegacyReconciliationPolicyApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  createdByUser  User                     @relation("LegacyReconciliationPolicyCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  carryovers     LegacyBalanceCarryover[]
+
+  @@index([status])
+}
+
 model LegacyMigrationBatch {
   id                  String                   @id @default(cuid())
   executedAt          DateTime                 @default(now())
@@ -302,6 +344,9 @@ model LegacyBalanceCarryover {
   /// value is handled by the same mechanism without rewriting history.
   conversionRatio          Decimal?              @db.Decimal(12, 6)
   reconciliationRuleVersion String?
+  /// The approved policy that produced this credit. Provenance: an auditor can
+  /// trace a credited figure back to the governance decision that authorised it.
+  reconciliationPolicyId    String?
   /// Points actually credited to the authoritative ledger.
   creditedPoints           Int?
   /// The authoritative ledger entry created by reconciliation, if any.
@@ -323,6 +368,8 @@ model LegacyBalanceCarryover {
   /// same member, and because every reconciliation identity derives from the
   /// carryover id, both reconcile successfully and credit the same legacy rows
   /// twice.
+  reconciliationPolicy LegacyReconciliationPolicy? @relation(fields: [reconciliationPolicyId], references: [id], onDelete: Restrict)
+
   @@unique([userId])
   @@unique([userId, migrationBatchId])
   @@index([status])
@@ -517,6 +564,8 @@ model User {
   assignedAdminLinks         AdminCandidateAssignment[]    @relation("AssignmentCandidate")
   rewardEntries              RewardLedger[]                @relation("RewardOwner")
   legacyBalanceCarryovers    LegacyBalanceCarryover[]      @relation("LegacyCarryoverUser")
+  legacyReconciliationPoliciesApproved LegacyReconciliationPolicy[] @relation("LegacyReconciliationPolicyApprover")
+  legacyReconciliationPoliciesCreated  LegacyReconciliationPolicy[] @relation("LegacyReconciliationPolicyCreator")
   payoutExecutionsReceived   PayoutExecution[]             @relation("PayoutExecutionBeneficiary")
   payoutExecutionsPerformed  PayoutExecution[]             @relation("PayoutExecutionActor")
   rewardRelatedEntries       RewardLedger[]                @relation("RewardRelatedUser")

@@ -1301,13 +1301,168 @@ router.get("/rewards/balance", requireAuth, async (request, response) => {
   });
 });
 
-const legacyReconciliationSchema = z.object({
-  carryoverId: z.string().trim().min(1),
-  /** Approved equivalence ratio. 1.0 means parity; any other value is handled identically. */
-  conversionRatio: z.number().positive().max(1000),
-  reconciliationRuleVersion: z.string().trim().min(3).max(60),
-  note: z.string().trim().max(500).optional(),
+/** Decimal is serialised as a string so a ratio never crosses the wire as a float. */
+function serializeLegacyReconciliationPolicy(policy: {
+  id: string;
+  version: string;
+  conversionRatio: Prisma.Decimal;
+  status: string;
+  rationale: string | null;
+  approvedAt: Date | null;
+  approvedByUserId: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: policy.id,
+    version: policy.version,
+    conversionRatio: policy.conversionRatio.toString(),
+    status: policy.status,
+    rationale: policy.rationale,
+    approvedAt: policy.approvedAt ? policy.approvedAt.toISOString() : null,
+    approvedByUserId: policy.approvedByUserId,
+    createdAt: policy.createdAt.toISOString(),
+  };
+}
+
+const legacyReconciliationPolicySchema = z
+  .object({
+    version: z.string().trim().min(3).max(60),
+    conversionRatio: z.number().positive().max(1000),
+    rationale: z.string().trim().max(1000).optional(),
+  })
+  .strict();
+
+/**
+ * Proposes an equivalence ratio. Created DRAFT and inert: nothing reads a policy
+ * until it is approved, so proposing a ratio cannot value anything.
+ */
+router.post("/rewards/legacy-reconciliation-policy", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+  const parsed = legacyReconciliationPolicySchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid reconciliation policy payload.", errors: parsed.error.flatten() });
+  }
+
+  const existing = await prisma.legacyReconciliationPolicy.findUnique({ where: { version: parsed.data.version } });
+  if (existing) {
+    return response.status(409).json({ message: "A reconciliation policy with that version already exists." });
+  }
+
+  const policy = await prisma.$transaction(async (transaction) => {
+    const created = await transaction.legacyReconciliationPolicy.create({
+      data: {
+        version: parsed.data.version,
+        conversionRatio: new Prisma.Decimal(parsed.data.conversionRatio),
+        rationale: parsed.data.rationale || null,
+        status: "DRAFT",
+        createdByUserId: request.authUser!.id,
+      },
+    });
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "LEGACY_RECONCILIATION_POLICY_DRAFTED",
+      targetType: "LegacyReconciliationPolicy",
+      targetId: created.id,
+      metadata: {
+        version: created.version,
+        conversionRatio: created.conversionRatio.toString(),
+        rationale: created.rationale,
+      },
+    });
+    return created;
+  });
+
+  return response.status(201).json({
+    message: "Reconciliation policy drafted. It has no effect until approved.",
+    policy: serializeLegacyReconciliationPolicy(policy),
+  });
 });
+
+/**
+ * Approves a drafted ratio, making it the one reconciliation reads.
+ *
+ * Deliberately a second act by a second call: drafting proposes a valuation and
+ * approving authorises it, so no single request can both invent a ratio and
+ * apply it to a member's balance. Any previously approved policy is retired in
+ * the same transaction, and a partial unique index refuses the write if that
+ * ever fails to happen.
+ */
+router.post(
+  "/rewards/legacy-reconciliation-policy/:policyId/approve",
+  requireAuth,
+  requireRole("SUPER_ADMIN"),
+  async (request, response) => {
+    const policyId = readParam(request.params.policyId);
+    if (!policyId) {
+      return response.status(400).json({ message: "Invalid reconciliation policy id." });
+    }
+
+    const policy = await prisma.legacyReconciliationPolicy.findUnique({ where: { id: policyId } });
+    if (!policy) {
+      return response.status(404).json({ message: "Reconciliation policy was not found." });
+    }
+    if (policy.status !== "DRAFT") {
+      return response.status(409).json({ message: `Policy is ${policy.status} and cannot be approved.` });
+    }
+
+    const approved = await prisma.$transaction(async (transaction) => {
+      await transaction.legacyReconciliationPolicy.updateMany({
+        where: { status: "APPROVED" },
+        data: { status: "RETIRED" },
+      });
+      const claimed = await transaction.legacyReconciliationPolicy.updateMany({
+        where: { id: policy.id, status: "DRAFT" },
+        data: { status: "APPROVED", approvedAt: new Date(), approvedByUserId: request.authUser!.id },
+      });
+      if (claimed.count === 0) {
+        throw new Error("POLICY_ALREADY_DECIDED");
+      }
+      const next = await transaction.legacyReconciliationPolicy.findUniqueOrThrow({ where: { id: policy.id } });
+      await createAuditLog(transaction, {
+        actorUserId: request.authUser!.id,
+        action: "LEGACY_RECONCILIATION_POLICY_APPROVED",
+        targetType: "LegacyReconciliationPolicy",
+        targetId: next.id,
+        metadata: { version: next.version, conversionRatio: next.conversionRatio.toString() },
+      });
+      return next;
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message === "POLICY_ALREADY_DECIDED") {
+        return null;
+      }
+      throw error;
+    });
+
+    if (!approved) {
+      return response.status(409).json({ message: "Policy was decided by a concurrent request." });
+    }
+
+    return response.json({
+      message: "Reconciliation policy approved.",
+      policy: serializeLegacyReconciliationPolicy(approved),
+    });
+  },
+);
+
+/** Read-only view of every proposed and approved equivalence ratio. */
+router.get("/rewards/legacy-reconciliation-policy", requireAuth, requireRole("SUPER_ADMIN"), async (_request, response) => {
+  const policies = await prisma.legacyReconciliationPolicy.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+  return response.json({
+    policies: policies.map(serializeLegacyReconciliationPolicy),
+    approvedPolicyCount: policies.filter((policy) => policy.status === "APPROVED").length,
+  });
+});
+
+/**
+ * Strict: a request carrying `conversionRatio` or `reconciliationRuleVersion` is
+ * rejected rather than silently stripped, so an old client is told its valuation
+ * was refused instead of quietly having it ignored.
+ */
+const legacyReconciliationSchema = z
+  .object({
+    carryoverId: z.string().trim().min(1),
+    note: z.string().trim().max(500).optional(),
+  })
+  .strict();
 
 /**
  * Applies an approved equivalence ratio to a preserved legacy balance.
@@ -1335,6 +1490,21 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
     });
   }
 
+  // The valuation comes from an approved, versioned policy and from nowhere
+  // else. Fail-closed: with no approved policy there is no equivalence between
+  // a legacy point and an authoritative one, so there is nothing to convert.
+  const policy = await prisma.legacyReconciliationPolicy.findFirst({
+    where: { status: "APPROVED" },
+    orderBy: { approvedAt: "desc" },
+  });
+  if (!policy) {
+    return response.status(409).json({
+      message:
+        "No approved legacy reconciliation policy exists. Governance must approve an equivalence ratio before any carryover can be converted.",
+      code: "RECONCILIATION_POLICY_NOT_APPROVED",
+    });
+  }
+
   // Exact decimal arithmetic on the unspent balance. In binary floating point
   // 100 x 0.29 is 28.999999999999996, which floors to 28 and under-credits; and
   // converting the gross balance would pay again for legacy points a redemption
@@ -1342,7 +1512,7 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
   const valuation = await valueLegacyCarryover(prisma, {
     userId: carryover.userId,
     legacyPointBalance: carryover.legacyPointBalance,
-    conversionRatio: parsed.data.conversionRatio,
+    conversionRatio: policy.conversionRatio,
   });
   const creditedPoints = valuation.creditedPoints;
 
@@ -1395,8 +1565,8 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
         sourceEventId: rewardEvent.id,
         description:
           `Legacy balance reconciled: ${carryover.legacyPointBalance} legacy points ` +
-          `x ${parsed.data.conversionRatio} = ${creditedPoints} points ` +
-          `(${parsed.data.reconciliationRuleVersion})`,
+          `x ${policy.conversionRatio.toString()} = ${creditedPoints} points ` +
+          `(policy ${policy.version})`,
       },
       update: {},
     });
@@ -1409,8 +1579,9 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
     const updated = await transaction.legacyBalanceCarryover.update({
       where: { id: carryover.id },
       data: {
-        conversionRatio: new Prisma.Decimal(parsed.data.conversionRatio),
-        reconciliationRuleVersion: parsed.data.reconciliationRuleVersion,
+        conversionRatio: policy.conversionRatio,
+        reconciliationRuleVersion: policy.version,
+        reconciliationPolicyId: policy.id,
         creditedPoints,
         reconciledLedgerEntryId: entry.id,
         reconciledAt: new Date(),
@@ -1437,13 +1608,15 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
       targetId: carryover.id,
       metadata: {
         sourceBalance: carryover.legacyPointBalance,
-        conversionRatio: parsed.data.conversionRatio,
+        reconciliationPolicyId: policy.id,
+        reconciliationPolicyVersion: policy.version,
+        conversionRatio: policy.conversionRatio.toString(),
         // Recorded so an auditor can see that this member held a legacy-era
         // claim which the credit did not settle; what to do about it is an
         // open reconciliation policy question.
         preCutoverReservedPoints: valuation.preCutoverReservedPoints,
         creditedPoints,
-        ruleVersion: parsed.data.reconciliationRuleVersion,
+        ruleVersion: policy.version,
         ledgerEntryId: entry.id,
         note: parsed.data.note || null,
       },
@@ -1470,9 +1643,10 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
       userId: result.userId,
       status: result.status,
       sourceBalance: carryover.legacyPointBalance,
-      conversionRatio: parsed.data.conversionRatio,
+      conversionRatio: policy.conversionRatio.toString(),
       creditedPoints: result.creditedPoints,
       ruleVersion: result.reconciliationRuleVersion,
+      reconciliationPolicyId: policy.id,
     },
   });
 });

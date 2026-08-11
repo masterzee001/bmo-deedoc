@@ -216,6 +216,7 @@ async function cleanup() {
     await prisma.strengthWeightConfiguration.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.strengthMetricDefinition.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.legacyBalanceCarryover.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.legacyReconciliationPolicy.deleteMany({ where: { createdByUserId: { in: userIds } } });
     await prisma.legacyMigrationBatch.deleteMany({ where: { snapshotChecksum: "test-snapshot-checksum" } });
     await prisma.rewardLedgerEntry.deleteMany({
       where: { OR: [{ userId: { in: userIds } }, { relatedUserId: { in: userIds } }] },
@@ -1023,12 +1024,80 @@ export async function runPreElectionTests() {
     assert.equal(carried.payablePoints, expectedAvailable);
     const beforeReconciliation = carried.confirmedPoints;
 
+    // With no approved policy there is no equivalence between a legacy point and
+    // an authoritative one, so there is nothing to convert. Fail closed.
+    assert.equal(
+      await prisma.legacyReconciliationPolicy.count({ where: { status: "APPROVED" } }),
+      0,
+      "no reconciliation ratio may be approved by default",
+    );
+    const unapproved = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(unapproved.status, 409, JSON.stringify(unapproved.payload));
+    assert.equal(unapproved.payload.code, "RECONCILIATION_POLICY_NOT_APPROVED");
+    assert.equal(
+      (await prisma.legacyBalanceCarryover.findUniqueOrThrow({ where: { id: carryover.id } })).status,
+      "LEGACY_CARRYOVER_PENDING",
+      "a refused reconciliation must leave the carryover pending",
+    );
+    assert.equal(
+      await prisma.rewardLedgerEntry.count({ where: { userId: referrer.id, category: "LEGACY_CARRYOVER" } }),
+      0,
+      "a refused reconciliation must credit nothing",
+    );
+    const batchBeforeAnyPolicy = await prisma.legacyMigrationBatch.findUniqueOrThrow({ where: { id: batch.id } });
+    assert.equal(batchBeforeAnyPolicy.reconciledTotalPoints, 0, "counters must not move for a refused reconciliation");
+
+    // The caller may no longer assert the valuation. A request carrying one is
+    // rejected outright rather than silently stripped, so an old client is told
+    // its figure was refused instead of quietly having it ignored.
+    const callerRatio = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id, conversionRatio: 1000 },
+    });
+    assert.equal(callerRatio.status, 400, JSON.stringify(callerRatio.payload));
+    const callerVersion = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id, reconciliationRuleVersion: "attacker-chosen" },
+    });
+    assert.equal(callerVersion.status, 400, JSON.stringify(callerVersion.payload));
+
+    // Governance approves a ratio in two deliberate acts: drafting proposes a
+    // valuation, approving authorises it. A draft alone converts nothing.
+    const draft = await apiRequest("/pre-election/rewards/legacy-reconciliation-policy", {
+      method: "POST",
+      token: superAdminToken,
+      body: { version: "legacy-reconciliation-v1", conversionRatio: 0.5, rationale: "Board-approved equivalence." },
+    });
+    assert.equal(draft.status, 201, JSON.stringify(draft.payload));
+    const draftedPolicy = (draft.payload as { policy: { id: string; status: string } }).policy;
+    assert.equal(draftedPolicy.status, "DRAFT");
+    const draftOnly = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+      method: "POST",
+      token: superAdminToken,
+      body: { carryoverId: carryover.id },
+    });
+    assert.equal(draftOnly.status, 409, "a drafted but unapproved ratio must convert nothing");
+    assert.equal(draftOnly.payload.code, "RECONCILIATION_POLICY_NOT_APPROVED");
+
+    const approvedPolicy = await apiRequest(
+      `/pre-election/rewards/legacy-reconciliation-policy/${draftedPolicy.id}/approve`,
+      { method: "POST", token: superAdminToken, body: {} },
+    );
+    assert.equal(approvedPolicy.status, 200, JSON.stringify(approvedPolicy.payload));
+    assert.equal((approvedPolicy.payload as { policy: { status: string } }).policy.status, "APPROVED");
+
     // Reconciliation is the only path that turns a carryover into spendable
-    // points, and it records the ratio and rule version that produced it.
+    // points, and its ratio and version now come from the approved policy.
     const reconciled = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
       method: "POST",
       token: superAdminToken,
-      body: { carryoverId: carryover.id, conversionRatio: 0.5, reconciliationRuleVersion: "legacy-reconciliation-v1" },
+      body: { carryoverId: carryover.id },
     });
     assert.equal(reconciled.status, 200, JSON.stringify(reconciled.payload));
     const reconciledCarryover = (reconciled.payload as { carryover: { creditedPoints: number; status: string } }).carryover;
@@ -1036,6 +1105,23 @@ export async function runPreElectionTests() {
     // is handled by the same mechanism without rewriting history.
     assert.equal(reconciledCarryover.creditedPoints, 175);
     assert.equal(reconciledCarryover.status, "LEGACY_CARRYOVER_CONFIRMED");
+
+    // Provenance: the credit traces back to the governance decision that
+    // authorised it, not merely to a number someone passed in.
+    const provenance = await prisma.legacyBalanceCarryover.findUniqueOrThrow({ where: { id: carryover.id } });
+    assert.equal(provenance.reconciliationPolicyId, draftedPolicy.id);
+    assert.equal(provenance.reconciliationRuleVersion, "legacy-reconciliation-v1");
+    assert.equal(provenance.conversionRatio?.toString(), "0.5");
+    const reconciliationAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { action: "LEGACY_BALANCE_RECONCILED", targetId: carryover.id },
+      orderBy: { createdAt: "desc" },
+    });
+    const auditMetadata = JSON.parse(reconciliationAudit.metadataJson || "{}") as Record<string, unknown>;
+    assert.equal(auditMetadata.reconciliationPolicyId, draftedPolicy.id);
+    assert.equal(auditMetadata.reconciliationPolicyVersion, "legacy-reconciliation-v1");
+    assert.equal(auditMetadata.conversionRatio, "0.5");
+    assert.equal(auditMetadata.creditedPoints, 175);
+    assert.equal(auditMetadata.sourceBalance, 350);
 
     const afterReconciliation = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, {
       token: superAdminToken,
@@ -1084,11 +1170,7 @@ export async function runPreElectionTests() {
         apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
           method: "POST",
           token: superAdminToken,
-          body: {
-            carryoverId: raceCarryover.id,
-            conversionRatio: 0.5,
-            reconciliationRuleVersion: "legacy-reconciliation-concurrent",
-          },
+          body: { carryoverId: raceCarryover.id },
         }),
       ),
     );
@@ -1135,7 +1217,7 @@ export async function runPreElectionTests() {
     const doubleReconcile = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
       method: "POST",
       token: superAdminToken,
-      body: { carryoverId: carryover.id, conversionRatio: 1.0, reconciliationRuleVersion: "legacy-reconciliation-v2" },
+      body: { carryoverId: carryover.id },
     });
     assert.equal(doubleReconcile.status, 409, JSON.stringify(doubleReconcile.payload));
     const finalBalance = await apiRequest(`/pre-election/rewards/balance?userId=${referrer.id}`, { token: superAdminToken });
