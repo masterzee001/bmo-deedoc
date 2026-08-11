@@ -74,6 +74,12 @@ export type AuthoritativeBalance = {
   legacyCarryoverPendingPoints: number;
   /** Legacy points already credited under an approved rule; included in confirmedPoints. */
   legacyCarryoverConfirmedPoints: number;
+  /**
+   * Reserving redemptions raised at or before this member's cutover. Reported
+   * so a legacy-era claim against the authoritative balance is visible; it is
+   * fully counted in `reservedPoints` and is deliberately not netted off.
+   */
+  preCutoverReservedPoints: number;
 };
 
 /** Payout statuses that hold points against a member's balance. */
@@ -95,28 +101,30 @@ const EMPTY_BALANCE: AuthoritativeBalance = {
   eligiblePoints: 0,
   legacyCarryoverPendingPoints: 0,
   legacyCarryoverConfirmedPoints: 0,
+  preCutoverReservedPoints: 0,
 };
 
 /**
- * Redemption points that the legacy ledger, not the authoritative one, funded.
+ * Reserving redemptions a member raised at or before their cutover.
  *
- * A redemption raised at or before a member's cutover was paid out of legacy
- * value. That value now sits in the carryover and is excluded from
- * `confirmedPoints`, so the redemption must not also be charged against
- * authoritative earnings.
+ * **Reported, never subtracted.** An earlier version of this code netted these
+ * off the authoritative reservation, on the reasoning that legacy value had
+ * funded them so authoritative earnings should not be charged twice. That
+ * reasoning silently priced a preserved balance at parity: releasing a
+ * reservation of N points because a pending carryover of N legacy points exists
+ * *is* paying out that carryover at 1:1, which is the single assumption this
+ * whole cutover exists to refuse. It also disagreed with reconciliation, which
+ * applies the approved ratio — so at any ratio below parity the member could
+ * receive more than the organisation had valued the balance at.
  *
- * Deliberately derived from the redemption rows rather than from the carryover's
- * stored `legacyReservedPoints`, which records only what the cutover observed.
- * A stored figure goes stale the moment one of those redemptions is rejected:
- * the redemption leaves the reserving set while the offset stays, and the member
- * gains spendable points out of nothing. Recomputing keeps the offset a strict
- * subset of the reservation it offsets.
- *
- * VOID carryovers are excluded: a voided carryover asserts no legacy funding.
- * All carryovers in one batch share a cutover instant, so this costs one query
- * per batch rather than one per member.
+ * What to do about a pre-cutover redemption is a reconciliation policy question
+ * and no approved policy exists. Until one does, the conservative reading
+ * applies: the reservation stands, so the platform can never over-pay, and the
+ * figure is surfaced separately so the situation is visible rather than silent.
+ * Such a redemption is also refused at execution while its carryover is pending
+ * (see `isUnreconciledLegacyClaim`), so nothing is settled on a guess.
  */
-async function getLegacyFundedReservations(
+async function getPreCutoverReservations(
   client: Client,
   userIds?: string[],
   excludeRedemptionIds?: string[],
@@ -125,21 +133,18 @@ async function getLegacyFundedReservations(
 
   const carryovers = await client.legacyBalanceCarryover.findMany({
     where: { ...(scope ? { userId: scope } : {}), status: { not: "LEGACY_CARRYOVER_VOID" } },
-    select: { userId: true, legacyPointBalance: true, migrationBatch: { select: { executedAt: true } } },
+    select: { userId: true, migrationBatch: { select: { executedAt: true } } },
   });
   if (carryovers.length === 0) {
     return new Map();
   }
 
-  // One cutover instant per member — the latest. Bucketing per carryover row
-  // counted a member carried in two batches once per batch, summing the same
-  // redemptions twice and offsetting reservations that had no legacy funding.
+  // One cutover instant per member — the latest — so a member carried in two
+  // batches is counted once rather than once per batch.
   const cutoverByUser = new Map<string, number>();
-  const legacyCeiling = new Map<string, number>();
   for (const carryover of carryovers) {
     const cutoverAt = carryover.migrationBatch.executedAt.getTime();
     cutoverByUser.set(carryover.userId, Math.max(cutoverByUser.get(carryover.userId) || 0, cutoverAt));
-    legacyCeiling.set(carryover.userId, (legacyCeiling.get(carryover.userId) || 0) + carryover.legacyPointBalance);
   }
 
   const usersByCutover = new Map<number, string[]>();
@@ -162,19 +167,13 @@ async function getLegacyFundedReservations(
     ),
   );
 
-  const legacyFunded = new Map<string, number>();
+  const preCutover = new Map<string, number>();
   for (const rows of perCutover) {
     for (const row of rows) {
-      // Capped at the legacy value that justifies it. Without the cap, a member
-      // whose pre-cutover redemptions exceed their migrated balance receives an
-      // offset larger than the carryover it derives from.
-      legacyFunded.set(
-        row.voterUserId,
-        Math.min(row._sum.pointsRequested || 0, legacyCeiling.get(row.voterUserId) || 0),
-      );
+      preCutover.set(row.voterUserId, row._sum.pointsRequested || 0);
     }
   }
-  return legacyFunded;
+  return preCutover;
 }
 
 /**
@@ -241,7 +240,7 @@ export async function getAuthoritativeBalances(
     reservedRedemptions,
     pendingCarryover,
     confirmedCarryover,
-    legacyFundedReservations,
+    preCutoverReservations,
   ] = await Promise.all([
     client.rewardLedgerEntry.groupBy({
       by: ["userId"],
@@ -274,16 +273,14 @@ export async function getAuthoritativeBalances(
       where: { ...(scope ? { userId: scope } : {}), status: "LEGACY_CARRYOVER_CONFIRMED" },
       _sum: { creditedPoints: true },
     }),
-    // Same exclusion, so the offset and the sum it offsets always describe the
-    // same set of rows.
-    getLegacyFundedReservations(client, userIds, excludeRedemptionIds),
+    getPreCutoverReservations(client, userIds, excludeRedemptionIds),
   ]);
 
   const assignmentPoints = new Map(reservedAssignments.map((row) => [row.beneficiaryUserId, row._sum.points || 0]));
   const redemptionPoints = new Map(reservedRedemptions.map((row) => [row.voterUserId, row._sum.pointsRequested || 0]));
   const pendingPoints = new Map(pendingCarryover.map((row) => [row.userId, row._sum.legacyPointBalance || 0]));
   const confirmedPointsByUser = new Map(confirmedCarryover.map((row) => [row.userId, row._sum.creditedPoints || 0]));
-  const legacyReserved = legacyFundedReservations;
+  const preCutoverReserved = preCutoverReservations;
 
   // Every member touched by any of the five queries, so a member who holds only
   // a carryover or only a reservation is not silently dropped.
@@ -293,37 +290,26 @@ export async function getAuthoritativeBalances(
     ...redemptionPoints.keys(),
     ...pendingPoints.keys(),
     ...confirmedPointsByUser.keys(),
-    ...legacyReserved.keys(),
+    ...preCutoverReserved.keys(),
   ]);
   const earnedPoints = new Map(earned.map((row) => [row.userId, row._sum.points || 0]));
 
   const balances = new Map<string, AuthoritativeBalance>();
   for (const userId of everyUserId) {
     const confirmedPoints = earnedPoints.get(userId) || 0;
-    // A redemption raised before the cutover was funded by the legacy ledger,
-    // whose value is held as carryover and deliberately excluded from
-    // confirmedPoints. Charging it against authoritative earnings too would let
-    // an already-paid redemption consume points the member earned afterwards.
-    //
-    // The offset is recomputed from the redemption rows themselves rather than
-    // read from the carryover's stored `legacyReservedPoints`. That stored
-    // figure is a frozen snapshot of the cutover moment: subtracting it from a
-    // *current* reservation total leaves a permanent credit behind once the
-    // pre-cutover redemption is rejected and stops reserving, fabricating
-    // spendable points the member never earned. Derived this way the offset is
-    // always a subset of the same sum it is subtracted from, so it cannot
-    // outlive the rows that justify it.
-    const redemptionReservation = Math.max(
-      (redemptionPoints.get(userId) || 0) - (legacyReserved.get(userId) || 0),
-      0,
-    );
-    const reservedPoints = (assignmentPoints.get(userId) || 0) + redemptionReservation;
+    // Every reserving redemption is charged, including one raised before the
+    // cutover. Releasing that reservation because a carryover exists would
+    // price the preserved balance at parity, which no approved ratio has
+    // authorised. The pre-cutover figure is reported instead, so the situation
+    // is visible without being valued.
+    const reservedPoints = (assignmentPoints.get(userId) || 0) + (redemptionPoints.get(userId) || 0);
     balances.set(userId, {
       confirmedPoints,
       reservedPoints,
       eligiblePoints: Math.max(confirmedPoints - reservedPoints, 0),
       legacyCarryoverPendingPoints: pendingPoints.get(userId) || 0,
       legacyCarryoverConfirmedPoints: confirmedPointsByUser.get(userId) || 0,
+      preCutoverReservedPoints: preCutoverReserved.get(userId) || 0,
     });
   }
   return balances;
@@ -495,17 +481,17 @@ export async function valueLegacyCarryover(
     conversionRatio: Prisma.Decimal | number | string;
   },
 ) {
-  // Recomputed, not read from the stored `legacyReservedPoints`. That snapshot
-  // was taken at cutover; if one of the redemptions behind it was rejected
-  // afterwards, the member never received that value and converting the balance
-  // net of it would destroy value they still hold. Capped at the carryover's own
-  // balance so a member's other redemptions cannot reduce it below zero.
-  const legacyFunded = await getLegacyFundedReservations(client, [carryover.userId]);
-  const committed = Math.min(legacyFunded.get(carryover.userId) || 0, carryover.legacyPointBalance);
-  const unspent = Math.max(carryover.legacyPointBalance - committed, 0);
+  // The whole preserved balance converts. Nothing was released against it —
+  // pre-cutover redemptions still reserve in full — so netting a "committed"
+  // portion off here would write that value off twice: once as a standing
+  // reservation and again as a reduced credit.
+  const preCutover = await getPreCutoverReservations(client, [carryover.userId]);
   return {
-    committedAtCutover: committed,
-    unspentPoints: unspent,
-    creditedPoints: new Prisma.Decimal(unspent).mul(new Prisma.Decimal(carryover.conversionRatio)).floor().toNumber(),
+    preCutoverReservedPoints: preCutover.get(carryover.userId) || 0,
+    convertedPoints: carryover.legacyPointBalance,
+    creditedPoints: new Prisma.Decimal(carryover.legacyPointBalance)
+      .mul(new Prisma.Decimal(carryover.conversionRatio))
+      .floor()
+      .toNumber(),
   };
 }

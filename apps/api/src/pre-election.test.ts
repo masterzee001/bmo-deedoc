@@ -1236,7 +1236,8 @@ export async function runPreElectionTests() {
     });
 
     // The member earned nothing in the authoritative ledger, so nothing is
-    // spendable — the 500 preserved points are visible but not payable.
+    // spendable — the 500 preserved points are visible but not payable, and the
+    // pre-cutover claim is reported rather than released.
     const leakBalance = await apiRequest(`/pre-election/rewards/balance?userId=${leakMember.id}`, {
       token: superAdminToken,
     });
@@ -1246,6 +1247,32 @@ export async function runPreElectionTests() {
       "a pre-cutover claim must not turn preserved carryover into a spendable balance",
     );
     assert.equal((leakBalance.payload as { legacyCarryoverPendingPoints: number }).legacyCarryoverPendingPoints, 500);
+    assert.equal(
+      (leakBalance.payload as { preCutoverReservedPoints: number }).preCutoverReservedPoints,
+      400,
+      "a legacy-era claim must be reported, and must stay fully reserved",
+    );
+
+    // The decisive assertion: the preserved balance must not change what is
+    // spendable. Releasing a reservation because a carryover exists would price
+    // that carryover at parity, which no approved ratio has authorised.
+    const beforeCarryoverRemoval = (leakBalance.payload as { availablePoints: number }).availablePoints;
+    await prisma.legacyBalanceCarryover.updateMany({
+      where: { userId: leakMember.id },
+      data: { status: "LEGACY_CARRYOVER_VOID" },
+    });
+    const withoutCarryover = await apiRequest(`/pre-election/rewards/balance?userId=${leakMember.id}`, {
+      token: superAdminToken,
+    });
+    assert.equal(
+      (withoutCarryover.payload as { availablePoints: number }).availablePoints,
+      beforeCarryoverRemoval,
+      "the spendable balance must not be a function of a pending carryover",
+    );
+    await prisma.legacyBalanceCarryover.updateMany({
+      where: { userId: leakMember.id },
+      data: { status: "LEGACY_CARRYOVER_PENDING" },
+    });
 
     // And it cannot be paid, at the chokepoint, whatever the routes allow.
     await assert.rejects(

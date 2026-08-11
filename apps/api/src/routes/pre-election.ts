@@ -1294,6 +1294,9 @@ router.get("/rewards/balance", requireAuth, async (request, response) => {
     // spendable figure would create value from an unverified assumption.
     legacyCarryoverPendingPoints: balance.legacyCarryoverPendingPoints,
     legacyCarryoverConfirmedPoints: balance.legacyCarryoverConfirmedPoints,
+    // Legacy-era claims against this balance, reported so they are visible.
+    // Fully counted in reservedPayoutPoints and never netted off.
+    preCutoverReservedPoints: balance.preCutoverReservedPoints,
     payablePoints: balance.eligiblePoints,
   });
 });
@@ -1391,9 +1394,9 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
         sourceEventType: RewardQualifyingEvent.LEGACY_BALANCE_RECONCILED,
         sourceEventId: rewardEvent.id,
         description:
-          `Legacy balance reconciled: ${carryover.legacyPointBalance} legacy points less ` +
-          `${valuation.committedAtCutover} already committed, x ${parsed.data.conversionRatio} ` +
-          `= ${creditedPoints} points (${parsed.data.reconciliationRuleVersion})`,
+          `Legacy balance reconciled: ${carryover.legacyPointBalance} legacy points ` +
+          `x ${parsed.data.conversionRatio} = ${creditedPoints} points ` +
+          `(${parsed.data.reconciliationRuleVersion})`,
       },
       update: {},
     });
@@ -1434,9 +1437,11 @@ router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUP
       targetId: carryover.id,
       metadata: {
         sourceBalance: carryover.legacyPointBalance,
-        committedAtCutover: valuation.committedAtCutover,
-        unspentPoints: valuation.unspentPoints,
         conversionRatio: parsed.data.conversionRatio,
+        // Recorded so an auditor can see that this member held a legacy-era
+        // claim which the credit did not settle; what to do about it is an
+        // open reconciliation policy question.
+        preCutoverReservedPoints: valuation.preCutoverReservedPoints,
         creditedPoints,
         ruleVersion: parsed.data.reconciliationRuleVersion,
         ledgerEntryId: entry.id,
@@ -2041,10 +2046,17 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     return response.status(400).json({ message: "paymentReference is required when marking a payout paid." });
   }
 
+  // Narrowed to a const before the branch below. After the PAID case returns,
+  // `nextStatus` is typed as the non-PAID members of the union, so the generic
+  // status writer further down cannot emit PAID even if this branch were later
+  // removed — the compiler rejects it. The repository scanner cannot see a
+  // variable status, so this is the guard that actually holds that line.
+  const nextStatus = parsed.data.status;
+
   // Paying is not this route's to do. It owns the non-money transitions below;
   // the PAID transition, its kill switch, its valuation, its atomic claim and
   // its execution record all belong to the one execution authority.
-  if (parsed.data.status === "PAID") {
+  if (nextStatus === "PAID") {
     const assignment = await prisma.payoutAssignment.findUnique({
       where: { id: assignmentId },
       select: { payoutOfficerUserId: true },
@@ -2086,6 +2098,13 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     return response.json({ message: "Payout assignment updated.", payoutAssignment: serializePayoutAssignment(paid) });
   }
 
+  // Compiler-enforced, not merely narrowed: if the PAID branch above were
+  // deleted or reordered, `nextStatus` would still include "PAID" and this
+  // annotation would fail to typecheck. The repository scanner matches only a
+  // literal PAID and cannot see a variable status, so this is what actually
+  // holds the line on the generic writer below.
+  const nonPayingStatus: "PROCESSING" | "HELD" | "REJECTED" = nextStatus;
+
   const result = await prisma.$transaction(async (transaction) => {
     const assignment = await transaction.payoutAssignment.findUnique({
       where: { id: assignmentId },
@@ -2100,14 +2119,14 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
     if (assignment.status === PayoutStatus.PAID || assignment.status === PayoutStatus.REJECTED) {
       throw new Error("FINALIZED");
     }
-    if (parsed.data.status === "PROCESSING" && assignment.status !== PayoutStatus.APPROVED) {
+    if (nonPayingStatus === "PROCESSING" && assignment.status !== PayoutStatus.APPROVED) {
       throw new Error("INVALID_TRANSITION");
     }
     const updated = await transaction.payoutAssignment.update({
       where: { id: assignment.id },
       data: {
-        status: parsed.data.status,
-        processedAt: ["HELD", "REJECTED"].includes(parsed.data.status) ? new Date() : assignment.processedAt,
+        status: nonPayingStatus,
+        processedAt: ["HELD", "REJECTED"].includes(nonPayingStatus) ? new Date() : assignment.processedAt,
         note: parsed.data.note || assignment.note,
       },
       include: {
@@ -2119,10 +2138,10 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
 
     await createAuditLog(transaction, {
       actorUserId: request.authUser!.id,
-      action: `PAYOUT_ASSIGNMENT_${parsed.data.status}`,
+      action: `PAYOUT_ASSIGNMENT_${nonPayingStatus}`,
       targetType: "PayoutAssignment",
       targetId: assignment.id,
-      metadata: { fromStatus: assignment.status, toStatus: parsed.data.status },
+      metadata: { fromStatus: assignment.status, toStatus: nonPayingStatus },
     });
 
     return updated;
