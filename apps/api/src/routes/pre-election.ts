@@ -1756,6 +1756,9 @@ router.post("/payout/cycles", requireAuth, requireRole("SUPER_ADMIN"), async (re
         payoutDate,
         minimumThreshold: terms.minimumThreshold,
         conversionRate: terms.conversionRate,
+        // Provenance for the amounts this cycle will pay: the configuration row
+        // the terms came from. Its absence is what marks a pre-authority cycle.
+        payoutConfigurationId: terms.payoutConfigurationId,
         status: PayoutStatus.PENDING,
       },
     });

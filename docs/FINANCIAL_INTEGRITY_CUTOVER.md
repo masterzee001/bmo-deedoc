@@ -48,6 +48,13 @@ Every execution, whichever path it came from:
 - writes an immutable `PayoutExecution` record and an audit row in the same
   transaction as the transition.
 
+An assignment is paid at its cycle's snapshotted terms rather than re-valued,
+because a cycle's terms are deliberately immutable for its lifetime. That is only
+sound if those terms were server-derived, so a cycle records the
+`PayoutConfiguration` it priced from. A cycle created before the payout authority
+has no such provenance — its rate came from a request body — and its assignments
+are refused at execution rather than paid at a figure nobody authorised.
+
 `PayoutExecution` exists because `PayoutTransaction`'s assignment foreign key is
 required, so it could not represent a redemption without being distorted. Unique
 indexes on each target make exactly-once a database property, and

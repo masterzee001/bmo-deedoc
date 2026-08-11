@@ -146,7 +146,10 @@ async function executeAssignment(
   input: Extract<ExecutePayoutInput, { kind: "ASSIGNMENT" }>,
   paymentReference: string,
 ): Promise<PayoutExecutionResult> {
-  const assignment = await transaction.payoutAssignment.findUnique({ where: { id: input.assignmentId } });
+  const assignment = await transaction.payoutAssignment.findUnique({
+    where: { id: input.assignmentId },
+    include: { payoutCycle: { select: { payoutConfigurationId: true } } },
+  });
   if (!assignment) {
     throw new PayoutExecutionError("NOT_FOUND", "Payout assignment was not found.");
   }
@@ -156,6 +159,21 @@ async function executeAssignment(
   // than recomputed: a cycle's terms are deliberately immutable for its
   // lifetime, so re-valuing against today's configuration would pay a different
   // amount than the one that was approved.
+  //
+  // That reasoning only holds if those terms were server-derived. Before the
+  // payout authority, this route accepted a caller-supplied threshold and rate
+  // and preferred them over the stored configuration, so a cycle created then
+  // prices its assignments at a figure nobody authorised. Such a cycle has no
+  // configuration provenance and is refused here rather than paid — the same
+  // reason executeRedemption re-values a pre-authority redemption instead of
+  // trusting its stored amount.
+  if (!assignment.payoutCycle.payoutConfigurationId) {
+    throw new PayoutExecutionError(
+      "AMOUNT_NOT_AUTHORITATIVE",
+      "This payout cycle predates server-side valuation and its terms were never derived from an approved payout configuration. Recreate the cycle before paying it.",
+    );
+  }
+
   if (assignment.amount.lessThanOrEqualTo(0)) {
     throw new PayoutExecutionError(
       "AMOUNT_NOT_AUTHORITATIVE",

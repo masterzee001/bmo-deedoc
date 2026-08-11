@@ -168,6 +168,23 @@ function ownerTable(line) {
   return stripped.length > 0 ? stripped : null;
 }
 
+/**
+ * The referencing columns of a FOREIGN KEY definition — the `(a, b)` in
+ * `FOREIGN KEY ("a", "b") REFERENCES ...`, not the referenced side. Returns an
+ * empty array when the shape is not recognised, so an unparseable definition is
+ * never mistaken for an exempt one.
+ */
+function referencingColumns(constraint) {
+  const match = /FOREIGN KEY\s*\(([^)]*)\)/.exec(constraint);
+  if (!match) {
+    return [];
+  }
+  return match[1]
+    .split(",")
+    .map((column) => column.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+}
+
 /** Unique indexes, which restrict writes exactly as a unique constraint does. */
 function uniqueIndexSet() {
   const rows = psql(
@@ -280,8 +297,30 @@ function backwardIncompatibleChanges(before, after) {
       continue;
     }
     const owner = ownerTable(constraint);
-    if (owner === null || before.tables.has(owner)) {
+    if (owner === null) {
       problems.push(`constraint added over existing data: ${constraint}`);
+      continue;
+    }
+    if (before.tables.has(owner)) {
+      // One exemption, and only one: a foreign key whose every referencing
+      // column is added by this same migration and is nullable. A previous
+      // image does not know those columns exist, so it writes NULL into them,
+      // and NULL satisfies a foreign key. Nothing it can insert or update is
+      // rejected. Any other constraint on a live table stays a violation,
+      // including a foreign key over a column that already held data.
+      const referencing = referencingColumns(constraint);
+      const exempt =
+        constraint.includes("FOREIGN KEY") &&
+        referencing.length > 0 &&
+        referencing.every((column) => {
+          const identity = `${owner}.${column}`;
+          return !before.columns.has(identity) && after.columns.get(identity)?.nullable === "YES";
+        });
+      if (!exempt) {
+        problems.push(`constraint added over existing data: ${constraint}`);
+        continue;
+      }
+      notes.push(`nullable new-column foreign key on pre-existing ${owner}: ${constraint}`);
       continue;
     }
     // The constraint sits on a new table, but a foreign key still reaches back

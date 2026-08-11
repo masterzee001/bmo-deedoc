@@ -1128,6 +1128,7 @@ model PayoutConfiguration {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   createdByUser       User      @relation("PayoutConfigurationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  payoutCycles        PayoutCycle[]
 
   @@index([active])
   @@index([createdByUserId])
@@ -1141,11 +1142,20 @@ model PayoutCycle {
   payoutDate       DateTime
   minimumThreshold Int
   conversionRate   Decimal       @db.Decimal(18, 4)
+  /// The versioned configuration these terms were snapshotted from.
+  ///
+  /// Null means the cycle predates the payout authority, when this route
+  /// accepted a caller-supplied threshold and rate and preferred them over the
+  /// stored configuration. Such a cycle's amounts were never server-derived, so
+  /// its assignments are refused at execution rather than paid at a rate nobody
+  /// authorised. Nullable so no historical row is rewritten to look authorised.
+  payoutConfigurationId String?
   status           PayoutStatus  @default(PENDING)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   batches          PayoutBatch[]
   assignments      PayoutAssignment[]
+  payoutConfiguration PayoutConfiguration? @relation(fields: [payoutConfigurationId], references: [id], onDelete: Restrict)
 
   @@index([status, payoutDate])
 }

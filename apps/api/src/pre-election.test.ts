@@ -494,6 +494,41 @@ export async function runPreElectionTests() {
 
     setPayoutExecutionEnabledForTests(true);
 
+    // A cycle created before the payout authority priced its assignments at a
+    // caller-supplied rate. Those amounts were never server-derived, so they
+    // are refused at execution rather than paid — the same treatment a
+    // pre-authority redemption gets, which it previously did not receive.
+    const legacyCycle = await prisma.payoutCycle.findUniqueOrThrow({ where: { id: payoutCycleId } });
+    assert.ok(legacyCycle.payoutConfigurationId, "a cycle created now must record the configuration it priced from");
+    await prisma.payoutCycle.update({
+      where: { id: payoutCycleId },
+      data: { payoutConfigurationId: null },
+    });
+    const unprovenAssignment = await prisma.payoutAssignment.findFirstOrThrow({ where: { payoutCycleId } });
+    await assert.rejects(
+      () =>
+        executePayout(prisma, {
+          kind: "ASSIGNMENT",
+          assignmentId: unprovenAssignment.id,
+          actorUserId: payoutOfficer.id,
+          paymentReference: "UNPROVEN-CYCLE-REF",
+        }),
+      (error: unknown) =>
+        error instanceof PayoutExecutionError &&
+        error.code === "AMOUNT_NOT_AUTHORITATIVE" &&
+        /predates server-side valuation/.test(error.message),
+      "an assignment priced by a caller-supplied rate must not be payable",
+    );
+    assert.equal(
+      await prisma.payoutExecution.count({ where: { paymentReference: "UNPROVEN-CYCLE-REF" } }),
+      0,
+      "a refused assignment must leave no execution record",
+    );
+    await prisma.payoutCycle.update({
+      where: { id: payoutCycleId },
+      data: { payoutConfigurationId: legacyCycle.payoutConfigurationId },
+    });
+
     const paidPayout = await apiRequest(`/pre-election/payout/assignments/${assignmentId}/status`, {
       method: "PATCH",
       token: payoutToken,

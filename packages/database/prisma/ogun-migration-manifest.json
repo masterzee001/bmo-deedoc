@@ -53,6 +53,10 @@
     {
       "name": "20260811190000_one_carryover_per_member",
       "sha256": "d769d52017fbca0328aae423948df8a8fc3d9890a88f6af99e76694e0869b770"
+    },
+    {
+      "name": "20260811210000_payout_cycle_configuration_provenance",
+      "sha256": "35d7140dac50634c4a74d5105541a30f8c3b682a1d4bddf864d8f105a92dba66"
     }
   ]
 }
