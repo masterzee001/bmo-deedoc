@@ -47,7 +47,8 @@
     "rehearse:migration": "node scripts/rehearse-production-migration.mjs",
     "verify:backup-restore": "node scripts/verify-backup-restore.mjs",
     "verify:load-recovery": "node scripts/verify-load-recovery.mjs",
-    "rehearse:production": "npm run rehearse:migration && npm run verify:backup-restore && npm run verify:load-recovery"
+    "rehearse:production": "npm run rehearse:migration && npm run verify:backup-restore && npm run verify:load-recovery",
+    "migrate:legacy-balances": "npm run migrate:legacy-balances --workspace @pics-nigeria/database --"
   },
   "devDependencies": {
     "concurrently": "9.2.4",

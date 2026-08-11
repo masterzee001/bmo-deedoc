@@ -41,6 +41,10 @@
     {
       "name": "20260810140000_system_controlled_bonus_rules",
       "sha256": "93821ac371101ef800130cadb1359b8db6e7910bf65b72f7819cab86a4c9a29c"
+    },
+    {
+      "name": "20260811090000_financial_integrity_legacy_carryover",
+      "sha256": "516b85053c4758218a3af5041d120baab0da33a59f1409d56c8760d03e187f5d"
     }
   ]
 }

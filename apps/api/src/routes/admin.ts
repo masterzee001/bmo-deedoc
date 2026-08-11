@@ -33,6 +33,7 @@ import { createNotification } from "../lib/notifications";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
 import { recordParticipationAndReward } from "../lib/participation";
+import { isPayoutExecutionEnabled } from "../lib/payout-authority";
 import { ensureNationalReferenceStates, syncLgasForState, syncPollingUnitsForWard, syncWardsForLga } from "../lib/inec-reference";
 import { createElectionDayRealtimeEvent } from "../realtime/events";
 import { publishRealtimeEvent } from "../realtime/gateway";
@@ -217,6 +218,16 @@ type ManagedUserDependencyCounts = {
   candidateCampaignEvents: number;
   notifications: number;
   rewardEntries: number;
+  /**
+   * Entries in the authoritative ledger. Counted separately from the legacy
+   * `rewardEntries` because earnings now post here: without this the guard
+   * below would report no dependencies for a member who has earned points, and
+   * the delete would fail on the database foreign key as a 500 instead of the
+   * explained 409.
+   */
+  authoritativeLedgerEntries: number;
+  /** Preserved legacy value. A member holding a carryover must never be deleted. */
+  legacyBalanceCarryovers: number;
   rewardRedemptions: number;
   agentActivities: number;
   reportedIncidents: number;
@@ -3716,6 +3727,8 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     candidateCampaignEvents,
     notifications,
     rewardEntries,
+    authoritativeLedgerEntries,
+    legacyBalanceCarryovers,
     rewardRedemptions,
     agentActivities,
     reportedIncidents,
@@ -3739,6 +3752,8 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     prisma.campaignEvent.count({ where: { candidateUserId: userId } }),
     prisma.notification.count({ where: { userId } }),
     prisma.rewardLedger.count({ where: { OR: [{ voterUserId: userId }, { relatedUserId: userId }] } }),
+    prisma.rewardLedgerEntry.count({ where: { OR: [{ userId }, { relatedUserId: userId }] } }),
+    prisma.legacyBalanceCarryover.count({ where: { userId } }),
     prisma.rewardRedemption.count({ where: { OR: [{ voterUserId: userId }, { reviewedByUserId: userId }] } }),
     prisma.agentActivity.count({ where: { agentUserId: userId } }),
     prisma.incident.count({ where: { OR: [{ reportedByUserId: userId }, { assignedAdminUserId: userId }, { escalatedByUserId: userId }] } }),
@@ -3764,6 +3779,8 @@ router.delete("/users/:userId", requireAuth, requireRole("ADMIN", "SUPER_ADMIN")
     candidateCampaignEvents,
     notifications,
     rewardEntries,
+    authoritativeLedgerEntries,
+    legacyBalanceCarryovers,
     rewardRedemptions,
     agentActivities,
     reportedIncidents,
@@ -5294,6 +5311,17 @@ router.patch("/redemptions/:redemptionId/paid", requireAuth, requireRole("ADMIN"
 
   if (redemption.status !== RewardRedemptionStatus.APPROVED) {
     return response.status(400).json({ message: "Only approved redemptions can be marked as paid." });
+  }
+
+  // Marking a redemption PAID moves money. The kill switch gates it in every
+  // environment, so an authorization or UI mistake cannot pay a member while
+  // legacy balance reconciliation is still outstanding.
+  if (!isPayoutExecutionEnabled()) {
+    return response.status(409).json({
+      message:
+        "Payout execution is disabled. Set PAYOUT_EXECUTION_ENABLED=true only after reconciliation and readiness gates have passed.",
+      payoutExecutionEnabled: false,
+    });
   }
 
   const updated = await prisma.$transaction(async (transaction) => {

@@ -5,6 +5,7 @@ import {
   PayoutStatus,
   Prisma,
   ReferralStatus,
+  RewardEventStatus,
   RewardLedgerCategory,
   RewardQualifyingEvent,
   UserRole,
@@ -20,6 +21,7 @@ import { createAuditLog } from "../lib/audit";
 import { processVerifiedReferralReward } from "../lib/pre-election-rewards";
 import { requireAuth, requireMemberCapability, requireRole } from "../middleware/auth";
 import { prisma } from "../prisma";
+import { getAuthoritativeBalance, isPayoutExecutionEnabled } from "../lib/payout-authority";
 
 const router = Router();
 
@@ -1304,18 +1306,195 @@ router.get("/rewards/balance", requireAuth, async (request, response) => {
     return response.status(403).json({ message: "Only Super Admin can inspect another user's reward balance." });
   }
 
-  const [confirmedPoints, pendingPotentialPoints, reservedPayoutPoints] = await Promise.all([
-    getConfirmedPoints(targetUserId),
+  const [pendingPotentialPoints, balance] = await Promise.all([
     getPotentialReferralPoints(targetUserId),
-    getReservedPayoutPoints(targetUserId),
+    getAuthoritativeBalance(prisma, targetUserId),
   ]);
 
   return response.json({
     userId: targetUserId,
-    confirmedPoints,
+    confirmedPoints: balance.confirmedPoints,
     pendingPotentialPoints,
-    reservedPayoutPoints,
-    availablePoints: Math.max(confirmedPoints - reservedPayoutPoints, 0),
+    reservedPayoutPoints: balance.reservedPoints,
+    availablePoints: balance.eligiblePoints,
+    // Reported separately and deliberately excluded from availablePoints: a
+    // migrated legacy balance is preserved and visible, but is not payable
+    // until an approved equivalence ratio credits it. Folding it into the
+    // spendable figure would create value from an unverified assumption.
+    legacyCarryoverPendingPoints: balance.legacyCarryoverPendingPoints,
+    legacyCarryoverConfirmedPoints: balance.legacyCarryoverConfirmedPoints,
+    payablePoints: balance.eligiblePoints,
+  });
+});
+
+const legacyReconciliationSchema = z.object({
+  carryoverId: z.string().trim().min(1),
+  /** Approved equivalence ratio. 1.0 means parity; any other value is handled identically. */
+  conversionRatio: z.number().positive().max(1000),
+  reconciliationRuleVersion: z.string().trim().min(3).max(60),
+  note: z.string().trim().max(500).optional(),
+});
+
+/**
+ * Applies an approved equivalence ratio to a preserved legacy balance.
+ *
+ * This is the only path that turns a carryover into spendable points, and it is
+ * Super Admin only. History is never rewritten: the legacy rows stay untouched,
+ * the carryover keeps its original `legacyPointBalance`, and the credit is
+ * posted as a new immutable ledger entry recording the ratio and rule version
+ * that produced it. A different ratio later is another explicit event, not an
+ * edit of this one.
+ */
+router.post("/rewards/legacy-carryover/reconcile", requireAuth, requireRole("SUPER_ADMIN"), async (request, response) => {
+  const parsed = legacyReconciliationSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ message: "Invalid reconciliation payload.", errors: parsed.error.flatten() });
+  }
+
+  const carryover = await prisma.legacyBalanceCarryover.findUnique({ where: { id: parsed.data.carryoverId } });
+  if (!carryover) {
+    return response.status(404).json({ message: "Legacy carryover was not found." });
+  }
+  if (carryover.status !== "LEGACY_CARRYOVER_PENDING") {
+    return response.status(409).json({
+      message: `Carryover is ${carryover.status} and cannot be reconciled again.`,
+    });
+  }
+
+  const creditedPoints = Math.floor(carryover.legacyPointBalance * parsed.data.conversionRatio);
+
+  const result = await prisma.$transaction(async (transaction) => {
+    const rewardEvent = await transaction.rewardEvent.upsert({
+      where: {
+        eventType_sourceType_sourceId: {
+          eventType: RewardQualifyingEvent.LEGACY_BALANCE_RECONCILED,
+          sourceType: "LegacyBalanceCarryover",
+          sourceId: carryover.id,
+        },
+      },
+      create: {
+        eventType: RewardQualifyingEvent.LEGACY_BALANCE_RECONCILED,
+        sourceType: "LegacyBalanceCarryover",
+        sourceId: carryover.id,
+        status: RewardEventStatus.PENDING,
+        idempotencyKey: `legacy-carryover:${carryover.id}`,
+      },
+      update: {},
+    });
+
+    const entry = await transaction.rewardLedgerEntry.upsert({
+      where: {
+        userId_sourceEventId_category: {
+          userId: carryover.userId,
+          sourceEventId: rewardEvent.id,
+          category: RewardLedgerCategory.LEGACY_CARRYOVER,
+        },
+      },
+      create: {
+        userId: carryover.userId,
+        points: creditedPoints,
+        category: RewardLedgerCategory.LEGACY_CARRYOVER,
+        sourceEventType: RewardQualifyingEvent.LEGACY_BALANCE_RECONCILED,
+        sourceEventId: rewardEvent.id,
+        description:
+          `Legacy balance reconciled: ${carryover.legacyPointBalance} legacy points x ${parsed.data.conversionRatio} ` +
+          `= ${creditedPoints} points (${parsed.data.reconciliationRuleVersion})`,
+      },
+      update: {},
+    });
+
+    await transaction.rewardEvent.update({
+      where: { id: rewardEvent.id },
+      data: { status: RewardEventStatus.PROCESSED, processedAt: new Date() },
+    });
+
+    const updated = await transaction.legacyBalanceCarryover.update({
+      where: { id: carryover.id },
+      data: {
+        status: "LEGACY_CARRYOVER_CONFIRMED",
+        conversionRatio: new Prisma.Decimal(parsed.data.conversionRatio),
+        reconciliationRuleVersion: parsed.data.reconciliationRuleVersion,
+        creditedPoints,
+        reconciledLedgerEntryId: entry.id,
+        reconciledAt: new Date(),
+        reconciledByUserId: request.authUser!.id,
+      },
+    });
+
+    await transaction.legacyMigrationBatch.update({
+      where: { id: carryover.migrationBatchId },
+      data: {
+        pendingTotalPoints: { decrement: carryover.legacyPointBalance },
+        reconciledTotalPoints: { increment: creditedPoints },
+      },
+    });
+
+    await createAuditLog(transaction, {
+      actorUserId: request.authUser!.id,
+      action: "LEGACY_BALANCE_RECONCILED",
+      targetType: "LegacyBalanceCarryover",
+      targetId: carryover.id,
+      metadata: {
+        sourceBalance: carryover.legacyPointBalance,
+        conversionRatio: parsed.data.conversionRatio,
+        creditedPoints,
+        ruleVersion: parsed.data.reconciliationRuleVersion,
+        ledgerEntryId: entry.id,
+        note: parsed.data.note || null,
+      },
+    });
+
+    return updated;
+  });
+
+  return response.json({
+    message: "Legacy balance reconciled and credited to the authoritative ledger.",
+    carryover: {
+      id: result.id,
+      userId: result.userId,
+      status: result.status,
+      sourceBalance: carryover.legacyPointBalance,
+      conversionRatio: parsed.data.conversionRatio,
+      creditedPoints: result.creditedPoints,
+      ruleVersion: result.reconciliationRuleVersion,
+    },
+  });
+});
+
+/** Read-only view of preserved legacy balances and cutover totals. */
+router.get("/rewards/legacy-carryover", requireAuth, requireRole("SUPER_ADMIN"), async (_request, response) => {
+  const [carryovers, batches] = await Promise.all([
+    prisma.legacyBalanceCarryover.findMany({
+      include: { user: { select: { name: true, email: true } } },
+      orderBy: { legacyPointBalance: "desc" },
+      take: 200,
+    }),
+    prisma.legacyMigrationBatch.findMany({ orderBy: { executedAt: "desc" } }),
+  ]);
+
+  return response.json({
+    batches: batches.map((batch) => ({
+      id: batch.id,
+      executedAt: batch.executedAt.toISOString(),
+      sourceLedger: batch.sourceLedger,
+      memberCount: batch.memberCount,
+      beforeTotalPoints: batch.beforeTotalPoints,
+      migratedTotalPoints: batch.migratedTotalPoints,
+      pendingTotalPoints: batch.pendingTotalPoints,
+      reconciledTotalPoints: batch.reconciledTotalPoints,
+      snapshotChecksum: batch.snapshotChecksum,
+    })),
+    carryovers: carryovers.map((entry) => ({
+      id: entry.id,
+      userId: entry.userId,
+      memberName: entry.user.name,
+      legacyPointBalance: entry.legacyPointBalance,
+      status: entry.status,
+      conversionRatio: entry.conversionRatio ? entry.conversionRatio.toString() : null,
+      creditedPoints: entry.creditedPoints,
+      reconciliationRuleVersion: entry.reconciliationRuleVersion,
+      rowChecksum: entry.rowChecksum,
+    })),
   });
 });
 
@@ -1848,6 +2027,17 @@ router.patch("/payout/assignments/:assignmentId/status", requireAuth, requireRol
   }
   if (parsed.data.status === "PAID" && !parsed.data.paymentReference) {
     return response.status(400).json({ message: "paymentReference is required when marking a payout paid." });
+  }
+
+  // Marking an assignment PAID moves money. Gated by the kill switch in every
+  // environment, so neither this path nor the redemption path can pay a member
+  // until an operator explicitly enables execution.
+  if (parsed.data.status === "PAID" && !isPayoutExecutionEnabled()) {
+    return response.status(409).json({
+      message:
+        "Payout execution is disabled. Set PAYOUT_EXECUTION_ENABLED=true only after reconciliation and readiness gates have passed.",
+      payoutExecutionEnabled: false,
+    });
   }
 
   const result = await prisma.$transaction(async (transaction) => {
