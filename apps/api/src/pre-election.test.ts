@@ -1016,6 +1016,86 @@ export async function runPreElectionTests() {
     assert.equal(storedCarryover.reconciliationRuleVersion, "legacy-reconciliation-v1");
     assert.ok(storedCarryover.reconciledLedgerEntryId);
 
+    // Reconciling CONCURRENTLY must not credit twice either. The PENDING check
+    // runs before the transaction, so every request passes it; what stops the
+    // losers is the conditional claim inside. The audit could not verify from
+    // source alone whether that claim is a real compare-and-swap, so it is
+    // exercised here rather than argued: under READ COMMITTED a loser blocks on
+    // the row lock, re-evaluates its WHERE against the committed row, and
+    // matches nothing.
+    const raceMember = await registerMember("903", null, "e".repeat(64));
+    const raceBatch = await prisma.legacyMigrationBatch.create({
+      data: {
+        memberCount: 1,
+        beforeTotalPoints: 200,
+        migratedTotalPoints: 200,
+        pendingTotalPoints: 200,
+        snapshotChecksum: "race-checksum",
+      },
+    });
+    const raceCarryover = await prisma.legacyBalanceCarryover.create({
+      data: {
+        userId: raceMember.id,
+        migrationBatchId: raceBatch.id,
+        sourceRowIdsJson: ["legacy-row-race"],
+        legacyPointBalance: 200,
+        rowChecksum: "race-row",
+        status: "LEGACY_CARRYOVER_PENDING",
+      },
+    });
+
+    const raced = await Promise.all(
+      [1, 2, 3].map(() =>
+        apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
+          method: "POST",
+          token: superAdminToken,
+          body: {
+            carryoverId: raceCarryover.id,
+            conversionRatio: 0.5,
+            reconciliationRuleVersion: "legacy-reconciliation-concurrent",
+          },
+        }),
+      ),
+    );
+    assert.equal(
+      raced.filter((result) => result.status === 200).length,
+      1,
+      `exactly one concurrent reconciliation may succeed: ${JSON.stringify(raced.map((r) => r.status))}`,
+    );
+    assert.equal(raced.filter((result) => result.status === 409).length, 2);
+
+    assert.equal(
+      await prisma.rewardLedgerEntry.count({ where: { userId: raceMember.id, category: "LEGACY_CARRYOVER" } }),
+      1,
+      "a concurrent reconciliation must post exactly one credit",
+    );
+    const racedBatch = await prisma.legacyMigrationBatch.findUniqueOrThrow({ where: { id: raceBatch.id } });
+    assert.equal(
+      racedBatch.pendingTotalPoints,
+      0,
+      "the batch counters must move exactly once, not once per concurrent request",
+    );
+    assert.equal(racedBatch.reconciledTotalPoints, 100);
+
+    // One carryover per member is now a database constraint, not a check the
+    // cutover script performs outside its own write transaction. Without it a
+    // second batch credits the same legacy rows again.
+    await assert.rejects(
+      () =>
+        prisma.legacyBalanceCarryover.create({
+          data: {
+            userId: raceMember.id,
+            migrationBatchId: batch.id,
+            sourceRowIdsJson: ["legacy-row-duplicate"],
+            legacyPointBalance: 200,
+            rowChecksum: "duplicate-carryover-row",
+            status: "LEGACY_CARRYOVER_PENDING",
+          },
+        }),
+      /Unique constraint/i,
+      "a member must not be able to hold two carryovers for the same legacy balance",
+    );
+
     // Reconciling twice must not credit twice.
     const doubleReconcile = await apiRequest("/pre-election/rewards/legacy-carryover/reconcile", {
       method: "POST",

@@ -49,6 +49,10 @@
     {
       "name": "20260811160000_payout_execution_chokepoint",
       "sha256": "b1b77dee01d7969cbae914a2d61f94511017a883e4d7cada571c9f97f7f7a9e8"
+    },
+    {
+      "name": "20260811190000_one_carryover_per_member",
+      "sha256": "d769d52017fbca0328aae423948df8a8fc3d9890a88f6af99e76694e0869b770"
     }
   ]
 }

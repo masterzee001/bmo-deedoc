@@ -317,6 +317,13 @@ model LegacyBalanceCarryover {
 
   /// One carryover per member per batch: a member cannot be migrated twice in
   /// the same run, which is the primary double-counting guard.
+  /// One carryover per member, ever — the cutover's own rule, enforced by the
+  /// database rather than by a read performed outside the write transaction.
+  /// Without it a second migration batch creates a second carryover for the
+  /// same member, and because every reconciliation identity derives from the
+  /// carryover id, both reconcile successfully and credit the same legacy rows
+  /// twice.
+  @@unique([userId])
   @@unique([userId, migrationBatchId])
   @@index([status])
   @@index([userId])
