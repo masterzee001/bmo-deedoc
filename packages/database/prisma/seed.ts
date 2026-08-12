@@ -15,7 +15,7 @@ import {
   RewardType,
   UserRole,
 } from "@prisma/client";
-import { normalizeEmail } from "@pics-nigeria/shared";
+import { OGUN_STATE_ID, normalizeEmail } from "@pics-nigeria/shared";
 
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
@@ -31,41 +31,95 @@ if (databaseUrl?.startsWith("file:")) {
 
 const prisma = new PrismaClient();
 
-const territorySeed = {
-  geoPoliticalZone: { id: "seed-zone-south-west", name: "South West" },
-  state: { id: "seed-state-lagos", name: "Lagos" },
-  district: { id: "seed-senatorial-lagos-central", name: "Lagos Central", stateId: "seed-state-lagos" },
-  federalConstituency: {
-    id: "seed-fed-ikeja",
-    name: "Ikeja Federal Constituency",
-    stateId: "seed-state-lagos",
-    senatorialDistrictId: "seed-senatorial-lagos-central",
-  },
-  lga: { id: "seed-lga-ikeja", name: "Ikeja", stateId: "seed-state-lagos" },
-  stateConstituency: {
-    id: "seed-state-const-ikeja-1",
-    name: "Ikeja I",
-    stateId: "seed-state-lagos",
-    lgaId: "seed-lga-ikeja",
-  },
-  wards: [
-    { id: "seed-ward-ikeja-ward-a", name: "Ward A", stateId: "seed-state-lagos", lgaId: "seed-lga-ikeja" },
-    { id: "seed-ward-ikeja-ward-b", name: "Ward B", stateId: "seed-state-lagos", lgaId: "seed-lga-ikeja" },
-  ],
-  pollingUnit: {
-    id: "seed-pu-ikeja-001",
-    name: "Polling Unit 001",
-    stateId: "seed-state-lagos",
-    lgaId: "seed-lga-ikeja",
-    wardId: "seed-ward-ikeja-ward-a",
-  },
+/**
+ * Seed territory, resolved from the real Ogun reference data.
+ *
+ * The platform operates in Ogun only (feature 001) and Ogun's structure is a
+ * fixed, verified fact — nine federal constituencies, twenty LGAs and so on,
+ * asserted by the reference-completeness checks. Inventing a seed constituency
+ * inside Ogun therefore does not add convenience, it corrupts the reference
+ * contract. So the seed attaches to territory that already exists rather than
+ * fabricating its own, and only falls back to creating rows when the Ogun
+ * reference set has not been imported yet.
+ */
+type SeedTerritory = {
+  stateId: string;
+  senatorialDistrictId: string;
+  federalConstituencyId: string;
+  stateConstituencyId: string;
+  lgaId: string;
+  wardIds: string[];
+  pollingUnitId: string;
 };
+
+/**
+ * Sample accounts need a place to stand, and in Ogun that place is defined by
+ * authoritative reference data. When it has not been loaded the seed creates
+ * users without territory-bound profiles rather than inventing an LGA or a
+ * state constituency — those counts are verified, and an invented row fails the
+ * command-hierarchy check for the entire platform.
+ */
+
+/** Ogun's own geo-political zone, read from reference data rather than assumed. */
+async function ogunZoneId(): Promise<string | undefined> {
+  const ogun = await prisma.state.findUnique({
+    where: { id: OGUN_STATE_ID },
+    select: { geoPoliticalZoneId: true },
+  });
+  return ogun?.geoPoliticalZoneId || undefined;
+}
+
+async function resolveSeedTerritory(): Promise<SeedTerritory | null> {
+  await prisma.state.upsert({
+    where: { id: OGUN_STATE_ID },
+    update: {},
+    create: { id: OGUN_STATE_ID, name: "Ogun" },
+  });
+
+  const [district, federal, lga, stateConstituency] = await Promise.all([
+    prisma.senatorialDistrict.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.federalConstituency.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.lGA.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+    prisma.stateConstituency.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { name: "asc" } }),
+  ]);
+  if (!district || !federal || !lga || !stateConstituency) {
+    return null;
+  }
+
+  const wards = await prisma.ward.findMany({
+    where: { stateId: OGUN_STATE_ID, lgaId: lga.id },
+    orderBy: { name: "asc" },
+    take: 2,
+  });
+  if (wards.length === 0) {
+    return null;
+  }
+
+  const pollingUnit = await prisma.pollingUnit.findFirst({
+    where: { stateId: OGUN_STATE_ID, wardId: wards[0].id },
+    orderBy: { name: "asc" },
+  });
+  if (!pollingUnit) {
+    return null;
+  }
+
+  return {
+    stateId: OGUN_STATE_ID,
+    senatorialDistrictId: district.id,
+    federalConstituencyId: federal.id,
+    stateConstituencyId: stateConstituency.id,
+    lgaId: lga.id,
+    wardIds: wards.map((ward) => ward.id),
+    pollingUnitId: pollingUnit.id,
+  };
+}
+
 
 const sampleAccounts = {
   stateAdmin: {
     email: "state.admin@pics.ng",
     password: "StateAdmin123!",
-    name: "Lagos State Admin",
+    name: "Ogun State Admin",
   },
   candidate: {
     email: "candidate@pics.ng",
@@ -85,7 +139,6 @@ const sampleAccounts = {
     phone: "08030000000",
     voterCardNumber: "VIN-SEEDED-0001",
     referralCode: "PICSSEED01",
-    pollingUnitId: "seed-pu-ikeja-001",
   },
 };
 
@@ -122,66 +175,12 @@ async function hash(password: string) {
 }
 
 async function main() {
-  await prisma.geoPoliticalZone.upsert({
-    where: { id: territorySeed.geoPoliticalZone.id },
-    update: territorySeed.geoPoliticalZone,
-    create: territorySeed.geoPoliticalZone,
-  });
-
-  await prisma.state.upsert({
-    where: { id: territorySeed.state.id },
-    update: {
-      ...territorySeed.state,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    },
-    create: {
-      ...territorySeed.state,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    },
-  });
+  const territory = await resolveSeedTerritory();
 
   await prisma.politicalParty.upsert({
     where: { id: sampleParty.id },
     update: sampleParty,
     create: sampleParty,
-  });
-
-  await prisma.senatorialDistrict.upsert({
-    where: { id: territorySeed.district.id },
-    update: territorySeed.district,
-    create: territorySeed.district,
-  });
-
-  await prisma.federalConstituency.upsert({
-    where: { id: territorySeed.federalConstituency.id },
-    update: territorySeed.federalConstituency,
-    create: territorySeed.federalConstituency,
-  });
-
-  await prisma.lGA.upsert({
-    where: { id: territorySeed.lga.id },
-    update: territorySeed.lga,
-    create: territorySeed.lga,
-  });
-
-  await prisma.stateConstituency.upsert({
-    where: { id: territorySeed.stateConstituency.id },
-    update: territorySeed.stateConstituency,
-    create: territorySeed.stateConstituency,
-  });
-
-  for (const ward of territorySeed.wards) {
-    await prisma.ward.upsert({
-      where: { id: ward.id },
-      update: ward,
-      create: ward,
-    });
-  }
-
-  await prisma.pollingUnit.upsert({
-    where: { id: territorySeed.pollingUnit.id },
-    update: territorySeed.pollingUnit,
-    create: territorySeed.pollingUnit,
   });
 
   const bootstrap = getBootstrapConfig();
@@ -210,6 +209,15 @@ async function main() {
         },
       });
 
+  if (!territory) {
+    console.warn(
+      "Ogun reference data is not loaded, so territory-bound sample accounts were skipped. " +
+        "The super admin and political party are seeded; load the authoritative Ogun structure " +
+        "and re-run the seed to create the sample state admin, candidate, agent and member.",
+    );
+    return;
+  }
+
   const stateAdmin = await prisma.user.upsert({
     where: { email: normalizeEmail(sampleAccounts.stateAdmin.email) },
     update: {
@@ -221,14 +229,14 @@ async function main() {
           update: {
             adminLevel: "STATE",
             politicalPartyId: sampleParty.id,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
+            stateId: territory.stateId,
           },
           create: {
             adminLevel: "STATE",
             politicalPartyId: sampleParty.id,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
+            stateId: territory.stateId,
           },
         },
       },
@@ -242,8 +250,8 @@ async function main() {
         create: {
           adminLevel: "STATE",
           politicalPartyId: sampleParty.id,
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          stateId: territorySeed.state.id,
+          geoPoliticalZoneId: (await ogunZoneId()),
+          stateId: territory.stateId,
         },
       },
     },
@@ -260,19 +268,19 @@ async function main() {
         upsert: {
           update: {
             officeType: CandidateOfficeType.HOUSE_OF_REP,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
             politicalPartyId: sampleParty.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
+            stateId: territory.stateId,
+            senatorialDistrictId: territory.senatorialDistrictId,
+            federalConstituencyId: territory.federalConstituencyId,
           },
           create: {
             officeType: CandidateOfficeType.HOUSE_OF_REP,
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
             politicalPartyId: sampleParty.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
+            stateId: territory.stateId,
+            senatorialDistrictId: territory.senatorialDistrictId,
+            federalConstituencyId: territory.federalConstituencyId,
           },
         },
       },
@@ -285,11 +293,11 @@ async function main() {
       candidateProfile: {
         create: {
           officeType: CandidateOfficeType.HOUSE_OF_REP,
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+          geoPoliticalZoneId: (await ogunZoneId()),
           politicalPartyId: sampleParty.id,
-          stateId: territorySeed.state.id,
-          senatorialDistrictId: territorySeed.district.id,
-          federalConstituencyId: territorySeed.federalConstituency.id,
+          stateId: territory.stateId,
+          senatorialDistrictId: territory.senatorialDistrictId,
+          federalConstituencyId: territory.federalConstituencyId,
         },
       },
     },
@@ -305,25 +313,25 @@ async function main() {
       agentProfile: {
         upsert: {
           update: {
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-            pollingUnitId: territorySeed.pollingUnit.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
+            stateId: territory.stateId,
+            senatorialDistrictId: territory.senatorialDistrictId,
+            federalConstituencyId: territory.federalConstituencyId,
+            lgaId: territory.lgaId,
+            wardId: territory.wardIds[0],
+            stateConstituencyId: territory.stateConstituencyId,
+            pollingUnitId: territory.pollingUnitId,
             assignedAdminUserId: stateAdmin.id,
           },
           create: {
-            geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-            stateId: territorySeed.state.id,
-            senatorialDistrictId: territorySeed.district.id,
-            federalConstituencyId: territorySeed.federalConstituency.id,
-            lgaId: territorySeed.lga.id,
-            wardId: territorySeed.wards[0].id,
-            stateConstituencyId: territorySeed.stateConstituency.id,
-            pollingUnitId: territorySeed.pollingUnit.id,
+            geoPoliticalZoneId: (await ogunZoneId()),
+            stateId: territory.stateId,
+            senatorialDistrictId: territory.senatorialDistrictId,
+            federalConstituencyId: territory.federalConstituencyId,
+            lgaId: territory.lgaId,
+            wardId: territory.wardIds[0],
+            stateConstituencyId: territory.stateConstituencyId,
+            pollingUnitId: territory.pollingUnitId,
             assignedAdminUserId: stateAdmin.id,
           },
         },
@@ -337,14 +345,14 @@ async function main() {
       role: UserRole.AGENT,
       agentProfile: {
         create: {
-          geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-          stateId: territorySeed.state.id,
-          senatorialDistrictId: territorySeed.district.id,
-          federalConstituencyId: territorySeed.federalConstituency.id,
-          lgaId: territorySeed.lga.id,
-          wardId: territorySeed.wards[0].id,
-          stateConstituencyId: territorySeed.stateConstituency.id,
-          pollingUnitId: territorySeed.pollingUnit.id,
+          geoPoliticalZoneId: (await ogunZoneId()),
+          stateId: territory.stateId,
+          senatorialDistrictId: territory.senatorialDistrictId,
+          federalConstituencyId: territory.federalConstituencyId,
+          lgaId: territory.lgaId,
+          wardId: territory.wardIds[0],
+          stateConstituencyId: territory.stateConstituencyId,
+          pollingUnitId: territory.pollingUnitId,
           assignedAdminUserId: stateAdmin.id,
         },
       },
@@ -354,27 +362,27 @@ async function main() {
   const seededVoterProfile: Prisma.VoterProfileUncheckedCreateWithoutUserInput = {
     voterCardNumber: sampleAccounts.voter.voterCardNumber,
     referralCode: sampleAccounts.voter.referralCode,
-    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    stateId: territorySeed.state.id,
-    senatorialDistrictId: territorySeed.district.id,
-    federalConstituencyId: territorySeed.federalConstituency.id,
-    lgaId: territorySeed.lga.id,
-    wardId: territorySeed.wards[0].id,
-    stateConstituencyId: territorySeed.stateConstituency.id,
-    pollingUnitId: sampleAccounts.voter.pollingUnitId,
+    geoPoliticalZoneId: (await ogunZoneId()),
+    stateId: territory.stateId,
+    senatorialDistrictId: territory.senatorialDistrictId,
+    federalConstituencyId: territory.federalConstituencyId,
+    lgaId: territory.lgaId,
+    wardId: territory.wardIds[0],
+    stateConstituencyId: territory.stateConstituencyId,
+    pollingUnitId: territory.pollingUnitId,
   };
 
   const seededVoterProfileUpdate: Prisma.VoterProfileUncheckedUpdateWithoutUserInput = {
     voterCardNumber: sampleAccounts.voter.voterCardNumber,
     referralCode: sampleAccounts.voter.referralCode,
-    geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-    stateId: territorySeed.state.id,
-    senatorialDistrictId: territorySeed.district.id,
-    federalConstituencyId: territorySeed.federalConstituency.id,
-    lgaId: territorySeed.lga.id,
-    wardId: territorySeed.wards[0].id,
-    stateConstituencyId: territorySeed.stateConstituency.id,
-    pollingUnitId: sampleAccounts.voter.pollingUnitId,
+    geoPoliticalZoneId: (await ogunZoneId()),
+    stateId: territory.stateId,
+    senatorialDistrictId: territory.senatorialDistrictId,
+    federalConstituencyId: territory.federalConstituencyId,
+    lgaId: territory.lgaId,
+    wardId: territory.wardIds[0],
+    stateConstituencyId: territory.stateConstituencyId,
+    pollingUnitId: territory.pollingUnitId,
   };
 
   const voter = await prisma.user.upsert({
@@ -447,10 +455,10 @@ async function main() {
       description: "Starter sentiment poll",
       candidateUserId: candidate.id,
       officeType: CandidateOfficeType.HOUSE_OF_REP,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      federalConstituencyId: territory.federalConstituencyId,
       createdByUserId: superAdmin.id,
       isActive: true,
     },
@@ -460,10 +468,10 @@ async function main() {
       description: "Starter sentiment poll",
       candidateUserId: candidate.id,
       officeType: CandidateOfficeType.HOUSE_OF_REP,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      federalConstituencyId: territory.federalConstituencyId,
       createdByUserId: superAdmin.id,
       isActive: true,
     },
@@ -504,9 +512,9 @@ async function main() {
       candidateUserId: candidate.id,
       title: "Our campaign priorities",
       content: "We are focused on jobs, accountability, and local development.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      federalConstituencyId: territory.federalConstituencyId,
       isPublished: true,
     },
     create: {
@@ -515,9 +523,9 @@ async function main() {
       candidateUserId: candidate.id,
       title: "Our campaign priorities",
       content: "We are focused on jobs, accountability, and local development.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      federalConstituencyId: territorySeed.federalConstituency.id,
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      federalConstituencyId: territory.federalConstituencyId,
       isPublished: true,
     },
   });
@@ -527,27 +535,27 @@ async function main() {
     update: {
       voterUserId: voter.id,
       candidateUserId: candidate.id,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
       type: "GENERAL_FEEDBACK",
       message: "Road access and youth employment should stay top priorities.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
     },
     create: {
       id: "seed-feedback-1",
       voterUserId: voter.id,
       candidateUserId: candidate.id,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
       type: "GENERAL_FEEDBACK",
       message: "Road access and youth employment should stay top priorities.",
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
     },
   });
 
@@ -560,11 +568,11 @@ async function main() {
       longitude: 3.3515,
       accuracyMeters: 15,
       note: "Seeded morning check-in",
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
     },
     create: {
       id: "seed-agent-activity-1",
@@ -574,11 +582,11 @@ async function main() {
       longitude: 3.3515,
       accuracyMeters: 15,
       note: "Seeded morning check-in",
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
     },
   });
 
@@ -593,12 +601,12 @@ async function main() {
       status: IncidentStatus.OPEN,
       latitude: 6.6018,
       longitude: 3.3515,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
       assignedAdminUserId: stateAdmin.id,
       escalatedAt: new Date("2026-03-09T10:00:00.000Z"),
       escalatedByUserId: superAdmin.id,
@@ -614,12 +622,12 @@ async function main() {
       status: IncidentStatus.OPEN,
       latitude: 6.6018,
       longitude: 3.3515,
-      geoPoliticalZoneId: territorySeed.geoPoliticalZone.id,
-      stateId: territorySeed.state.id,
-      senatorialDistrictId: territorySeed.district.id,
-      lgaId: territorySeed.lga.id,
-      wardId: territorySeed.wards[0].id,
-      pollingUnitId: territorySeed.pollingUnit.id,
+      geoPoliticalZoneId: (await ogunZoneId()),
+      stateId: territory.stateId,
+      senatorialDistrictId: territory.senatorialDistrictId,
+      lgaId: territory.lgaId,
+      wardId: territory.wardIds[0],
+      pollingUnitId: territory.pollingUnitId,
       assignedAdminUserId: stateAdmin.id,
       escalatedAt: new Date("2026-03-09T10:00:00.000Z"),
       escalatedByUserId: superAdmin.id,

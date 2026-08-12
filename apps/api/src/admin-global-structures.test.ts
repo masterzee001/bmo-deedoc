@@ -66,8 +66,7 @@ async function createAdminFixture(token: string, suffix: string) {
       password: "TestAdmin123!",
       adminLevel: "STATE",
       politicalPartyId: "seed-party-independent-alliance",
-      geoPoliticalZoneId: "seed-zone-south-west",
-      stateId: "seed-state-lagos",
+      stateId: OGUN_FIXTURE.stateId,
     },
   });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
@@ -86,8 +85,7 @@ async function createCandidateFixture(token: string, suffix: string) {
       password: "TestCandidate123!",
       officeType: "GOVERNORSHIP",
       politicalPartyId: "seed-party-independent-alliance",
-      geoPoliticalZoneId: "seed-zone-south-west",
-      stateId: "seed-state-lagos",
+      stateId: OGUN_FIXTURE.stateId,
     },
   });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
@@ -106,10 +104,10 @@ async function createAgentFixture(token: string, suffix: string) {
       password: "TestAgent123!",
       phone: "08031111111",
       politicalPartyId: "seed-party-independent-alliance",
-      stateId: "seed-state-lagos",
-      lgaId: "seed-lga-ikeja",
-      wardId: "seed-ward-ikeja-ward-a",
-      pollingUnitId: "seed-pu-ikeja-001",
+      stateId: OGUN_FIXTURE.stateId,
+      lgaId: OGUN_FIXTURE.lgaId,
+      wardId: OGUN_FIXTURE.wardId,
+      pollingUnitId: OGUN_FIXTURE.pollingUnitId,
     },
   });
   assert.equal(created.status, 201, JSON.stringify(created.payload));
@@ -179,7 +177,7 @@ const cases: Case[] = [
     run: async () => {
       const token = await login("superadmin@pics.ng", "ChangeMe123!");
 
-      const deleted = await apiRequest("/admin/geo-political-zones/seed-zone-south-west", {
+      const deleted = await apiRequest("/admin/geo-political-zones/ng-zone-south-west", {
         method: "DELETE",
         token,
       });
@@ -252,14 +250,14 @@ const cases: Case[] = [
       });
       assert.equal(createZone.status, 403);
 
-      const updateZone = await apiRequest("/admin/geo-political-zones/seed-zone-south-west", {
+      const updateZone = await apiRequest("/admin/geo-political-zones/ng-zone-south-west", {
         method: "PATCH",
         token,
         body: { name: "Should Not Work" },
       });
       assert.equal(updateZone.status, 403);
 
-      const deleteZone = await apiRequest("/admin/geo-political-zones/seed-zone-south-west", {
+      const deleteZone = await apiRequest("/admin/geo-political-zones/ng-zone-south-west", {
         method: "DELETE",
         token,
       });
@@ -306,10 +304,9 @@ const cases: Case[] = [
           name: "Updated Admin",
           adminLevel: "WARD",
           politicalPartyId: "seed-party-independent-alliance",
-          geoPoliticalZoneId: "seed-zone-south-west",
-          stateId: "seed-state-lagos",
-          lgaId: "seed-lga-ikeja",
-          wardId: "seed-ward-ikeja-ward-a",
+          stateId: OGUN_FIXTURE.stateId,
+          lgaId: OGUN_FIXTURE.lgaId,
+          wardId: OGUN_FIXTURE.wardId,
         },
       });
       assert.equal(updatedAdmin.status, 200, JSON.stringify(updatedAdmin.payload));
@@ -322,9 +319,9 @@ const cases: Case[] = [
           name: "Updated Candidate",
           officeType: "HOUSE_OF_REP",
           politicalPartyId: "seed-party-independent-alliance",
-          geoPoliticalZoneId: "seed-zone-south-west",
-          stateId: "seed-state-lagos",
-          federalConstituencyId: "seed-fed-ikeja",
+          stateId: OGUN_FIXTURE.stateId,
+          senatorialDistrictId: OGUN_FIXTURE.senatorialDistrictId,
+          federalConstituencyId: OGUN_FIXTURE.federalConstituencyId,
         },
       });
       assert.equal(updatedCandidate.status, 200, JSON.stringify(updatedCandidate.payload));
@@ -337,10 +334,10 @@ const cases: Case[] = [
           name: "Updated Agent",
           phone: "08032223333",
           politicalPartyId: "seed-party-independent-alliance",
-          stateId: "seed-state-lagos",
-          lgaId: "seed-lga-ikeja",
-          wardId: "seed-ward-ikeja-ward-a",
-          pollingUnitId: "seed-pu-ikeja-001",
+          stateId: OGUN_FIXTURE.stateId,
+          lgaId: OGUN_FIXTURE.lgaId,
+          wardId: OGUN_FIXTURE.wardId,
+          pollingUnitId: OGUN_FIXTURE.pollingUnitId,
         },
       });
       assert.equal(updatedAgent.status, 200, JSON.stringify(updatedAgent.payload));
@@ -364,10 +361,10 @@ const cases: Case[] = [
           name: "Scoped Agent Update",
           phone: "08034445555",
           politicalPartyId: "seed-party-independent-alliance",
-          stateId: "seed-state-lagos",
-          lgaId: "seed-lga-ikeja",
-          wardId: "seed-ward-ikeja-ward-a",
-          pollingUnitId: "seed-pu-ikeja-001",
+          stateId: OGUN_FIXTURE.stateId,
+          lgaId: OGUN_FIXTURE.lgaId,
+          wardId: OGUN_FIXTURE.wardId,
+          pollingUnitId: OGUN_FIXTURE.pollingUnitId,
         },
       });
       assert.equal(updatedAgent.status, 200, JSON.stringify(updatedAgent.payload));
@@ -380,8 +377,7 @@ const cases: Case[] = [
           name: "Denied",
           adminLevel: "STATE",
           politicalPartyId: "seed-party-independent-alliance",
-          geoPoliticalZoneId: "seed-zone-south-west",
-          stateId: "seed-state-lagos",
+          stateId: OGUN_FIXTURE.stateId,
         },
       });
       assert.equal(deniedAdmin.status, 403, JSON.stringify(deniedAdmin.payload));
@@ -393,8 +389,7 @@ const cases: Case[] = [
           name: "Denied",
           officeType: "GOVERNORSHIP",
           politicalPartyId: "seed-party-independent-alliance",
-          geoPoliticalZoneId: "seed-zone-south-west",
-          stateId: "seed-state-lagos",
+          stateId: OGUN_FIXTURE.stateId,
         },
       });
       assert.equal(deniedCandidate.status, 403, JSON.stringify(deniedCandidate.payload));
@@ -495,54 +490,59 @@ const cases: Case[] = [
   },
 ];
 
+/**
+ * Ogun territory for fixtures, resolved from reference data.
+ *
+ * Creating territory inside Ogun is not an option: its structure is verified
+ * (20 LGAs, 26 state constituencies, and so on) and the organization-tree
+ * integrity check fails the moment a suite invents an extra one. Earlier this
+ * fixture did create its own, which is what pushed the LGA count to 21.
+ */
 const OGUN_FIXTURE = {
   stateId: "ng-state-ogun",
-  lgaId: "global-structures-ogun-lga",
-  wardId: "global-structures-ogun-ward",
-  pollingUnitId: "global-structures-ogun-pu",
+  senatorialDistrictId: "",
+  federalConstituencyId: "",
+  stateConstituencyId: "",
+  lgaId: "",
+  wardId: "",
+  pollingUnitId: "",
 };
 
-/**
- * Member registration is Ogun-only (feature 001), so a member fixture cannot be
- * created in the seeded Lagos chain any more. This provides the minimum Ogun
- * territory the registration endpoint will accept.
- */
-async function ensureOgunTerritory() {
-  await prisma.state.upsert({
-    where: { id: OGUN_FIXTURE.stateId },
-    update: {},
-    create: { id: OGUN_FIXTURE.stateId, name: "Ogun" },
+async function resolveOgunFixture() {
+  const [district, federal, lga, stateConstituency] = await Promise.all([
+    prisma.senatorialDistrict.findFirst({ where: { stateId: OGUN_FIXTURE.stateId }, orderBy: { name: "asc" } }),
+    prisma.federalConstituency.findFirst({ where: { stateId: OGUN_FIXTURE.stateId }, orderBy: { name: "asc" } }),
+    prisma.lGA.findFirst({ where: { stateId: OGUN_FIXTURE.stateId }, orderBy: { name: "asc" } }),
+    prisma.stateConstituency.findFirst({ where: { stateId: OGUN_FIXTURE.stateId }, orderBy: { name: "asc" } }),
+  ]);
+  if (!district || !federal || !lga || !stateConstituency) {
+    throw new Error("Ogun reference data must be loaded before this suite.");
+  }
+  const ward = await prisma.ward.findFirst({
+    where: { stateId: OGUN_FIXTURE.stateId, lgaId: lga.id },
+    orderBy: { name: "asc" },
   });
-  await prisma.lGA.upsert({
-    where: { id: OGUN_FIXTURE.lgaId },
-    update: {},
-    create: { id: OGUN_FIXTURE.lgaId, name: "Global Structures Ogun LGA", stateId: OGUN_FIXTURE.stateId },
+  if (!ward) {
+    throw new Error("Ogun wards must be loaded before this suite.");
+  }
+  const pollingUnit = await prisma.pollingUnit.findFirst({
+    where: { stateId: OGUN_FIXTURE.stateId, wardId: ward.id },
+    orderBy: { name: "asc" },
   });
-  await prisma.ward.upsert({
-    where: { id: OGUN_FIXTURE.wardId },
-    update: {},
-    create: {
-      id: OGUN_FIXTURE.wardId,
-      name: "Global Structures Ogun Ward",
-      stateId: OGUN_FIXTURE.stateId,
-      lgaId: OGUN_FIXTURE.lgaId,
-    },
-  });
-  await prisma.pollingUnit.upsert({
-    where: { id: OGUN_FIXTURE.pollingUnitId },
-    update: {},
-    create: {
-      id: OGUN_FIXTURE.pollingUnitId,
-      name: "Global Structures Ogun PU",
-      stateId: OGUN_FIXTURE.stateId,
-      lgaId: OGUN_FIXTURE.lgaId,
-      wardId: OGUN_FIXTURE.wardId,
-    },
-  });
+  if (!pollingUnit) {
+    throw new Error("Ogun polling units must be loaded before this suite.");
+  }
+
+  OGUN_FIXTURE.senatorialDistrictId = district.id;
+  OGUN_FIXTURE.federalConstituencyId = federal.id;
+  OGUN_FIXTURE.lgaId = lga.id;
+  OGUN_FIXTURE.stateConstituencyId = stateConstituency.id;
+  OGUN_FIXTURE.wardId = ward.id;
+  OGUN_FIXTURE.pollingUnitId = pollingUnit.id;
 }
 
 async function setup() {
-  await ensureOgunTerritory();
+  await resolveOgunFixture();
   server = http.createServer(createApp());
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
 
@@ -572,13 +572,6 @@ async function teardown() {
       where: { id: { in: Array.from(createdZoneIds) } },
     });
   }
-
-  // The suites share one database, and other tests assert on Ogun polling-unit
-  // counts. A fixture that outlives its suite becomes another suite's phantom
-  // polling unit, so this territory is removed rather than left behind.
-  await prisma.pollingUnit.deleteMany({ where: { id: OGUN_FIXTURE.pollingUnitId } });
-  await prisma.ward.deleteMany({ where: { id: OGUN_FIXTURE.wardId } });
-  await prisma.lGA.deleteMany({ where: { id: OGUN_FIXTURE.lgaId } });
 
   await prisma.$disconnect();
 

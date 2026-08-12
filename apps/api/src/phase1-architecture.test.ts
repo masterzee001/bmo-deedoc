@@ -26,7 +26,8 @@ type Branch = {
 };
 
 const password = "Phase1Test123!";
-const lgaId = "phase1-test-lga-reference-only";
+/** A real Ogun LGA, resolved at setup. LGA is reference data, not a command level. */
+let lgaId = "";
 const createdCandidateIds = new Set<string>();
 let branches: Branch[] = [];
 let baseUrl = "";
@@ -66,71 +67,47 @@ function testEmail(label: string) {
   return `phase1-test-${label}@pics.ng`;
 }
 
+/**
+ * Builds the command branches this suite exercises from the real Ogun reference
+ * structure.
+ *
+ * It used to synthesise 20 LGAs and 26 state constituencies, because the count
+ * gate demands exactly those numbers and no authoritative Ogun dataset existed.
+ * Now one does, and inventing a parallel structure alongside it simply doubles
+ * every count and blocks the very hierarchy this suite needs.
+ */
 async function createCommandHierarchy() {
-  for (let index = 0; index < 20; index += 1) {
-    const suffix = String(index + 1).padStart(2, "0");
-    const fixtureLgaId = index === 0 ? lgaId : `phase1-test-lga-reference-${suffix}`;
-    await prisma.lGA.upsert({
-      where: { id: fixtureLgaId },
-      update: { name: `Phase 1 Reference LGA ${suffix}`, stateId: OGUN_STATE_ID },
-      create: { id: fixtureLgaId, name: `Phase 1 Reference LGA ${suffix}`, stateId: OGUN_STATE_ID },
-    });
-  }
-  const federalConstituencies = await prisma.federalConstituency.findMany({
-    where: { stateId: OGUN_STATE_ID },
+  const stateConstituencies = await prisma.stateConstituency.findMany({
+    where: {
+      stateId: OGUN_STATE_ID,
+      federalConstituencyId: { not: null },
+      wards: { some: { pollingUnits: { some: {} } } },
+    },
     orderBy: { id: "asc" },
-    select: { id: true, senatorialDistrictId: true },
+    select: {
+      id: true,
+      federalConstituency: { select: { id: true, senatorialDistrictId: true } },
+      wards: {
+        where: { pollingUnits: { some: {} } },
+        orderBy: { id: "asc" },
+        take: 1,
+        select: { id: true, pollingUnits: { orderBy: { id: "asc" }, take: 1, select: { id: true } } },
+      },
+    },
   });
-  assert.ok(federalConstituencies.length >= 2, "Ogun Federal Constituency references are required.");
 
-  branches = [];
-  for (let index = 0; index < 26; index += 1) {
-    const federal = federalConstituencies[index % federalConstituencies.length];
-    const suffix = String(index + 1).padStart(2, "0");
-    const stateConstituencyId = `phase1-test-state-constituency-${suffix}`;
-    const wardId = `phase1-test-ward-${suffix}`;
-    const pollingUnitId = `phase1-test-pu-${suffix}`;
-    await prisma.stateConstituency.upsert({
-      where: { id: stateConstituencyId },
-      update: { federalConstituencyId: federal.id },
-      create: {
-        id: stateConstituencyId,
-        name: `Phase 1 State Constituency ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        federalConstituencyId: federal.id,
-      },
-    });
-    await prisma.ward.upsert({
-      where: { id: wardId },
-      update: { stateConstituencyId },
-      create: {
-        id: wardId,
-        name: `Phase 1 Ward ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        stateConstituencyId,
-      },
-    });
-    await prisma.pollingUnit.upsert({
-      where: { id: pollingUnitId },
-      update: {},
-      create: {
-        id: pollingUnitId,
-        name: `Phase 1 Polling Unit ${suffix}`,
-        stateId: OGUN_STATE_ID,
-        lgaId,
-        wardId,
-      },
-    });
-    branches.push({
-      senatorialDistrictId: federal.senatorialDistrictId,
-      federalConstituencyId: federal.id,
-      stateConstituencyId,
-      wardId,
-      pollingUnitId,
-    });
-  }
+  assert.ok(
+    stateConstituencies.length >= 26,
+    `Ogun reference data must be imported before this suite; found ${stateConstituencies.length} usable state constituencies.`,
+  );
+
+  branches = stateConstituencies.slice(0, 26).map((stateConstituency) => ({
+    senatorialDistrictId: stateConstituency.federalConstituency!.senatorialDistrictId,
+    federalConstituencyId: stateConstituency.federalConstituency!.id,
+    stateConstituencyId: stateConstituency.id,
+    wardId: stateConstituency.wards[0].id,
+    pollingUnitId: stateConstituency.wards[0].pollingUnits[0].id,
+  }));
 }
 
 function coordinatorData(level: CoordinatorLevel, branch: Branch) {
@@ -738,6 +715,9 @@ async function setup() {
     throw new Error("Phase 1 test server did not start.");
   }
   baseUrl = `http://127.0.0.1:${address.port}`;
+  const referenceLga = await prisma.lGA.findFirst({ where: { stateId: OGUN_STATE_ID }, orderBy: { id: "asc" } });
+  assert.ok(referenceLga, "Ogun LGA reference data must be imported before this suite.");
+  lgaId = referenceLga.id;
   await createCommandHierarchy();
   await createTargetFixtures();
   await createLegacyFixtures();

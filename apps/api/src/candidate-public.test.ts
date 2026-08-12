@@ -69,10 +69,9 @@ async function createCandidateFixture(token: string, suffix: string, officeType:
       email,
       password: "TestCandidate123!",
       officeType,
-      geoPoliticalZoneId: "seed-zone-south-west",
-      stateId: "seed-state-lagos",
-      ...(officeType === "CHAIRMANSHIP" ? { lgaId: "seed-lga-ikeja" } : {}),
-      ...(officeType === "COUNCILLOR" ? { lgaId: "seed-lga-ikeja", wardId: "seed-ward-ikeja-ward-a" } : {}),
+      stateId: "ng-state-ogun",
+      ...(officeType === "CHAIRMANSHIP" ? { lgaId: ogunLgaId } : {}),
+      ...(officeType === "COUNCILLOR" ? { lgaId: ogunLgaId, wardId: ogunWardId } : {}),
     },
   });
   assert.equal(created.status, 201);
@@ -208,7 +207,7 @@ const cases: Case[] = [
         },
       });
 
-      const filtered = await apiRequest("/candidate/public?officeType=CHAIRMANSHIP&stateId=seed-state-lagos&search=Public");
+      const filtered = await apiRequest("/candidate/public?officeType=CHAIRMANSHIP&stateId=ng-state-ogun&search=Public");
       assert.equal(filtered.status, 200);
       const candidates = filtered.payload.candidates as Array<{ officeType?: string }>;
       assert.ok(candidates.length >= 1);
@@ -295,7 +294,32 @@ const cases: Case[] = [
   },
 ];
 
+/**
+ * Resolved from reference data rather than hardcoded. Ogun's LGAs and wards come
+ * from the authoritative import, so a fixed id here is a guess about what the
+ * import produced — and it broke the moment the seed stopped inventing its own.
+ */
+let ogunLgaId = "";
+let ogunWardId = "";
+
+async function resolveOgunTerritory() {
+  const lga = await prisma.lGA.findFirst({ where: { stateId: "ng-state-ogun" }, orderBy: { name: "asc" } });
+  if (!lga) {
+    throw new Error("No Ogun LGA is present; reference data must be loaded before this suite.");
+  }
+  ogunLgaId = lga.id;
+  const ward = await prisma.ward.findFirst({
+    where: { stateId: "ng-state-ogun", lgaId: lga.id },
+    orderBy: { name: "asc" },
+  });
+  if (!ward) {
+    throw new Error("No Ogun ward is present; reference data must be loaded before this suite.");
+  }
+  ogunWardId = ward.id;
+}
+
 async function setup() {
+  await resolveOgunTerritory();
   server = http.createServer(createApp());
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
 

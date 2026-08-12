@@ -24,11 +24,11 @@
   "files": {
     "territories": {
       "path": "territories.csv",
-      "sha256": "925091b1a35a781f5c7aceee55558b29065e876ebf45d374e6eb142356b222a7"
+      "sha256": "b2056db8530932c75585e1020e59349d35f965938b8e6948db230f9aaa30a164"
     },
     "commandRelationships": {
       "path": "command-relationships.csv",
-      "sha256": "ebe31b0499ffff9595d709b846e7c83319e4b999a66547fc5d21652d2c2afe9a"
+      "sha256": "01b78c653ed5cd729f2059cdf5ff7142812d1373b4e3c6f133805c83b14beab7"
     },
     "lgaMemberships": {
       "path": "lga-memberships.csv",

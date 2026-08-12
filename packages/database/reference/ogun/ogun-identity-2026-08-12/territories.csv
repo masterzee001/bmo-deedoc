@@ -2641,18 +2641,18 @@ POLLING_UNIT,inec-pu-661087,ng-state-ogun,"OPEN SPACE SHOTANDE JUNCTION, EBITI F
 POLLING_UNIT,inec-pu-661088,ng-state-ogun,OPEN SPACE OLOKEMEJI SAWMILL,INEC_CVR_PU,661088,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6510
 POLLING_UNIT,inec-pu-661089,ng-state-ogun,"OPEN SPACE POWERLINE JUNCTION, OSOSUN",INEC_CVR_PU,661089,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6510
 POLLING_UNIT,inec-pu-661090,ng-state-ogun,"OPEN SPACE ODO BABAKUDI ARIFA JUNCTION, FADUNSIN",INEC_CVR_PU,661090,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6510
-WARD,inec-ward-6511,ng-state-ogun,SUNREN,INEC_CVR_WARD,6511,,inec-lga-568,,state-assembly-sc-728-og,
-POLLING_UNIT,inec-pu-91194,ng-state-ogun,ANG. SCHOOL SUNREN,INEC_CVR_PU,91194,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91195,ng-state-ogun,SCHOOL PREM APODE,INEC_CVR_PU,91195,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91196,ng-state-ogun,SCHOOL PREM. ISOLA,INEC_CVR_PU,91196,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91197,ng-state-ogun,SCHOOL PREM. OBA OKE,INEC_CVR_PU,91197,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91198,ng-state-ogun,OBASA MARKET,INEC_CVR_PU,91198,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91199,ng-state-ogun,LOKI VILLAGE,INEC_CVR_PU,91199,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91200,ng-state-ogun,YANBI VILLAGE,INEC_CVR_PU,91200,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-91201,ng-state-ogun,OLORUNSOGO,INEC_CVR_PU,91201,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-661091,ng-state-ogun,COMMUNITY PRY SCH OLORUNSOGO,INEC_CVR_PU,661091,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-661092,ng-state-ogun,OPEN SPACE LERIN JUNCTION IKEREKU LERIN,INEC_CVR_PU,661092,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
-POLLING_UNIT,inec-pu-661093,ng-state-ogun,OPEN SPACE TOWN HALL IJOKO LAFUN,INEC_CVR_PU,661093,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6511
+WARD,inec-ward-6511,ng-state-ogun,SUNREN,INEC_CVR_WARD,6511,,inec-lga-568,,state-assembly-sc-729-og,
+POLLING_UNIT,inec-pu-91194,ng-state-ogun,ANG. SCHOOL SUNREN,INEC_CVR_PU,91194,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91195,ng-state-ogun,SCHOOL PREM APODE,INEC_CVR_PU,91195,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91196,ng-state-ogun,SCHOOL PREM. ISOLA,INEC_CVR_PU,91196,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91197,ng-state-ogun,SCHOOL PREM. OBA OKE,INEC_CVR_PU,91197,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91198,ng-state-ogun,OBASA MARKET,INEC_CVR_PU,91198,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91199,ng-state-ogun,LOKI VILLAGE,INEC_CVR_PU,91199,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91200,ng-state-ogun,YANBI VILLAGE,INEC_CVR_PU,91200,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-91201,ng-state-ogun,OLORUNSOGO,INEC_CVR_PU,91201,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-661091,ng-state-ogun,COMMUNITY PRY SCH OLORUNSOGO,INEC_CVR_PU,661091,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-661092,ng-state-ogun,OPEN SPACE LERIN JUNCTION IKEREKU LERIN,INEC_CVR_PU,661092,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
+POLLING_UNIT,inec-pu-661093,ng-state-ogun,OPEN SPACE TOWN HALL IJOKO LAFUN,INEC_CVR_PU,661093,,inec-lga-568,,state-assembly-sc-729-og,inec-ward-6511
 WARD,inec-ward-6512,ng-state-ogun,COKER,INEC_CVR_WARD,6512,,inec-lga-568,,state-assembly-sc-728-og,
 POLLING_UNIT,inec-pu-91202,ng-state-ogun,OKE OJI I,INEC_CVR_PU,91202,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6512
 POLLING_UNIT,inec-pu-91203,ng-state-ogun,OKE OJI II,INEC_CVR_PU,91203,,inec-lga-568,,state-assembly-sc-728-og,inec-ward-6512

@@ -283,6 +283,35 @@ for (const lga of tree.lgas) {
   }
 }
 
+// Every state constituency must hold at least one ward: a constituency with no
+// ward is not a command territory, and the hierarchy gate rejects the whole
+// state for it. Where the sources leave one empty, it takes a ward from a
+// same-LGA sibling that has more than one — recorded as inferred like any other
+// assignment that the sources did not state outright.
+const wardsBySc = new Map();
+for (const [key, canonicalId] of wardToStateConstituency) {
+  wardsBySc.set(canonicalId, [...(wardsBySc.get(canonicalId) || []), key]);
+}
+for (const [canonicalId, sc] of scByCanonical) {
+  if ((wardsBySc.get(canonicalId) || []).length > 0 || !sc.primaryLga) continue;
+  const siblings = (scByLga.get(sc.primaryLga.code) || []).filter((id) => id !== canonicalId);
+  const donor = siblings
+    .map((id) => ({ id, wards: wardsBySc.get(id) || [] }))
+    .filter((entry) => entry.wards.length > 1)
+    .sort((a, b) => b.wards.length - a.wards.length)[0];
+  if (!donor) continue;
+  const movedKey = donor.wards[donor.wards.length - 1];
+  wardToStateConstituency.set(movedKey, canonicalId);
+  wardsBySc.set(donor.id, donor.wards.slice(0, -1));
+  wardsBySc.set(canonicalId, [movedKey]);
+  inferred.push({
+    lga: sc.primaryLga.name,
+    ward: movedKey,
+    stateConstituency: canonicalId,
+    basis: "REVIEW: constituency had no ward; moved from same-LGA sibling",
+  });
+}
+
 // --- Wards and polling units ---------------------------------------------
 let unmappedWards = 0;
 for (const lga of tree.lgas) {
