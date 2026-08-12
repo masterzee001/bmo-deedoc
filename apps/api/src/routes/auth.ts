@@ -190,8 +190,17 @@ router.patch("/me", requireAuth, async (request, response) => {
 });
 
 router.get("/territories/states", async (_request, response) => {
+  // Backfilling reference data must never decide whether this endpoint answers.
+  // It is unauthenticated and it populates the registration form: a failure
+  // here previously escaped an async handler with no catch and terminated the
+  // API process, so every visitor saw empty dropdowns and every other route
+  // went down with it. Serve whatever is stored either way.
   if ((await prisma.state.count()) < 37) {
-    await ensureNationalReferenceStates(prisma);
+    try {
+      await ensureNationalReferenceStates(prisma);
+    } catch (error) {
+      console.error("Reference state backfill failed; serving stored states.", error);
+    }
   }
 
   const states = await prisma.state.findMany({
