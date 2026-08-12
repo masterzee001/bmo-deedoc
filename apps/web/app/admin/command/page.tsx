@@ -52,8 +52,10 @@ export default function CommandDashboardPage() {
   const load = useCallback(async () => {
     const token = readToken();
     if (!token) {
-      setError("Sign in to view the command dashboard.");
-      setLoading(false);
+      // Redirect rather than render: returning here left the entire admin
+      // navigation on screen for an anonymous visitor, which every other admin
+      // page avoids by leaving.
+      window.location.href = "/admin/login";
       return;
     }
 

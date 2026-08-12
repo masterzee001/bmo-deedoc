@@ -16,6 +16,7 @@ const groups: AdminNavGroup[] = [
       { href: "/admin/command", label: "Command Dashboard" },
       { href: "/admin/pre-election", label: "Pre-Election" },
       { href: "/admin/rewards", label: "Rewards" },
+      { href: "/admin/rewards/reconciliation", label: "Legacy Reconciliation" },
       { href: "/admin/activity", label: "Activity" },
       { href: "/admin/reference", label: "Reference Data" },
       { href: "/admin/account", label: "Account" },
@@ -39,6 +40,9 @@ const groups: AdminNavGroup[] = [
       { href: "/admin/election-reports", label: "Election Reports" },
       { href: "/admin/evidence", label: "Evidence" },
       { href: "/admin/communications", label: "Communications" },
+      // The election-day command board had no inbound link from any navigation:
+      // its only route in was a footnote on a page that 403s for ADMIN.
+      { href: "/election-day/situation-room", label: "Situation Room" },
     ],
   },
 ];

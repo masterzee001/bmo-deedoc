@@ -56,6 +56,10 @@ export default function DashboardPage() {
     pendingPotentialPoints: number;
     reservedPayoutPoints: number;
     availablePoints: number;
+    legacyCarryoverPendingPoints: number;
+    legacyCarryoverConfirmedPoints: number;
+    preCutoverReservedPoints: number;
+    payablePoints: number;
   } | null>(null);
   const [verification, setVerification] = useState<PreElectionVerificationCase | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -277,7 +281,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error || !user || !rewards || !balance) {
+  if (!user || !rewards || !balance) {
     return (
       <main className="shell">
         <section className="panel card">
@@ -324,6 +328,12 @@ export default function DashboardPage() {
         <article className="panel card">
           <h2>Reserved Payout</h2>
           <div className="value">{preElectionBalance?.reservedPayoutPoints ?? balance.reservedPoints}</div>
+          {preElectionBalance?.preCutoverReservedPoints ? (
+            <p className="muted">
+              Includes {preElectionBalance.preCutoverReservedPoints} points claimed before the legacy cutover.
+              Those are held against your balance and are not payable until reconciliation is settled.
+            </p>
+          ) : null}
         </article>
         <article className="panel card">
           <h2>Available Balance</h2>

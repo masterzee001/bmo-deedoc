@@ -42,7 +42,11 @@ export default function AdminManageTerritoryPage() {
         setSelectedStateId(currentUser.adminProfile?.stateId || "");
       })
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaAdminToken");
+        // Only a real authentication failure clears the session. A 403 means this
+        // screen is above the operator's role, not that they are signed out.
+        if (caughtError instanceof ApiError && caughtError.status === 401) {
+          localStorage.removeItem("picsNigeriaAdminToken");
+        }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load territory controls.");
       })
       .finally(() => setLoading(false));
