@@ -1,0 +1,38 @@
+{
+  "contractVersion": 1,
+  "releaseId": "ogun-identity-2026-08-12",
+  "kind": "OGUN_IDENTITY",
+  "stateId": "ng-state-ogun",
+  "publisher": "INEC",
+  "sourceUrl": "https://cvr.inecnigeria.org/PublicApi",
+  "sourceDocumentId": "inec-constituencies.xls",
+  "retrievedAt": "2026-08-12T00:00:00.000Z",
+  "approvedBy": "platform-engineering",
+  "approvedAt": "2026-08-12T00:00:00.000Z",
+  "sourceCodeNamespaces": [
+    "INEC_CVR_LGA",
+    "INEC_CVR_WARD",
+    "INEC_CVR_PU",
+    "INEC_CONSTITUENCY_WORKBOOK"
+  ],
+  "declaredCounts": {
+    "stateConstituencies": 26,
+    "lgas": 20,
+    "wards": 236,
+    "pollingUnits": 5042
+  },
+  "files": {
+    "territories": {
+      "path": "territories.csv",
+      "sha256": "925091b1a35a781f5c7aceee55558b29065e876ebf45d374e6eb142356b222a7"
+    },
+    "commandRelationships": {
+      "path": "command-relationships.csv",
+      "sha256": "ebe31b0499ffff9595d709b846e7c83319e4b999a66547fc5d21652d2c2afe9a"
+    },
+    "lgaMemberships": {
+      "path": "lga-memberships.csv",
+      "sha256": "91d8d255efbfe1b5dc519977d6a7c684c980aa6a70a9a03da136aad56e129b55"
+    }
+  }
+}
