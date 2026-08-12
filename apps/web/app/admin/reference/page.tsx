@@ -279,7 +279,7 @@ export default function AdminReferencePage() {
         <p>Manage the reference structures used by candidate creation and public party discovery.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <FeedbackBanner tone="error" message={error} />
       <FeedbackBanner tone="success" message={message} />

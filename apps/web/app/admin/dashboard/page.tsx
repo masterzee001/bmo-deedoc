@@ -133,7 +133,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      <AdminNav />
+      <AdminNav role={data?.user.role} />
 
       <section className="grid stats">
         <article className="panel card">

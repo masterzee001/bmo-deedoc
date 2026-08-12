@@ -396,7 +396,7 @@ export default function AdminEvidencePage() {
         <p className="muted">Originals remain private and immutable. Every view, download, review, case association, and export is backend-authorized and audited.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
       <section className="grid stats">

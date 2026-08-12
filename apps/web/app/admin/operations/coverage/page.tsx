@@ -165,7 +165,7 @@ export default function AdminCoveragePage() {
         <p className="muted">Coverage totals are restricted to your current authority. State and LGA inventory is authoritative. Ward, polling-unit, and staffing totals remain provisional until the full polling-unit reference dataset is loaded for this scope.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
       {insights.scopeWarning ? <p className="muted">{insights.scopeWarning}</p> : null}

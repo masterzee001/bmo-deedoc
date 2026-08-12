@@ -124,10 +124,18 @@ export default function AdminManageCreatePage() {
   });
 
   const manageableAdminLevels = useMemo(() => {
+    // Features 001 and 003: the platform is Ogun-only and LGA is reference
+    // data, not a command level. NATIONAL and GEO_POLITICAL_ZONE describe a
+    // hierarchy above the state that no longer exists here, and LGA describes
+    // authority the constituency-first structure does not grant — offering any
+    // of the three creates an operator the command model cannot place.
+    const assignable = ADMIN_LEVELS.filter(
+      (level) => level !== "NATIONAL" && level !== "GEO_POLITICAL_ZONE" && level !== "LGA",
+    );
     if (!user?.adminProfile || user.role === "SUPER_ADMIN") {
-      return ADMIN_LEVELS;
+      return assignable;
     }
-    return ADMIN_LEVELS.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level]);
+    return assignable.filter((level) => adminLevelRank[user.adminProfile!.adminLevel] > adminLevelRank[level]);
   }, [user]);
 
   const manageableCandidateOffices = useMemo(() => {
@@ -420,7 +428,7 @@ export default function AdminManageCreatePage() {
         <p>Authority scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}
 

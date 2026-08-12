@@ -320,7 +320,7 @@ export default function AdminPreElectionPage() {
         </p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {message ? <p className="feedback-banner success">{message}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 

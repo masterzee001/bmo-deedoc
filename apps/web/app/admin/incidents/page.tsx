@@ -131,7 +131,7 @@ export default function AdminIncidentsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       {error ? <p className="error">{error}</p> : null}
 
       <section className="grid stats">

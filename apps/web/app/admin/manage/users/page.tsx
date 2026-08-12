@@ -199,7 +199,7 @@ export default function AdminManageUsersPage() {
         <p>Visible scope: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <FeedbackBanner tone="error" message={error} />
       <FeedbackBanner tone="success" message={message} />

@@ -184,7 +184,7 @@ export default function AdminAccountPage() {
         </div>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       {error ? <p className="error">{error}</p> : null}
       {message ? <p className="muted">{message}</p> : null}

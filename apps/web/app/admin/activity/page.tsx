@@ -168,7 +168,7 @@ export default function AdminActivityPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone="error" message={error} />
 
       <section className="panel card">

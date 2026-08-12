@@ -128,10 +128,10 @@ async function createVoterFixture(suffix: string) {
       phone: "08037778888",
       password: "TestVoter123!",
       voterCardNumber: `VIN-${suffix}`,
-      stateId: "seed-state-lagos",
-      lgaId: "seed-lga-ikeja",
-      wardId: "seed-ward-ikeja-ward-a",
-      pollingUnitId: "seed-pu-ikeja-001",
+      stateId: OGUN_FIXTURE.stateId,
+      lgaId: OGUN_FIXTURE.lgaId,
+      wardId: OGUN_FIXTURE.wardId,
+      pollingUnitId: OGUN_FIXTURE.pollingUnitId,
       acceptTerms: true,
       contactConsent: true,
       confirmAdult: true,
@@ -299,12 +299,17 @@ const cases: Case[] = [
         method: "PATCH",
         token,
         body: {
+          // WARD, not LGA: the Ogun command structure runs
+          // State -> Senatorial -> Federal -> State Constituency -> Ward -> PU,
+          // and LGA is reference data for reporting rather than a rung of
+          // authority. The endpoint now refuses the levels it cannot place.
           name: "Updated Admin",
-          adminLevel: "LGA",
+          adminLevel: "WARD",
           politicalPartyId: "seed-party-independent-alliance",
           geoPoliticalZoneId: "seed-zone-south-west",
           stateId: "seed-state-lagos",
           lgaId: "seed-lga-ikeja",
+          wardId: "seed-ward-ikeja-ward-a",
         },
       });
       assert.equal(updatedAdmin.status, 200, JSON.stringify(updatedAdmin.payload));
@@ -490,7 +495,54 @@ const cases: Case[] = [
   },
 ];
 
+const OGUN_FIXTURE = {
+  stateId: "ng-state-ogun",
+  lgaId: "global-structures-ogun-lga",
+  wardId: "global-structures-ogun-ward",
+  pollingUnitId: "global-structures-ogun-pu",
+};
+
+/**
+ * Member registration is Ogun-only (feature 001), so a member fixture cannot be
+ * created in the seeded Lagos chain any more. This provides the minimum Ogun
+ * territory the registration endpoint will accept.
+ */
+async function ensureOgunTerritory() {
+  await prisma.state.upsert({
+    where: { id: OGUN_FIXTURE.stateId },
+    update: {},
+    create: { id: OGUN_FIXTURE.stateId, name: "Ogun" },
+  });
+  await prisma.lGA.upsert({
+    where: { id: OGUN_FIXTURE.lgaId },
+    update: {},
+    create: { id: OGUN_FIXTURE.lgaId, name: "Global Structures Ogun LGA", stateId: OGUN_FIXTURE.stateId },
+  });
+  await prisma.ward.upsert({
+    where: { id: OGUN_FIXTURE.wardId },
+    update: {},
+    create: {
+      id: OGUN_FIXTURE.wardId,
+      name: "Global Structures Ogun Ward",
+      stateId: OGUN_FIXTURE.stateId,
+      lgaId: OGUN_FIXTURE.lgaId,
+    },
+  });
+  await prisma.pollingUnit.upsert({
+    where: { id: OGUN_FIXTURE.pollingUnitId },
+    update: {},
+    create: {
+      id: OGUN_FIXTURE.pollingUnitId,
+      name: "Global Structures Ogun PU",
+      stateId: OGUN_FIXTURE.stateId,
+      lgaId: OGUN_FIXTURE.lgaId,
+      wardId: OGUN_FIXTURE.wardId,
+    },
+  });
+}
+
 async function setup() {
+  await ensureOgunTerritory();
   server = http.createServer(createApp());
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
 
@@ -520,6 +572,13 @@ async function teardown() {
       where: { id: { in: Array.from(createdZoneIds) } },
     });
   }
+
+  // The suites share one database, and other tests assert on Ogun polling-unit
+  // counts. A fixture that outlives its suite becomes another suite's phantom
+  // polling unit, so this territory is removed rather than left behind.
+  await prisma.pollingUnit.deleteMany({ where: { id: OGUN_FIXTURE.pollingUnitId } });
+  await prisma.ward.deleteMany({ where: { id: OGUN_FIXTURE.wardId } });
+  await prisma.lGA.deleteMany({ where: { id: OGUN_FIXTURE.lgaId } });
 
   await prisma.$disconnect();
 

@@ -32,6 +32,7 @@ let branches: Branch[] = [];
 let baseUrl = "";
 let server: http.Server | null = null;
 let stateOfficerEmail = "";
+let superAdminEmail = "";
 let wardCoordinatorEmail = "";
 let memberEmail = "";
 let validatorEmail = "";
@@ -193,6 +194,15 @@ async function createTargetFixtures() {
     (branch) => branch.senatorialDistrictId !== branches[0].senatorialDistrictId,
   ) || branches[1];
   stateOfficerEmail = (await createTargetUser("state-officer", "STATE_OFFICER")).email;
+  superAdminEmail = testEmail("super-admin");
+  await prisma.user.create({
+    data: {
+      name: "Phase 1 Test Super Admin",
+      email: superAdminEmail,
+      passwordHash: await hashPassword(password),
+      role: "SUPER_ADMIN",
+    },
+  });
   await createTargetUser("senatorial", "COORDINATOR", { level: "SENATORIAL_DISTRICT", branch: branches[0] });
   await createTargetUser("federal", "COORDINATOR", { level: "FEDERAL_CONSTITUENCY", branch: branches[0] });
   await createTargetUser("state-constituency", "COORDINATOR", { level: "STATE_CONSTITUENCY", branch: branches[0] });
@@ -446,6 +456,76 @@ function mockActor(
 }
 
 const cases: Array<{ name: string; run: () => Promise<void> }> = [
+  {
+    name: "Ogun-only registration is enforced by the server, not by the form",
+    run: async () => {
+      // Feature 001. The endpoint is public and unauthenticated, so whatever it
+      // accepts is reachable regardless of what the picker offers.
+      const outsideOgun = await apiRequest("/auth/register-voter", {
+        method: "POST",
+        body: {
+          fullName: "Outside Ogun Applicant",
+          email: "phase1-outside-ogun@pics.ng",
+          phone: "08039999001",
+          password: "OutsideOgun123!",
+          voterCardNumber: "PHASE1-OUTSIDE-OGUN",
+          stateId: "ng-state-lagos",
+          lgaId: "any-lga",
+          wardId: "any-ward",
+          pollingUnitId: "any-pu",
+          acceptTerms: true,
+          acceptPrivacy: true,
+          contactConsent: true,
+          confirmAdult: true,
+        },
+      });
+      assert.equal(outsideOgun.status, 400, JSON.stringify(outsideOgun.payload));
+      assert.equal(outsideOgun.payload.code, "OUTSIDE_OGUN_STATE");
+      assert.equal(
+        await prisma.user.count({ where: { email: "phase1-outside-ogun@pics.ng" } }),
+        0,
+        "a registration outside Ogun must create no account",
+      );
+    },
+  },
+  {
+    name: "the public state list offers Ogun only",
+    run: async () => {
+      const states = await apiRequest("/auth/territories/states");
+      assert.equal(states.status, 200, JSON.stringify(states.payload));
+      const offered = states.payload.states as Array<{ id: string }>;
+      assert.ok(
+        offered.every((state) => state.id === OGUN_STATE_ID),
+        `the registration picker must not offer a state registration will refuse: ${JSON.stringify(offered)}`,
+      );
+    },
+  },
+  {
+    name: "NATIONAL, GEO_POLITICAL_ZONE and LGA cannot be assigned as command levels",
+    run: async () => {
+      // Features 001 and 003. A level above the state does not exist here, and
+      // LGA is reference data rather than a rung of authority.
+      for (const adminLevel of ["NATIONAL", "GEO_POLITICAL_ZONE", "LGA"]) {
+        const created = await apiRequest("/admin/users", {
+          method: "POST",
+          token: await login(superAdminEmail),
+          body: {
+            name: `Phase1 ${adminLevel} Admin`,
+            email: `phase1-${adminLevel.toLowerCase()}@pics.ng`,
+            password: "UnplaceableLevel123!",
+            adminLevel,
+            stateId: OGUN_STATE_ID,
+          },
+        });
+        assert.equal(created.status, 400, `${adminLevel} must be refused: ${JSON.stringify(created.payload)}`);
+        assert.equal(
+          await prisma.user.count({ where: { email: `phase1-${adminLevel.toLowerCase()}@pics.ng` } }),
+          0,
+          `${adminLevel} must create no operator the command model cannot place`,
+        );
+      }
+    },
+  },
   {
     name: "RBAC matrix enforces own, subordinate, peer, superior, specialist, and LGA boundaries",
     run: async () => {

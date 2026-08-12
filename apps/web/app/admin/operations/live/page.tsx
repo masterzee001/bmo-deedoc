@@ -434,7 +434,7 @@ export default function AdminLiveOperationsPage() {
         </div>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone="error" message={error} />
       <FeedbackBanner tone="success" message={message} />
 

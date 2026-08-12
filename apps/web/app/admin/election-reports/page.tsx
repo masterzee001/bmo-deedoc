@@ -171,7 +171,7 @@ export default function AdminElectionReportsPage() {
         })}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
       <FeedbackBanner tone={feedback.tone} message={feedback.message} />
 
       <section className="panel card">

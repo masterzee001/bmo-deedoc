@@ -128,7 +128,7 @@ export default function AdminManageTerritoryPage() {
         <p>Current authority: {describeTerritory(user.adminProfile || emptyTerritorySummary())}</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <section className="panel card">
         <h2>Choose scope</h2>

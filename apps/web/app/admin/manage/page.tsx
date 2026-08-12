@@ -76,7 +76,7 @@ export default function AdminManagePage() {
         <p>Authority is scoped to {describeTerritory(user.adminProfile || emptyTerritorySummary())}. Choose a territory first, then move into focused user workflows.</p>
       </section>
 
-      <AdminNav />
+      <AdminNav role={user?.role} />
 
       <section className="grid stats">
         <article className="panel card">
