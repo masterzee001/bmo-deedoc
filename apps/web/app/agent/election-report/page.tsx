@@ -69,7 +69,7 @@ export default function AgentElectionReportPage() {
   useEffect(() => {
     const token = readSession();
     if (!token) {
-      window.location.href = "/agent/login";
+      window.location.href = "/login?field=1";
       return;
     }
 

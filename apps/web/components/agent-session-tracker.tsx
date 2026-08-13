@@ -38,7 +38,7 @@ export function AgentSessionTracker() {
   const logoutInProgressRef = useRef(false);
 
   useEffect(() => {
-    if (!pathname.startsWith("/agent") || pathname === "/agent/login") {
+    if (!pathname.startsWith("/agent")) {
       return;
     }
 

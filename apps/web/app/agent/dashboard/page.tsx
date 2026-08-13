@@ -109,7 +109,7 @@ export default function AgentDashboardPage() {
     const token = readSession();
 
     if (!token) {
-      window.location.href = "/agent/login";
+      window.location.href = "/login?field=1";
       return;
     }
 
@@ -147,7 +147,7 @@ export default function AgentDashboardPage() {
     }
 
     clearSession();
-    router.replace(reason ? `/agent/login?reason=${encodeURIComponent(reason)}` : "/agent/login");
+    router.replace(reason ? `/login?field=1&reason=${encodeURIComponent(reason)}` : "/login?field=1");
   }
 
   async function sendDeviceLocation(path: "check-in" | "check-out" | "location", options?: { refreshDashboard?: boolean }) {
@@ -279,7 +279,7 @@ export default function AgentDashboardPage() {
             </p>
           ) : null}
           <p>
-            <Link href="/agent/login">Return to agent login</Link>
+            <Link href="/login?field=1">Return to sign in</Link>
           </p>
         </section>
       </main>
