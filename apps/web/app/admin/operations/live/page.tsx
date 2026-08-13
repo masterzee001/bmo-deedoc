@@ -39,6 +39,7 @@ import { ConfirmDialog } from "../../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../../components/feedback-banner";
 import { GoogleLiveMap } from "../../../../components/google-live-map";
 import { RasterLiveMap } from "../../../../components/raster-live-map";
+import { clearSession } from "../../../../lib/session";
 
 type Marker = {
   id: string;
@@ -168,7 +169,7 @@ export default function AdminLiveOperationsPage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -313,8 +314,8 @@ export default function AdminLiveOperationsPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAdminToken");
-    router.replace("/admin/login");
+    clearSession();
+    router.replace("/login");
   }
 
   async function handleSingleTaskSubmit(event: FormEvent<HTMLFormElement>) {

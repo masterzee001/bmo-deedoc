@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthUserProfile, OgunOrganizationTree } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchOgunOrganizationTree, logoutCurrentUser } from "../../lib/api";
+import { clearSession } from "../../lib/session";
 
 export default function PlatformOrganizationPage() {
   const router = useRouter();
@@ -14,7 +15,7 @@ export default function PlatformOrganizationPage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      router.push("/admin/login");
+      router.push("/login");
       return;
     }
 
@@ -36,8 +37,8 @@ export default function PlatformOrganizationPage() {
     if (token) {
       await logoutCurrentUser(token).catch(() => undefined);
     }
-    localStorage.removeItem("picsNigeriaAdminToken");
-    router.push("/admin/login");
+    clearSession();
+    router.push("/login");
   }
 
   return (

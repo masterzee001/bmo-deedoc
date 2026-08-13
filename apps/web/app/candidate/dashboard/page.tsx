@@ -44,6 +44,7 @@ import {
   updateCandidateEvent,
   updateCandidateProfile,
 } from "../../../lib/api";
+import { clearSession } from "../../../lib/session";
 
 const officeLabels: Record<string, string> = {
   PRESIDENTIAL: "Presidential",
@@ -223,7 +224,7 @@ export default function CandidateDashboardPage() {
 
     hydrateDashboard(token)
       .catch((caughtError) => {
-        localStorage.removeItem("picsNigeriaCandidateToken");
+        clearSession();
         setError(caughtError instanceof Error ? caughtError.message : "Could not load your candidate dashboard.");
       })
       .finally(() => setLoading(false));
@@ -610,7 +611,7 @@ export default function CandidateDashboardPage() {
     if (token) {
       void logoutCurrentUser(token).catch(() => undefined);
     }
-    localStorage.removeItem("picsNigeriaCandidateToken");
+    clearSession();
     window.location.href = "/candidate/login";
   }
 
@@ -645,6 +646,21 @@ export default function CandidateDashboardPage() {
 
   return (
     <main className="shell">
+      {/* Candidate accounts no longer sign in: in the Ogun model a candidate is
+          a record the organisation maintains, not an operator. Existing sessions
+          keep working rather than being cut off mid-use, but they are told what
+          is happening instead of discovering it at the sign-in page. */}
+      <section className="notice notice-legacy" style={{ marginBottom: 16 }}>
+        <div className="notice-body">
+          <span className="notice-title">Candidate sign-in is being retired</span>
+          <span>
+            Candidate profiles are now maintained by your state office as organisation records. This workspace still
+            works for your current session, but new sign-ins are not issued for candidate accounts. Contact your state
+            office for changes to your profile.
+          </span>
+        </div>
+      </section>
+
       <section className="panel hero candidate-hero">
         <div className="candidate-identity">
           {profileForm.portraitUrl ? (

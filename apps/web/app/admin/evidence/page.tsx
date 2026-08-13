@@ -186,7 +186,7 @@ export default function AdminEvidencePage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 

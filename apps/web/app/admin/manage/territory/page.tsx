@@ -7,6 +7,7 @@ import type { AuthUserProfile, LgaItem, StateItem, WardItem } from "@pics-nigeri
 import { ApiError, fetchCurrentUser, fetchLgas, fetchStates, fetchWards } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory, getManagedRoleLabel, MANAGED_ROLE_OPTIONS } from "../../../../components/admin-management-utils";
+import { clearSession } from "../../../../lib/session";
 
 type LocatorAction = "manage-users" | "create-user" | "track-agents";
 
@@ -26,7 +27,7 @@ export default function AdminManageTerritoryPage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -45,7 +46,7 @@ export default function AdminManageTerritoryPage() {
         // Only a real authentication failure clears the session. A 403 means this
         // screen is above the operator's role, not that they are signed out.
         if (caughtError instanceof ApiError && caughtError.status === 401) {
-          localStorage.removeItem("picsNigeriaAdminToken");
+          clearSession();
         }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load territory controls.");
       })
@@ -114,7 +115,7 @@ export default function AdminManageTerritoryPage() {
         <section className="panel card">
           <h1>Unable to load territory selector</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );

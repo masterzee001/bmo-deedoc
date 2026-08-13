@@ -33,6 +33,7 @@ import {
   submitMyPreElectionVerificationDocument,
 } from "../../lib/api";
 import type { PreElectionVerificationCase } from "../../lib/api";
+import { clearSession } from "../../lib/session";
 
 async function sha256File(file: File) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
@@ -151,7 +152,7 @@ export default function DashboardPage() {
       try {
         await loadDashboard(authToken);
       } catch (caughtError) {
-        localStorage.removeItem("picsNigeriaToken");
+        clearSession();
         setError(caughtError instanceof Error ? caughtError.message : "Could not load your dashboard.");
       } finally {
         setLoading(false);
@@ -266,7 +267,7 @@ export default function DashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaToken");
+    clearSession();
     window.location.href = "/login";
   }
 

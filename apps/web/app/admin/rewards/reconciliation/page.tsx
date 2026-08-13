@@ -28,6 +28,7 @@ import {
   type LegacyReconciliationPolicy,
 } from "../../../../lib/api";
 import { describeApiError, isSessionExpired, type DescribedError } from "../../../../lib/api-errors";
+import { clearSession } from "../../../../lib/session";
 
 /**
  * Legacy reconciliation.
@@ -67,8 +68,8 @@ export default function LegacyReconciliationPage() {
         setProblem(null);
       } catch (error) {
         if (isSessionExpired(error)) {
-          window.localStorage.removeItem("picsNigeriaAdminToken");
-          router.replace("/admin/login");
+          clearSession();
+          router.replace("/login");
           return;
         }
         // A 403 is reported, never treated as a dead session: signing an
@@ -85,7 +86,7 @@ export default function LegacyReconciliationPage() {
   useEffect(() => {
     const stored = window.localStorage.getItem("picsNigeriaAdminToken");
     if (!stored) {
-      router.replace("/admin/login");
+      router.replace("/login");
       return;
     }
     setToken(stored);

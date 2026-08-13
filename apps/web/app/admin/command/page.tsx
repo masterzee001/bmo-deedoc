@@ -55,7 +55,7 @@ export default function CommandDashboardPage() {
       // Redirect rather than render: returning here left the entire admin
       // navigation on screen for an anonymous visitor, which every other admin
       // page avoids by leaving.
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 

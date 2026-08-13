@@ -19,6 +19,7 @@ import {
 import { AdminNav } from "../../../components/admin-nav";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import { clearSession } from "../../../lib/session";
 
 function formatDependencyCounts(dependencyCounts?: Record<string, number>) {
   if (!dependencyCounts) {
@@ -84,7 +85,7 @@ export default function AdminReferencePage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -93,7 +94,7 @@ export default function AdminReferencePage() {
         // Only a real authentication failure clears the session. A 403 means this
         // screen is above the operator's role, not that they are signed out.
         if (caughtError instanceof ApiError && caughtError.status === 401) {
-          localStorage.removeItem("picsNigeriaAdminToken");
+          clearSession();
         }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load reference data.");
       })
@@ -263,7 +264,7 @@ export default function AdminReferencePage() {
         <section className="panel card">
           <h1>Unable to load reference data</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );

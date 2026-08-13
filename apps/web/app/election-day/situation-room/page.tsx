@@ -113,7 +113,7 @@ export default function ElectionSituationRoomPage() {
   useEffect(() => {
     const token = readToken();
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
     setCallToken(token);

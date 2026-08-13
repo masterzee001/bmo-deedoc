@@ -1,90 +1,28 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { PublicAccessShell } from "../../../components/public-access-shell";
-import { loginUser } from "../../../lib/api";
 
-export default function AdminLoginPage() {
+/**
+ * Command and specialist sign-in moved to the single door.
+ *
+ * Kept as a redirect rather than deleted: these URLs are bookmarked, printed in
+ * onboarding notes, and linked from the public shell. A 404 would read as the
+ * platform being down.
+ */
+export default function RedirectToSignIn() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      const data = await loginUser(email, password);
-
-      // VALIDATOR and PAYOUT_OFFICER are specialist roles: they hold no command
-      // territory, but they own the verification queue and the payout queue
-      // respectively. Omitting them here left /admin/pre-election reachable only
-      // by roles the API then rejects, so the decision buttons were dead UI for
-      // the only roles permitted to press them.
-      const hasWorkspaceAccess = ["ADMIN", "SUPER_ADMIN", "STATE_OFFICER", "COORDINATOR", "VALIDATOR", "PAYOUT_OFFICER"].includes(
-        data.user.role,
-      );
-      if (!hasWorkspaceAccess) {
-        setError("This login page is for authorized command and specialist users only.");
-        return;
-      }
-
-      localStorage.setItem("picsNigeriaAdminToken", data.token);
-      const destination =
-        data.user.role === "ADMIN" || data.user.role === "SUPER_ADMIN"
-          ? "/admin/dashboard"
-          : data.user.role === "VALIDATOR" || data.user.role === "PAYOUT_OFFICER"
-            ? "/admin/pre-election"
-            : "/platform";
-      router.push(destination);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Login failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    router.replace("/login");
+  }, [router]);
 
   return (
-    <PublicAccessShell
-      currentAccess="ADMIN"
-      brandSubtitle="Administrative Access"
-      authTitle="Admin Sign In"
-      authDescription="Sign in to review scope summaries, visible candidates, reference coverage, and operational activity."
-      footerNote="Admin access uses the same public entry layout, with role-specific routing after authentication."
-    >
-      <form className="starter-form" onSubmit={handleSubmit}>
-        <label className="starter-form__field">
-          <span>Email address</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="admin@picsnigeria.ng"
-            required
-          />
-        </label>
-
-        <label className="starter-form__field">
-          <span>Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Enter your password"
-            required
-          />
-        </label>
-
-        {error ? <p className="error">{error}</p> : null}
-
-        <button className="starter-form__submit" type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in to admin portal"}
-        </button>
-      </form>
-    </PublicAccessShell>
+    <main className="shell">
+      <section className="panel card">
+        <h1>Taking you to sign in…</h1>
+        <p className="muted">Command and specialist sign-in moved to the single door.</p>
+      </section>
+    </main>
   );
 }

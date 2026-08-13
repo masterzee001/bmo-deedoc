@@ -22,6 +22,7 @@ import {
   updateAgentTask,
 } from "../../../lib/api";
 import { AGENT_TRACKING_EVENT_NAME } from "../../../components/agent-session-tracker";
+import { clearSession } from "../../../lib/session";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
 
@@ -145,7 +146,7 @@ export default function AgentDashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAgentToken");
+    clearSession();
     router.replace(reason ? `/agent/login?reason=${encodeURIComponent(reason)}` : "/agent/login");
   }
 

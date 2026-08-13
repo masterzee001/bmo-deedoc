@@ -23,6 +23,7 @@ import {
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
+import { clearSession } from "../../../lib/session";
 
 type DashboardData = {
   user: AuthUserProfile;
@@ -65,14 +66,14 @@ export default function AdminDashboardPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAdminToken");
-    window.location.href = "/admin/login";
+    clearSession();
+    window.location.href = "/login";
   }
 
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -82,7 +83,7 @@ export default function AdminDashboardPage() {
         // Only a real authentication failure clears the session. A 403 means this
         // screen is above the operator's role, not that they are signed out.
         if (caughtError instanceof ApiError && caughtError.status === 401) {
-          localStorage.removeItem("picsNigeriaAdminToken");
+          clearSession();
         }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load the admin dashboard.");
       })
@@ -111,7 +112,7 @@ export default function AdminDashboardPage() {
         <section className="panel card">
           <h1>Unable to load dashboard</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );

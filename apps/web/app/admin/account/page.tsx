@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile } from "@pics-nigeria/shared";
 import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, logoutCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
+import { clearSession } from "../../../lib/session";
 
 export default function AdminAccountPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -26,7 +27,7 @@ export default function AdminAccountPage() {
   useEffect(() => {
     const token = localStorage.getItem("picsNigeriaAdminToken");
     if (!token) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
 
@@ -47,7 +48,7 @@ export default function AdminAccountPage() {
         // Only a real authentication failure clears the session. A 403 means this
         // screen is above the operator's role, not that they are signed out.
         if (caughtError instanceof ApiError && caughtError.status === 401) {
-          localStorage.removeItem("picsNigeriaAdminToken");
+          clearSession();
         }
         setError(caughtError instanceof Error ? caughtError.message : "Could not load account settings.");
       })
@@ -145,8 +146,8 @@ export default function AdminAccountPage() {
       }
     }
 
-    localStorage.removeItem("picsNigeriaAdminToken");
-    window.location.href = "/admin/login";
+    clearSession();
+    window.location.href = "/login";
   }
 
   if (loading) {
@@ -165,7 +166,7 @@ export default function AdminAccountPage() {
         <section className="panel card">
           <h1>Unable to load account</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );

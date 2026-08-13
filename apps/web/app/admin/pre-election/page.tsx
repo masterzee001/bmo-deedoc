@@ -184,7 +184,7 @@ export default function AdminPreElectionPage() {
   useEffect(() => {
     const authToken = localStorage.getItem("picsNigeriaAdminToken");
     if (!authToken) {
-      window.location.href = "/admin/login";
+      window.location.href = "/login";
       return;
     }
     loadPage(authToken)
@@ -304,7 +304,7 @@ export default function AdminPreElectionPage() {
         <section className="panel card">
           <h1>Unable to load pre-election workspace</h1>
           <p className="error">{error || "Authentication is required."}</p>
-          <Link href="/admin/login">Return to admin login</Link>
+          <Link href="/login">Return to admin login</Link>
         </section>
       </main>
     );
