@@ -9,50 +9,26 @@ import type { AuthUserProfile } from "@pics-nigeria/shared";
  * token from another role survived and the next page drove with the wrong
  * session. The resulting 403s read as data faults rather than as the wrong user.
  *
- * The canonical key is written on every sign-in. The legacy keys are written
- * alongside it so the many pages that still read them directly keep working, and
- * every one of them is cleared on sign-out. Reads fall back through the legacy
- * keys so a session created before this change is not silently dropped.
+ * Every page now reads and writes here, so there is one key and no fallback to
+ * disagree with. Anyone holding a pre-existing token signs in again, which is
+ * the correct outcome for a product that has not shipped.
  */
 
-const CANONICAL_KEY = "picsNigeriaSession";
-
-/** Every key the app has ever written a token to. */
-const LEGACY_KEYS = [
-  "picsNigeriaAdminToken",
-  "picsNigeriaToken",
-  "picsNigeriaAgentToken",
-  "picsNigeriaCandidateToken",
-] as const;
+const SESSION_KEY = "picsNigeriaSession";
 
 export function saveSession(token: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(CANONICAL_KEY, token);
-  // Written until every page reads through this module. Until then a single
-  // canonical key would simply sign everyone out.
-  for (const key of LEGACY_KEYS) {
-    window.localStorage.setItem(key, token);
-  }
+  window.localStorage.setItem(SESSION_KEY, token);
 }
 
 export function readSession(): string | null {
   if (typeof window === "undefined") return null;
-  const canonical = window.localStorage.getItem(CANONICAL_KEY);
-  if (canonical) return canonical;
-  for (const key of LEGACY_KEYS) {
-    const legacy = window.localStorage.getItem(key);
-    if (legacy) return legacy;
-  }
-  return null;
+  return window.localStorage.getItem(SESSION_KEY);
 }
 
-/** Clears every key, so signing out actually signs out. */
 export function clearSession() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(CANONICAL_KEY);
-  for (const key of LEGACY_KEYS) {
-    window.localStorage.removeItem(key);
-  }
+  window.localStorage.removeItem(SESSION_KEY);
 }
 
 /**

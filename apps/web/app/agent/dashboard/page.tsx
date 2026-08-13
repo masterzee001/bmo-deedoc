@@ -22,7 +22,7 @@ import {
   updateAgentTask,
 } from "../../../lib/api";
 import { AGENT_TRACKING_EVENT_NAME } from "../../../components/agent-session-tracker";
-import { clearSession } from "../../../lib/session";
+import { clearSession, readSession } from "../../../lib/session";
 
 type AgentActivityItem = Awaited<ReturnType<typeof fetchAgentActivities>>[number];
 
@@ -90,7 +90,7 @@ export default function AgentDashboardPage() {
   }
 
   async function handleTaskStatusUpdate(taskId: string, status: FieldTaskItem["status"]) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -106,7 +106,7 @@ export default function AgentDashboardPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
 
     if (!token) {
       window.location.href = "/agent/login";
@@ -137,7 +137,7 @@ export default function AgentDashboardPage() {
   }
 
   async function forceLogout(reason?: string) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -151,7 +151,7 @@ export default function AgentDashboardPage() {
   }
 
   async function sendDeviceLocation(path: "check-in" | "check-out" | "location", options?: { refreshDashboard?: boolean }) {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -222,7 +222,7 @@ export default function AgentDashboardPage() {
 
   async function handleIncidentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;

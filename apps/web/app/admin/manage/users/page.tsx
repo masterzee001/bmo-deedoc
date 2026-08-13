@@ -19,7 +19,7 @@ import {
   describeTerritory,
   getManagedRoleLabel,
 } from "../../../../components/admin-management-utils";
-import { clearSession } from "../../../../lib/session";
+import { clearSession, readSession } from "../../../../lib/session";
 
 export default function AdminManageUsersPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -68,7 +68,7 @@ export default function AdminManageUsersPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -97,7 +97,7 @@ export default function AdminManageUsersPage() {
   }, []);
 
   async function handleToggleUser(userId: string, nextIsActive: boolean) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -115,7 +115,7 @@ export default function AdminManageUsersPage() {
   }
 
   async function handleDeleteUser(item: ManagedUserItem) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -133,7 +133,7 @@ export default function AdminManageUsersPage() {
   }
 
   async function handleRevokeAgentSession(item: ManagedUserItem) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;

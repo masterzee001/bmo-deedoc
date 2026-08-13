@@ -12,6 +12,7 @@ import {
   uploadAgentElectionReportPhoto,
 } from "../../../lib/api";
 import { FeedbackBanner } from "../../../components/feedback-banner";
+import { readSession } from "../../../lib/session";
 
 const openingStatuses = [
   { value: "OPENED_ON_TIME", label: "Opened on time" },
@@ -66,7 +67,7 @@ export default function AgentElectionReportPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/agent/login";
       return;
@@ -93,7 +94,7 @@ export default function AgentElectionReportPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAgentToken");
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;

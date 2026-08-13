@@ -39,6 +39,7 @@ import {
   type PreElectionStrengthDashboard,
   type PreElectionVerificationCase,
 } from "../../../lib/api";
+import { readSession } from "../../../lib/session";
 
 const verificationStatuses = ["PENDING", "UNDER_REVIEW", "RESUBMISSION_REQUIRED", "VERIFIED", "REJECTED"];
 const referralStatuses = ["PENDING_VERIFICATION", "QUALIFIED", "REJECTED", "FLAGGED", "REWARD_PROCESSED"];
@@ -95,7 +96,7 @@ export default function AdminPreElectionPage() {
    */
   const [payoutExecutionEnabled, setPayoutExecutionEnabled] = useState<boolean | null>(null);
 
-  const token = typeof window === "undefined" ? null : localStorage.getItem("picsNigeriaAdminToken");
+  const token = typeof window === "undefined" ? null : readSession();
 
   /**
    * Every payout mutation goes through here. Before this, four of them were
@@ -182,7 +183,7 @@ export default function AdminPreElectionPage() {
   }
 
   useEffect(() => {
-    const authToken = localStorage.getItem("picsNigeriaAdminToken");
+    const authToken = readSession();
     if (!authToken) {
       window.location.href = "/login";
       return;

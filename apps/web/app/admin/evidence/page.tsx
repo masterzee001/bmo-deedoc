@@ -35,6 +35,7 @@ import {
   updateEvidenceReview,
   verifyEvidenceManifest,
 } from "../../../lib/api";
+import { readSession } from "../../../lib/session";
 
 const reviewerRoles = new Set(["SUPER_ADMIN", "STATE_OFFICER", "VALIDATOR"]);
 const groupOptions = ["POLLING_UNIT", "WARD", "STATE_CONSTITUENCY", "FEDERAL_CONSTITUENCY", "SENATORIAL_DISTRICT"] as const;
@@ -184,7 +185,7 @@ export default function AdminEvidencePage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -210,7 +211,7 @@ export default function AdminEvidencePage() {
   }, []);
 
   async function withToken(action: (token: string) => Promise<void>) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setFeedback({ tone: "error", message: "Authentication is required." });
       return;

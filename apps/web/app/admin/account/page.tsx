@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { AuthUserProfile } from "@pics-nigeria/shared";
 import { ApiError, downloadSuperAdminVoterContacts, fetchCurrentUser, logoutCurrentUser, updateCurrentUserPassword, updateCurrentUserProfile } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
-import { clearSession } from "../../../lib/session";
+import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminAccountPage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -25,7 +25,7 @@ export default function AdminAccountPage() {
   });
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -57,7 +57,7 @@ export default function AdminAccountPage() {
 
   async function handleProfileSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -81,7 +81,7 @@ export default function AdminAccountPage() {
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -111,7 +111,7 @@ export default function AdminAccountPage() {
   }
 
   async function handleExportContacts() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -137,7 +137,7 @@ export default function AdminAccountPage() {
   }
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);

@@ -19,7 +19,7 @@ import {
 import { AdminNav } from "../../../components/admin-nav";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../components/feedback-banner";
-import { clearSession } from "../../../lib/session";
+import { clearSession, readSession } from "../../../lib/session";
 
 function formatDependencyCounts(dependencyCounts?: Record<string, number>) {
   if (!dependencyCounts) {
@@ -83,7 +83,7 @@ export default function AdminReferencePage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -103,7 +103,7 @@ export default function AdminReferencePage() {
 
   async function handleCreateZone(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -121,7 +121,7 @@ export default function AdminReferencePage() {
   }
 
   async function handleUpdateZone(zoneId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -140,7 +140,7 @@ export default function AdminReferencePage() {
   }
 
   async function handleDeleteZone(zoneId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -168,7 +168,7 @@ export default function AdminReferencePage() {
 
   async function handleCreateParty(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -195,7 +195,7 @@ export default function AdminReferencePage() {
   }
 
   async function handleUpdateParty(partyId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -222,7 +222,7 @@ export default function AdminReferencePage() {
   }
 
   async function handleDeleteParty(partyId: string) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;

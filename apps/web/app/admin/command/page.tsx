@@ -14,18 +14,8 @@ import {
 import { AdminNav } from "../../../components/admin-nav";
 import { FeedbackBanner } from "../../../components/feedback-banner";
 import { ApiError, fetchHierarchicalDashboard } from "../../../lib/api";
+import { readSession } from "../../../lib/session";
 
-const tokenKeys = ["picsNigeriaAdminToken", "picsNigeriaAgentToken", "picsNigeriaCandidateToken"];
-
-function readToken() {
-  for (const key of tokenKeys) {
-    const token = localStorage.getItem(key);
-    if (token) {
-      return token;
-    }
-  }
-  return null;
-}
 
 function bandColor(band: StrengthBand) {
   return STRENGTH_BAND_THRESHOLDS.find((entry) => entry.band === band)?.color || "#64748b";
@@ -50,7 +40,7 @@ export default function CommandDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const token = readToken();
+    const token = readSession();
     if (!token) {
       // Redirect rather than render: returning here left the entire admin
       // navigation on screen for an anonymous visitor, which every other admin

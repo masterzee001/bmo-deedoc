@@ -33,7 +33,7 @@ import {
   submitMyPreElectionVerificationDocument,
 } from "../../lib/api";
 import type { PreElectionVerificationCase } from "../../lib/api";
-import { clearSession } from "../../lib/session";
+import { clearSession, readSession } from "../../lib/session";
 
 async function sha256File(file: File) {
   const hashBuffer = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
@@ -140,7 +140,7 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
 
     if (!token) {
       window.location.href = "/login";
@@ -164,7 +164,7 @@ export default function DashboardPage() {
 
   async function handleRedemptionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -187,7 +187,7 @@ export default function DashboardPage() {
 
   async function handleVerificationDocumentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token || !verificationDocument) {
       setError("Authentication and a voter evidence file are required.");
       return;
@@ -224,7 +224,7 @@ export default function DashboardPage() {
   }
 
   async function handleClaimTask(taskId: string) {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -241,7 +241,7 @@ export default function DashboardPage() {
   }
 
   async function handleEventRsvp(eventId: string, status: "INTERESTED" | "GOING") {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -258,7 +258,7 @@ export default function DashboardPage() {
   }
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);

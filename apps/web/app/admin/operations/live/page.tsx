@@ -39,7 +39,7 @@ import { ConfirmDialog } from "../../../../components/confirm-dialog";
 import { FeedbackBanner } from "../../../../components/feedback-banner";
 import { GoogleLiveMap } from "../../../../components/google-live-map";
 import { RasterLiveMap } from "../../../../components/raster-live-map";
-import { clearSession } from "../../../../lib/session";
+import { clearSession, readSession } from "../../../../lib/session";
 
 type Marker = {
   id: string;
@@ -167,7 +167,7 @@ export default function AdminLiveOperationsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -181,7 +181,7 @@ export default function AdminLiveOperationsPage() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       return;
     }
@@ -196,7 +196,7 @@ export default function AdminLiveOperationsPage() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !bulkForm.stateId) {
       setLgas([]);
       setWards([]);
@@ -212,7 +212,7 @@ export default function AdminLiveOperationsPage() {
   }, [bulkForm.stateId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !trackingFilter.stateId || !trackingFilter.lgaId) {
       setWards([]);
       return;
@@ -222,7 +222,7 @@ export default function AdminLiveOperationsPage() {
   }, [trackingFilter.lgaId, trackingFilter.stateId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !trackingFilter.stateId) {
       setTrackingLgas([]);
       return;
@@ -232,7 +232,7 @@ export default function AdminLiveOperationsPage() {
   }, [trackingFilter.stateId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !bulkForm.stateId) {
       setFederalConstituencies([]);
       return;
@@ -305,7 +305,7 @@ export default function AdminLiveOperationsPage() {
   }, [agents, bulkForm]);
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -320,7 +320,7 @@ export default function AdminLiveOperationsPage() {
 
   async function handleSingleTaskSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;
@@ -350,7 +350,7 @@ export default function AdminLiveOperationsPage() {
   }
 
   async function submitBulkTaskAssignment() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       setError("Authentication is required.");
       return;

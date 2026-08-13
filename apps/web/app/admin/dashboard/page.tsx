@@ -23,7 +23,7 @@ import {
 } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
-import { clearSession } from "../../../lib/session";
+import { clearSession, readSession } from "../../../lib/session";
 
 type DashboardData = {
   user: AuthUserProfile;
@@ -57,7 +57,7 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState("");
 
   async function handleLogout() {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (token) {
       try {
         await logoutCurrentUser(token);
@@ -71,7 +71,7 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;

@@ -7,7 +7,7 @@ import type { AuthUserProfile, LgaItem, StateItem, WardItem } from "@pics-nigeri
 import { ApiError, fetchCurrentUser, fetchLgas, fetchStates, fetchWards } from "../../../../lib/api";
 import { AdminNav } from "../../../../components/admin-nav";
 import { describeTerritory, getManagedRoleLabel, MANAGED_ROLE_OPTIONS } from "../../../../components/admin-management-utils";
-import { clearSession } from "../../../../lib/session";
+import { clearSession, readSession } from "../../../../lib/session";
 
 type LocatorAction = "manage-users" | "create-user" | "track-agents";
 
@@ -25,7 +25,7 @@ export default function AdminManageTerritoryPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;
@@ -54,7 +54,7 @@ export default function AdminManageTerritoryPage() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !selectedStateId) {
       setLgas([]);
       setSelectedLgaId("");
@@ -65,7 +65,7 @@ export default function AdminManageTerritoryPage() {
   }, [selectedStateId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token || !selectedStateId || !selectedLgaId) {
       setWards([]);
       setSelectedWardId("");

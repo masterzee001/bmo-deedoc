@@ -26,6 +26,7 @@ import {
 } from "../../../components/ui";
 import { describeApiError, type DescribedError } from "../../../lib/api-errors";
 import { describeTerritory } from "../../../components/admin-management-utils";
+import { readSession } from "../../../lib/session";
 
 function countByStatus(redemptions: RewardRedemptionItem[], status: RewardRedemptionItem["status"]) {
   return redemptions.filter((item) => item.status === status).length;
@@ -50,7 +51,7 @@ export default function AdminRewardsPage() {
    * primary money button simply did nothing and said nothing.
    */
   async function act(key: string, run: (token: string) => Promise<string>) {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) return;
     setBusy(key);
     setProblem(null);
@@ -85,7 +86,7 @@ export default function AdminRewardsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;

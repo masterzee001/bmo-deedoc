@@ -7,7 +7,7 @@ import type { AuthUserProfile, ManagedUserItem } from "@pics-nigeria/shared";
 import { ApiError, fetchCurrentUser, fetchManagedUsers } from "../../../lib/api";
 import { AdminNav } from "../../../components/admin-nav";
 import { describeTerritory, getScopeTitle } from "../../../components/admin-management-utils";
-import { clearSession } from "../../../lib/session";
+import { clearSession, readSession } from "../../../lib/session";
 
 export default function AdminManagePage() {
   const [user, setUser] = useState<AuthUserProfile | null>(null);
@@ -16,7 +16,7 @@ export default function AdminManagePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("picsNigeriaAdminToken");
+    const token = readSession();
     if (!token) {
       window.location.href = "/login";
       return;

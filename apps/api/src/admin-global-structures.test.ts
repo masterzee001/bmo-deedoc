@@ -224,6 +224,10 @@ const cases: Case[] = [
     name: "political party delete is blocked when a candidate depends on it",
     run: async () => {
       const token = await login("superadmin@pics.ng", "ChangeMe123!");
+      // The dependency used to come from a seeded candidate persona. The test
+      // now creates the record it depends on, so it proves the guard rather
+      // than proving the seed ran.
+      await createCandidateFixture(token, `party-dependency-${Date.now()}`);
 
       const deleted = await apiRequest("/admin/political-parties/seed-party-independent-alliance", {
         method: "DELETE",
@@ -239,7 +243,7 @@ const cases: Case[] = [
   {
     name: "non-super-admin cannot create, update, or delete global structures",
     run: async () => {
-      const token = await login("state.admin@pics.ng", "StateAdmin123!");
+      const token = await login(SUITE_STATE_ADMIN.email, SUITE_STATE_ADMIN.password);
       const zoneId = `forbidden-zone-${Date.now()}`;
       const partyId = `forbidden-party-${Date.now()}`;
 
@@ -348,7 +352,7 @@ const cases: Case[] = [
     name: "state admin can update an agent in scope but cannot update admins or candidates",
     run: async () => {
       const superToken = await login("superadmin@pics.ng", "ChangeMe123!");
-      const stateToken = await login("state.admin@pics.ng", "StateAdmin123!");
+      const stateToken = await login(SUITE_STATE_ADMIN.email, SUITE_STATE_ADMIN.password);
       const suffix = String(Date.now());
       const admin = await createAdminFixture(superToken, `${suffix}-admin`);
       const candidate = await createCandidateFixture(superToken, `${suffix}-candidate`);
@@ -541,6 +545,36 @@ async function resolveOgunFixture() {
   OGUN_FIXTURE.pollingUnitId = pollingUnit.id;
 }
 
+const SUITE_STATE_ADMIN = { email: "global-structures-state-admin@pics.ng", password: "StateAdmin123!" };
+
+/**
+ * The suite provisions the scoped admin it needs.
+ *
+ * It used to sign in as a persona the product seed created. Fabricated people
+ * with known passwords are not something a seed should manufacture for a real
+ * platform, so the fixture moved here — where it is owned, scoped and cleaned up
+ * by the suite that actually needs it.
+ */
+async function createSuiteStateAdmin() {
+  const superToken = await login("superadmin@pics.ng", "ChangeMe123!");
+  createdUserEmails.add(SUITE_STATE_ADMIN.email);
+  const created = await apiRequest("/admin/users", {
+    method: "POST",
+    token: superToken,
+    body: {
+      name: "Global Structures State Admin",
+      email: SUITE_STATE_ADMIN.email,
+      password: SUITE_STATE_ADMIN.password,
+      adminLevel: "STATE",
+      // Admin and candidate accounts must be linked to a party; the seeded
+      // party is reference data rather than a fabricated person, so it stays.
+      politicalPartyId: "seed-party-independent-alliance",
+      stateId: OGUN_FIXTURE.stateId,
+    },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.payload));
+}
+
 async function setup() {
   await resolveOgunFixture();
   server = http.createServer(createApp());
@@ -552,6 +586,7 @@ async function setup() {
   }
 
   baseUrl = `http://127.0.0.1:${address.port}`;
+  await createSuiteStateAdmin();
 }
 
 async function teardown() {

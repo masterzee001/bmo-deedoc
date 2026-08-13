@@ -28,7 +28,7 @@ import {
   type LegacyReconciliationPolicy,
 } from "../../../../lib/api";
 import { describeApiError, isSessionExpired, type DescribedError } from "../../../../lib/api-errors";
-import { clearSession } from "../../../../lib/session";
+import { clearSession, readSession } from "../../../../lib/session";
 
 /**
  * Legacy reconciliation.
@@ -84,7 +84,7 @@ export default function LegacyReconciliationPage() {
   );
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("picsNigeriaAdminToken");
+    const stored = readSession();
     if (!stored) {
       router.replace("/login");
       return;

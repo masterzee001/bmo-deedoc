@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createAgentActivity, fetchCurrentUser, logoutCurrentUser } from "../lib/api";
+import { clearSession, readSession } from "../lib/session";
 
 const TRACKING_EVENT_NAME = "pics-agent-tracking";
 
@@ -41,7 +42,7 @@ export function AgentSessionTracker() {
       return;
     }
 
-    const initialToken = localStorage.getItem("picsNigeriaAgentToken");
+    const initialToken = readSession();
     if (!initialToken) {
       return;
     }
@@ -70,7 +71,7 @@ export function AgentSessionTracker() {
       });
 
       try {
-        const logoutToken = localStorage.getItem("picsNigeriaAgentToken");
+        const logoutToken = readSession();
         if (logoutToken) {
           await logoutCurrentUser(logoutToken);
         }
@@ -78,7 +79,7 @@ export function AgentSessionTracker() {
         // Best effort.
       }
 
-      localStorage.removeItem("picsNigeriaAgentToken");
+      clearSession();
       router.replace(`/agent/login?reason=${encodeURIComponent(reason)}`);
     }
 
@@ -142,7 +143,7 @@ export function AgentSessionTracker() {
       });
 
     const sessionInterval = window.setInterval(() => {
-      const currentToken = localStorage.getItem("picsNigeriaAgentToken");
+      const currentToken = readSession();
       if (!currentToken) {
         void forceLogout("session-ended");
         return;
